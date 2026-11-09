@@ -22,7 +22,8 @@ import { statusFromText } from './core/statusMerge';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
 import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
 import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsRecentlyFinishedMs, sessionsSort, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
-import { hooksInstalled, hooksSettingsShown, watchHooksSettings } from './hooksCommands';
+import { hooksSettingsShown, hooksStatus, watchHooksSettings } from './hooksCommands';
+import type { HooksStatus } from './core/hooks';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { SessionsReadState } from './sessionsReadState';
@@ -83,7 +84,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   private readonly colors: MementoEntries<string>;
   /** The colors last drawn, to redraw when another window changed them. */
   private drawnColors: ReadonlyMap<string, string> | undefined;
-  private hooksMissing = false;
+  private hooksState: HooksStatus = 'installed';
   /** Counts hook reads, so a slow earlier read cannot overwrite a later one. */
   private hooksReads = 0;
   private readonly settledOrder = new SettledOrder();
@@ -155,10 +156,10 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** Re-reads whether the hooks are installed (settings.json): on activation, setting changes and when the file changes. */
   refreshHooks(): void {
     const read = ++this.hooksReads;
-    void hooksInstalled().then(
-      (installed) => {
-        if (read !== this.hooksReads || this.hooksMissing === !installed) return;
-        this.hooksMissing = !installed;
+    void hooksStatus().then(
+      (state) => {
+        if (read !== this.hooksReads || this.hooksState === state) return;
+        this.hooksState = state;
         this.changed.fire(undefined);
       },
       (err) => log.warn(`cannot read Claude hook settings: ${(err as Error).message}`),
@@ -489,7 +490,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     }
     if (node) return [];
     const rows: SessionNode[] = sessionsGroupByWorktree() ? this.groups().map((group) => ({ kind: 'worktree', group })) : worktreeRows(ALL_KEY, this.cards);
-    return this.hooksMissing ? [{ kind: 'hooks' }, ...rows] : rows;
+    return this.hooksState !== 'installed' ? [{ kind: 'hooks' }, ...rows] : rows;
   }
 
   /** A session's worktree group (needed to reveal session rows); other rows are never revealed. */
@@ -512,10 +513,13 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
 
   getTreeItem(node: SessionNode): vscode.TreeItem {
     if (node.kind === 'hooks') {
-      const item = new vscode.TreeItem('Install Claude status hooks…');
+      const outdated = this.hooksState === 'outdated';
+      const item = new vscode.TreeItem(outdated ? 'Update Claude status hooks…' : 'Install Claude status hooks…');
       item.id = 'hooks';
-      item.description = 'not installed or out of date';
-      item.tooltip = `Without DevDesk hooks, sessions show no status. Click to install them in ${hooksSettingsShown()}.`;
+      item.description = outdated ? 'need an update' : 'sessions show no status without them';
+      item.tooltip = outdated
+        ? `This version of DevDesk needs its hooks in ${hooksSettingsShown()} updated to show every session's status. Click to update them.`
+        : `DevDesk shows what each Claude session is doing (working, waiting for you, done) through hooks in ${hooksSettingsShown()}. Click to install them.`;
       item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
       item.command = { command: 'devdesk.sessions.installHooks', title: 'Install Claude Status Hooks' };
       return item;

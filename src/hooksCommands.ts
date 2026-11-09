@@ -1,7 +1,7 @@
 import { watch } from 'node:fs';
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
-import { type HookFileResult, type HooksStatus, hookEvents, installHooksInto, parseClaudeVersion, readHooksInstalled, readHooksStatus, removeHooksFrom } from './core/hooks';
+import { type HookFileResult, type HooksStatus, installHooksInto, parseClaudeVersion, readHooksInstalled, readHooksStatus, removeHooksFrom } from './core/hooks';
 import { join } from 'node:path';
 import { claudeConfigDir, claudeInvocation, sessionsStateDir } from './config';
 import { runCommand } from './core/shellRun';
@@ -79,20 +79,22 @@ async function changeHooks(verb: 'install' | 'remove', change: () => Promise<Hoo
 /** Asks, then installs the DevDesk hooks in Claude Code's `settings.json`; true when they are installed. */
 export async function installHooksCommand(): Promise<boolean> {
   const version = await claudeCodeVersion(true);
-  const events = hookEvents(version);
+  const outdated = (await hooksStatus().catch(() => 'missing')) === 'outdated';
+  const settings = hooksSettingsShown();
   const choice = await vscode.window.showInformationMessage(
-    'Install Claude status hooks?',
+    outdated ? 'Update Claude status hooks?' : 'Install Claude status hooks?',
     {
       modal: true,
       detail:
-        `DevDesk adds hooks to ${hooksSettingsShown()} on this machine for ${events.slice(0, -1).join(', ')} and ${events[events.length - 1]}. Each runs ${shown(join(claudeConfigDir(), 'devdesk', 'devdesk_hook.py'))}, which writes a small status file ` +
-        'to the configured state directory and always exits successfully, even if the script is missing. Older DevDesk ' +
-        'hook entries are updated in place; your other hooks are kept, and the current settings file is backed up first. ' +
-        'Claude sessions started from now on report their status; restart running sessions to include them.',
+        (outdated
+          ? `This version of DevDesk needs its hooks in ${settings} updated so every session shows its status.`
+          : `DevDesk adds hooks to ${settings} so the Claude view can show what each session is doing: working, waiting for you, or done.`) +
+        '\n\nYour other settings stay as they are, and the file is backed up first. ' +
+        'New sessions show their status right away; restart running ones to see theirs.',
     },
-    'Install',
+    outdated ? 'Update' : 'Install',
   );
-  if (choice !== 'Install') return false;
+  if (choice !== 'Update' && choice !== 'Install') return false;
   return changeHooks(
     'install',
     () => installHooksInto(claudeConfigDir(), new Date(), sessionsStateDir(), version),
