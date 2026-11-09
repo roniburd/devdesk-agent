@@ -2,7 +2,7 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ChildrenReader, limitFinished, runningCount, type SessionChild, TranscriptScan } from '../src/core/sessionChildren';
+import { ChildrenReader, limitFinished, runningBackground, runningCount, type SessionChild, TranscriptScan } from '../src/core/sessionChildren';
 
 const T = '2026-10-29T10:00:00.000Z';
 const line = (o: unknown) => `${JSON.stringify(o)}\n`;
@@ -239,5 +239,17 @@ describe('limitFinished', () => {
   it('leaves short lists alone', () => {
     const list = [c('a', 'done')];
     expect(limitFinished(list, 1)).toBe(list);
+  });
+});
+
+describe('runningBackground', () => {
+  const c = (id: string, kind: SessionChild['kind'], state: SessionChild['state'], background = true, children: SessionChild[] = []): SessionChild => ({ id, kind, label: id, state, background, children });
+  it('finds running background work at any depth', () => {
+    expect(runningBackground([c('a', 'agent', 'done'), c('w', 'workflow', 'running')])).toBe(true);
+    expect(runningBackground([c('s', 'shell', 'running')])).toBe(true);
+    expect(runningBackground([c('w', 'workflow', 'running', true, [c('p', 'phase', 'running', false, [c('x', 'agent', 'running', false)])])])).toBe(true);
+  });
+  it('ignores foreground children and finished work', () => {
+    expect(runningBackground([c('f', 'agent', 'running', false), c('w', 'workflow', 'done'), c('m', 'more', 'done')])).toBe(false);
   });
 });

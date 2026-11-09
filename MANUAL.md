@@ -250,7 +250,7 @@ Click an item to open it, scrolled to the end:
 - a shell opens its output file,
 - a workflow opens its summary.
 
-Each level lists the running items and the last 10 finished ones (`devdesk.sessions.finishedChildren`). Older ones fold into one `N earlier finished` row. To hide all of this, turn off `devdesk.sessions.showChildren`.
+Each level lists the running items and the last 10 finished ones (`devdesk.sessions.finishedChildren`). Older ones fold into one `N earlier finished` row. To hide all of this, turn off `devdesk.sessions.showChildren`. A session still shows as waiting on background work while one of them runs.
 
 ### See what a turn changed
 

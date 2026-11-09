@@ -400,3 +400,8 @@ export function limitFinished(children: SessionChild[], limit: number): SessionC
 export function runningCount(children: readonly SessionChild[]): number {
   return children.reduce((n, c) => n + (c.state === 'running' && c.kind !== 'phase' && c.kind !== 'more' ? 1 : 0) + runningCount(c.children), 0);
 }
+
+/** Some background child (or a child of one) still runs; a foreground one left running by an interrupted turn does not count. */
+export function runningBackground(children: readonly SessionChild[]): boolean {
+  return children.some((c) => c.background && runningCount([c]) > 0);
+}

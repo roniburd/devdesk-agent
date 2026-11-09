@@ -383,6 +383,9 @@ describe('attention', () => {
     expect(look({ state: 'done', children: [shell('done')] })).toBe('done');
     // A foreground child still marked running (an interrupted turn) is not background work Claude comes back for.
     expect(look({ state: 'done', children: [shell('running', false)] })).toBe('done');
+    // Children not listed (`devdesk.sessions.showChildren` off): the refresh still marks what runs in the background.
+    expect(look({ state: 'done', runsInBackground: true })).toBe('background');
+    expect(look({ state: 'done', updatedAt: NOW - IDLE - STUCK - 1, runsInBackground: true })).toBe('background');
     // Input and errors still come first.
     expect(look({ state: 'waiting', detail: 'Asking: which one?', children: [shell('running')] })).toBe('question');
     const cards = [
