@@ -1,0 +1,8 @@
+#!/bin/sh
+# The fake Claude CLI (see fake-claude.mjs) for manual checks: set devdesk.sessions.claudePath to this file.
+# Node runs through a link named `claude`, so the process list shows it as Claude does and the Claude view counts its
+# session as running (as .vscode-test.mjs does for the e2e tests).
+node=$(command -v node) || { echo 'fake-claude: node is not on PATH' >&2; exit 127; }
+bin="${XDG_CACHE_HOME:-$HOME/.cache}/devdesk-agents/fake-claude-bin"
+[ "$(readlink "$bin/claude" 2>/dev/null)" = "$node" ] || { mkdir -p "$bin" && ln -sf "$node" "$bin/claude"; } || exit 1
+exec "$bin/claude" "$(dirname "$0")/fake-claude.mjs" "$@"

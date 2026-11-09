@@ -1,0 +1,1635 @@
+{
+  "name": "devdesk-claude",
+  "displayName": "DevDesk Claude",
+  "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
+  "icon": "images/icon.png",
+  "version": "0.5.74",
+  "publisher": "roniburd",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:devdesk.board"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "package": "npm run build && mkdir -p dist && vsce package --no-dependencies --skip-license --no-rewrite-relative-links -o dist/devdesk-claude.vsix"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "~1.95.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roniburd/devdesk-agent"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devdesk",
+          "title": "Agent Sessions",
+          "icon": "media/claude.svg"
+        }
+      ]
+    },
+    "views": {
+      "devdesk": [
+        {
+          "id": "devdesk.sessions",
+          "name": "Claude",
+          "icon": "media/claude.svg",
+          "when": "devdesk.inWorkspace"
+        },
+        {
+          "id": "devdesk.features",
+          "name": "Worktrees",
+          "icon": "media/worktrees.svg",
+          "when": "devdesk.inWorkspace"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "devdesk.sessions",
+        "contents": "No Claude sessions are running.\n[New Claude session](command:devdesk.sessions.new)\n[New worktree session](command:devdesk.sessions.newWorktree)",
+        "when": "!config.devdesk.board.enabled"
+      },
+      {
+        "view": "devdesk.sessions",
+        "contents": "No Claude sessions are running.\n[New Claude session](command:devdesk.sessions.new)\n[New worktree session](command:devdesk.sessions.newWorktree)\n[Show Claude Board](command:devdesk.board.open)",
+        "when": "config.devdesk.board.enabled"
+      }
+    ],
+    "commands": [
+      {
+        "command": "devdesk.features.refresh",
+        "title": "Refresh",
+        "category": "Worktrees",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "devdesk.features.openSettings",
+        "title": "Worktrees Settings",
+        "category": "Worktrees",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "devdesk.features.toggleBase",
+        "title": "Toggle Diff Base (mainline / uncommitted)",
+        "category": "Worktrees",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "devdesk.features.showSessions",
+        "title": "Show Claude Sessions Under Worktrees",
+        "category": "Worktrees",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devdesk.features.hideSessions",
+        "title": "Hide Claude Sessions Under Worktrees",
+        "category": "Worktrees",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "devdesk.openDiff",
+        "title": "Open Diff",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.claude.open",
+        "title": "Open Worktree's Claude Session",
+        "category": "Worktrees",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "devdesk.claude.kill",
+        "title": "End Claude Session",
+        "category": "Worktrees",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devdesk.worktrees.delete",
+        "title": "Delete Worktree and Its Sessions",
+        "category": "Worktrees",
+        "icon": "$(close)"
+      },
+      {
+        "command": "devdesk.sessions.open",
+        "title": "Show Claude Sessions",
+        "category": "Worktrees",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devdesk.sessions.new",
+        "title": "New Claude Session",
+        "category": "Worktrees",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devdesk.sessions.newWorktree",
+        "title": "New Worktree Session",
+        "category": "Worktrees",
+        "icon": "$(git-branch-create)"
+      },
+      {
+        "command": "devdesk.sessions.newInWorktree",
+        "title": "New Claude Session in This Worktree",
+        "category": "Worktrees",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devdesk.sessions.newWithMode",
+        "title": "New Claude Session with Mode…",
+        "category": "Worktrees",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "devdesk.sessions.listAll",
+        "title": "List All Sessions (Not by Worktree)",
+        "category": "Worktrees",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "devdesk.sessions.groupByWorktree",
+        "title": "Group Sessions by Worktree",
+        "category": "Worktrees",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "devdesk.sessions.forkWithMode",
+        "title": "Fork Claude Session with Mode…",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.openCard",
+        "title": "Open Claude Session",
+        "category": "Worktrees",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "devdesk.sessions.fork",
+        "title": "Fork Claude Session",
+        "category": "Worktrees",
+        "icon": "$(repo-forked)"
+      },
+      {
+        "command": "devdesk.sessions.kill",
+        "title": "End Claude Session",
+        "category": "Worktrees",
+        "icon": "$(close)"
+      },
+      {
+        "command": "devdesk.sessions.remove",
+        "title": "Remove Parked Claude Session from List",
+        "category": "Worktrees",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devdesk.sessions.markRead",
+        "title": "Mark Claude Session as Read",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.markUnread",
+        "title": "Mark Claude Session as Unread",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.red",
+        "title": "🟥 Red",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.red.current",
+        "title": "🟥 Red ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.orange",
+        "title": "🟧 Orange",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.orange.current",
+        "title": "🟧 Orange ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.yellow",
+        "title": "🟨 Yellow",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.yellow.current",
+        "title": "🟨 Yellow ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.green",
+        "title": "🟩 Green",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.green.current",
+        "title": "🟩 Green ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.blue",
+        "title": "🟦 Blue",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.blue.current",
+        "title": "🟦 Blue ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.purple",
+        "title": "🟪 Purple",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.purple.current",
+        "title": "🟪 Purple ✓",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.color.none",
+        "title": "No Color",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.nextWaiting",
+        "title": "Open Next Claude Session Needing Input",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.diagnostics",
+        "title": "Write Claude Session Diagnostics (read/unread state)",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.openChild",
+        "title": "Open Transcript or Output",
+        "category": "Worktrees",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "devdesk.sessions.openSettings",
+        "title": "Claude Sessions Settings",
+        "category": "Worktrees",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "devdesk.sessions.installTmux",
+        "title": "Install tmux",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.board.open",
+        "title": "Open Claude Board",
+        "category": "DevDesk",
+        "icon": "$(project)"
+      },
+      {
+        "command": "devdesk.board.openFromEditorTitle",
+        "title": "Open Claude Board",
+        "category": "DevDesk",
+        "icon": {
+          "light": "media/board-color-light.svg",
+          "dark": "media/board-color-dark.svg"
+        }
+      },
+      {
+        "command": "devdesk.claude.showUsage",
+        "title": "Show Claude Token Usage",
+        "category": "DevDesk",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "devdesk.board.focusPrompt",
+        "title": "Focus Claude Board Prompt",
+        "category": "DevDesk"
+      },
+      {
+        "command": "devdesk.board.fromSidebar",
+        "title": "Back to the Claude Board",
+        "category": "DevDesk"
+      },
+      {
+        "command": "devdesk.board.addTask",
+        "title": "Prompt for Later on Claude Board",
+        "category": "DevDesk",
+        "icon": "$(add)"
+      },
+      {
+        "command": "devdesk.sessions.installHooks",
+        "title": "Install Claude Status Hooks",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.removeHooks",
+        "title": "Remove Claude Status Hooks",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.leftArrow",
+        "title": "Claude Terminal: ← (Focus the Claude View on an Empty Prompt)",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.claude.openWorktree",
+        "title": "Open a Worktree's Claude Session",
+        "category": "Worktrees"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "devdesk.sessions.new",
+          "when": "view == devdesk.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devdesk.sessions.newWorktree",
+          "when": "view == devdesk.sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devdesk.sessions.newWithMode",
+          "when": "view == devdesk.sessions",
+          "group": "1_new@1"
+        },
+        {
+          "command": "devdesk.sessions.listAll",
+          "when": "view == devdesk.sessions && config.devdesk.sessions.groupByWorktree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "devdesk.sessions.groupByWorktree",
+          "when": "view == devdesk.sessions && !config.devdesk.sessions.groupByWorktree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "devdesk.board.open",
+          "when": "view == devdesk.sessions && config.devdesk.board.enabled",
+          "group": "navigation@0"
+        },
+        {
+          "command": "devdesk.sessions.openSettings",
+          "when": "view == devdesk.sessions",
+          "group": "navigation@4"
+        },
+        {
+          "command": "devdesk.features.toggleBase",
+          "when": "view == devdesk.features",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devdesk.features.showSessions",
+          "when": "view == devdesk.features && !config.devdesk.worktrees.showSessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devdesk.features.hideSessions",
+          "when": "view == devdesk.features && config.devdesk.worktrees.showSessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devdesk.features.refresh",
+          "when": "view == devdesk.features",
+          "group": "navigation@3"
+        },
+        {
+          "command": "devdesk.features.openSettings",
+          "when": "view == devdesk.features",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "devdesk.sessions.newInWorktree",
+          "when": "view == devdesk.sessions && viewItem =~ /\\blaunchable\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devdesk.sessions.newInWorktree",
+          "when": "view == devdesk.sessions && viewItem =~ /\\blaunchable\\b/",
+          "group": "worktree@1"
+        },
+        {
+          "command": "devdesk.sessions.fork",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devdesk.sessions.kill",
+          "when": "view == devdesk.sessions && viewItem =~ /\\btmux\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.sessions.remove",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bparked\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.sessions.openCard",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bsession\\b/",
+          "group": "session@1"
+        },
+        {
+          "command": "devdesk.sessions.fork",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
+          "group": "session@2"
+        },
+        {
+          "command": "devdesk.sessions.forkWithMode",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
+          "group": "session@3"
+        },
+        {
+          "command": "devdesk.sessions.kill",
+          "when": "view == devdesk.sessions && viewItem =~ /\\btmux\\b/",
+          "group": "session@4"
+        },
+        {
+          "command": "devdesk.sessions.remove",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bparked\\b/",
+          "group": "session@4"
+        },
+        {
+          "command": "devdesk.sessions.markRead",
+          "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\bunread$/",
+          "group": "read@1"
+        },
+        {
+          "command": "devdesk.sessions.markUnread",
+          "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\sread$/",
+          "group": "read@1"
+        },
+        {
+          "command": "devdesk.sessions.markRead",
+          "when": "view == devdesk.sessions && listMultiSelection && viewItem =~ /^session\\b/",
+          "group": "read@1"
+        },
+        {
+          "command": "devdesk.sessions.markUnread",
+          "when": "view == devdesk.sessions && listMultiSelection && viewItem =~ /^session\\b/",
+          "group": "read@2"
+        },
+        {
+          "submenu": "devdesk.sessions.color",
+          "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
+          "group": "read@3"
+        },
+        {
+          "command": "devdesk.claude.open",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devdesk.claude.kill",
+          "when": "view == devdesk.features && viewItem =~ /^feature\\.session\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.worktrees.delete",
+          "when": "view == devdesk.features && viewItem =~ /^feature\\b.*\\bdeletable\\b/",
+          "group": "inline@3"
+        },
+        {
+          "command": "devdesk.worktrees.delete",
+          "when": "view == devdesk.features && viewItem =~ /^feature\\b.*\\bdeletable\\b/",
+          "group": "worktree@9"
+        },
+        {
+          "command": "devdesk.sessions.fork",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
+          "group": "inline@1"
+        },
+        {
+          "command": "devdesk.sessions.kill",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\btmux\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.sessions.remove",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bparked\\b/",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.sessions.openCard",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/",
+          "group": "session@1"
+        },
+        {
+          "command": "devdesk.sessions.fork",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
+          "group": "session@2"
+        },
+        {
+          "command": "devdesk.sessions.forkWithMode",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
+          "group": "session@3"
+        },
+        {
+          "command": "devdesk.sessions.kill",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\btmux\\b/",
+          "group": "session@4"
+        },
+        {
+          "command": "devdesk.sessions.remove",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bparked\\b/",
+          "group": "session@4"
+        },
+        {
+          "command": "devdesk.sessions.markRead",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\bunread$/",
+          "group": "read@1"
+        },
+        {
+          "command": "devdesk.sessions.markUnread",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\sread$/",
+          "group": "read@1"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "devdesk.sessions.markRead",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && sessionUnread",
+          "group": "read@1"
+        },
+        {
+          "command": "devdesk.sessions.markUnread",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && !sessionUnread",
+          "group": "read@1"
+        },
+        {
+          "submenu": "devdesk.sessions.color",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "read@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "devdesk.board.fromSidebar",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.openDiff",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.claude.open",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.claude.kill",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.worktrees.delete",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.openCard",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.newInWorktree",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.fork",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.forkWithMode",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.kill",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.remove",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.markRead",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.markUnread",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.openChild",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.leftArrow",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.board.open",
+          "when": "config.devdesk.board.enabled"
+        },
+        {
+          "command": "devdesk.board.addTask",
+          "when": "config.devdesk.board.enabled"
+        },
+        {
+          "command": "devdesk.claude.openWorktree",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.red",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.red.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.orange",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.orange.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.yellow",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.yellow.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.green",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.green.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.blue",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.blue.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.purple",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.purple.current",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.color.none",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.board.openFromEditorTitle",
+          "when": "false"
+        }
+      ],
+      "devdesk.sessions.color": [
+        {
+          "command": "devdesk.sessions.color.red",
+          "group": "colors@1",
+          "when": "!(viewItem =~ /\\bcolor-red\\b/ || sessionColor == 'red')"
+        },
+        {
+          "command": "devdesk.sessions.color.red.current",
+          "group": "colors@1",
+          "when": "viewItem =~ /\\bcolor-red\\b/ || sessionColor == 'red'"
+        },
+        {
+          "command": "devdesk.sessions.color.orange",
+          "group": "colors@2",
+          "when": "!(viewItem =~ /\\bcolor-orange\\b/ || sessionColor == 'orange')"
+        },
+        {
+          "command": "devdesk.sessions.color.orange.current",
+          "group": "colors@2",
+          "when": "viewItem =~ /\\bcolor-orange\\b/ || sessionColor == 'orange'"
+        },
+        {
+          "command": "devdesk.sessions.color.yellow",
+          "group": "colors@3",
+          "when": "!(viewItem =~ /\\bcolor-yellow\\b/ || sessionColor == 'yellow')"
+        },
+        {
+          "command": "devdesk.sessions.color.yellow.current",
+          "group": "colors@3",
+          "when": "viewItem =~ /\\bcolor-yellow\\b/ || sessionColor == 'yellow'"
+        },
+        {
+          "command": "devdesk.sessions.color.green",
+          "group": "colors@4",
+          "when": "!(viewItem =~ /\\bcolor-green\\b/ || sessionColor == 'green')"
+        },
+        {
+          "command": "devdesk.sessions.color.green.current",
+          "group": "colors@4",
+          "when": "viewItem =~ /\\bcolor-green\\b/ || sessionColor == 'green'"
+        },
+        {
+          "command": "devdesk.sessions.color.blue",
+          "group": "colors@5",
+          "when": "!(viewItem =~ /\\bcolor-blue\\b/ || sessionColor == 'blue')"
+        },
+        {
+          "command": "devdesk.sessions.color.blue.current",
+          "group": "colors@5",
+          "when": "viewItem =~ /\\bcolor-blue\\b/ || sessionColor == 'blue'"
+        },
+        {
+          "command": "devdesk.sessions.color.purple",
+          "group": "colors@6",
+          "when": "!(viewItem =~ /\\bcolor-purple\\b/ || sessionColor == 'purple')"
+        },
+        {
+          "command": "devdesk.sessions.color.purple.current",
+          "group": "colors@6",
+          "when": "viewItem =~ /\\bcolor-purple\\b/ || sessionColor == 'purple'"
+        },
+        {
+          "command": "devdesk.sessions.color.none",
+          "group": "0_none@1",
+          "when": "viewItem =~ /\\bcolor-/ || sessionColor"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "devdesk.board.openFromEditorTitle",
+          "group": "navigation@100",
+          "when": "config.devdesk.board.enabled && config.devdesk.board.editorTitleButton && activeWebviewPanelId != devdesk.board"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "key": "left",
+        "command": "devdesk.sessions.leftArrow",
+        "when": "terminalFocus && devdesk.claudeTerminalActive && config.devdesk.sessions.leftArrowOpensSidebar"
+      },
+      {
+        "key": "right",
+        "command": "devdesk.board.focusPrompt",
+        "when": "focusedView == 'devdesk.sessions' && config.devdesk.board.enabled && !inputFocus"
+      },
+      {
+        "key": "ctrl+alt+shift+b",
+        "mac": "ctrl+cmd+b",
+        "command": "devdesk.board.focusPrompt",
+        "when": "config.devdesk.board.enabled"
+      }
+    ],
+    "configuration": [
+      {
+        "id": "devdesk-claude.sessions",
+        "title": "Sessions",
+        "order": 1,
+        "properties": {
+          "devdesk.sessions.show": {
+            "type": "string",
+            "enum": [
+              "vscode",
+              "all"
+            ],
+            "enumDescriptions": [
+              "Only Claude sessions running on DevDesk's tmux server (devdesk.sessions.tmuxServer).",
+              "Every Claude session on this machine: other tmux servers, plain terminals, IDE integrations and background jobs."
+            ],
+            "default": "vscode",
+            "description": "Which Claude sessions the Claude view lists.",
+            "order": 1
+          },
+          "devdesk.sessions.scope": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "all"
+            ],
+            "enumDescriptions": [
+              "Only sessions working in this window's workspace: its root folder or one of its worktrees.",
+              "Sessions of every folder, also those started from other VS Code windows."
+            ],
+            "default": "workspace",
+            "description": "Which folders' Claude sessions the Claude view and the Claude Board list.",
+            "order": 2
+          },
+          "devdesk.sessions.groupByWorktree": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "The Claude view nests sessions under their worktree. Off: it lists every session in one list, in attention order, each row naming its worktree. Toggle it with the Claude view's list button.",
+            "order": 3
+          },
+          "devdesk.sessions.unreadFirst": {
+            "type": "boolean",
+            "default": true,
+            "description": "Sort unread Claude sessions above every read one. When off, unread sessions only sort first within their state (needs input, blocked, working, ...).",
+            "order": 4
+          },
+          "devdesk.sessions.dimRead": {
+            "type": "boolean",
+            "default": true,
+            "description": "Grey the titles of Claude sessions you have read, so unread ones stand out in the Claude view.",
+            "order": 5
+          },
+          "devdesk.sessions.unreadBadge": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show a ● badge at the end of unread Claude session rows in the Claude view.",
+            "order": 6
+          },
+          "devdesk.sessions.notifyWhenWaiting": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show a notification when a Claude session starts waiting for you.",
+            "order": 7
+          },
+          "devdesk.sessions.statusBar": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show a status bar item with the number of Claude sessions needing input; click it to open the next one.",
+            "order": 8
+          },
+          "devdesk.sessions.stuckMinutes": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "description": "A working Claude session with no progress (no hook event) for this many minutes shows as stuck (orange watch).",
+            "order": 9
+          },
+          "devdesk.sessions.idleMinutes": {
+            "scope": "machine",
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "description": "A finished Claude session not updated for this many minutes sorts after working and recently finished sessions (it still shows as done).",
+            "order": 10
+          },
+          "devdesk.sessions.resortWorkingMinutes": {
+            "type": "number",
+            "default": 5,
+            "minimum": 0,
+            "description": "Working Claude sessions keep their order in the Claude view and on the Claude Board for this many minutes, then sort again (newest first), so rows don't move each time a session does something. A session that starts working goes first among them. 0: always sorted.",
+            "order": 11
+          },
+          "devdesk.sessions.readAfterSeconds": {
+            "type": "number",
+            "default": 1.5,
+            "minimum": 0,
+            "description": "A Claude session shows in bold (unread) when anything happened in it since you last looked; its terminal must be in front for this many seconds to count as read.",
+            "order": 12
+          },
+          "devdesk.sessions.finishedSessions": {
+            "type": "number",
+            "default": 10,
+            "minimum": 0,
+            "markdownDescription": "How many parked (not running) Claude sessions the Claude view lists per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
+            "order": 13
+          },
+          "devdesk.sessions.showChildren": {
+            "type": "boolean",
+            "default": true,
+            "description": "List what each Claude session spun off under its row: subagents (and their own subagents and shells), background shell commands, and workflows with their phases and agents. Read from the session's transcript.",
+            "order": 14
+          },
+          "devdesk.sessions.finishedChildren": {
+            "type": "number",
+            "default": 10,
+            "minimum": 0,
+            "markdownDescription": "How many finished subagents, shells and workflows the Claude view lists per level; older ones fold into one `N earlier finished` row. Running ones are always listed. Applies when `#devdesk.sessions.showChildren#` is on.",
+            "order": 15
+          },
+          "devdesk.sessions.pollSeconds": {
+            "type": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "How often (seconds) the Claude Sessions panel re-checks tmux while it is open or notifications are on.",
+            "order": 16
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.launch",
+        "title": "Starting Claude",
+        "order": 2,
+        "properties": {
+          "devdesk.sessions.defaultMode": {
+            "type": "string",
+            "default": "Default",
+            "enum": [
+              "Default",
+              "Manual",
+              "Accept edits",
+              "Auto",
+              "Plan",
+              "Don't ask",
+              "Bypass (clauded)"
+            ],
+            "enumDescriptions": [
+              "Claude's own default (your settings' defaultMode)",
+              "--permission-mode manual: ask before every tool that needs permission",
+              "--permission-mode acceptEdits: edit files without asking",
+              "--permission-mode auto: a classifier approves safe actions",
+              "--permission-mode plan: read and plan only, no changes",
+              "--permission-mode dontAsk: deny anything not pre-approved, never prompt",
+              "--dangerously-skip-permissions: skip all permission checks"
+            ],
+            "scope": "machine",
+            "markdownDescription": "The `#devdesk.sessions.modes#` entry every new Claude session starts in (+, the robot icon on a worktree, Fork). The list offers the modes DevDesk ships; to start in a mode you added, type its name in settings.json (it works despite the warning). An unknown name uses the first mode.",
+            "order": 1
+          },
+          "devdesk.sessions.modes": {
+            "type": "array",
+            "scope": "machine",
+            "items": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Name shown in New Claude Session with Mode… and used by devdesk.sessions.defaultMode."
+                },
+                "args": {
+                  "type": "string",
+                  "description": "Claude Code arguments for this mode, in shell syntax."
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "default": [
+              {
+                "name": "Default",
+                "args": "",
+                "description": "Claude's own default (your settings' defaultMode)"
+              },
+              {
+                "name": "Manual",
+                "args": "--permission-mode manual",
+                "description": "Ask before every tool that needs permission"
+              },
+              {
+                "name": "Accept edits",
+                "args": "--permission-mode acceptEdits",
+                "description": "Edit files without asking"
+              },
+              {
+                "name": "Auto",
+                "args": "--permission-mode auto",
+                "description": "A classifier approves safe actions"
+              },
+              {
+                "name": "Plan",
+                "args": "--permission-mode plan",
+                "description": "Read and plan only, no changes"
+              },
+              {
+                "name": "Don't ask",
+                "args": "--permission-mode dontAsk",
+                "description": "Deny anything not pre-approved, never prompt"
+              },
+              {
+                "name": "Bypass (clauded)",
+                "args": "--dangerously-skip-permissions",
+                "description": "Skip all permission checks"
+              }
+            ],
+            "markdownDescription": "Ways to start Claude Code. **New Claude Session with Mode…** and **Fork Claude Session with Mode…** list them (plus **Custom…** for one-off arguments); `#devdesk.sessions.defaultMode#` picks the one + and the robot icon use. Add your own, for example `{ \"name\": \"Opus plan\", \"args\": \"--model opus --permission-mode plan --effort high\" }`.",
+            "order": 2
+          },
+          "devdesk.sessions.claudeArgs": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Extra arguments for Claude Code in every new Claude session, whatever its mode, in shell syntax, for example `--model opus`. The launch mode's arguments (`#devdesk.sessions.defaultMode#`) come after these. Empty: none. Applies to sessions started after the change; `#devdesk.sessions.command#`, when set, replaces the whole command.",
+            "order": 3
+          },
+          "devdesk.sessions.claudePath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Claude Code binary DevDesk starts in new Claude sessions. Empty: `$HOME/.toolbox/bin/claude` when it exists, else `claude` on PATH.",
+            "order": 4
+          },
+          "devdesk.sessions.command": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Full shell command tmux runs when it creates a feature's Claude session, overriding `#devdesk.sessions.claudePath#` and `#devdesk.sessions.claudeArgs#`. Empty: `<claudePath> <claudeArgs>; exec $SHELL -l`.",
+            "order": 5
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.terminals",
+        "title": "Terminals",
+        "order": 3,
+        "properties": {
+          "devdesk.sessions.restoreTerminals": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "When a window opens (after a reload, or a Remote-SSH reconnect that restarted VS Code on the remote machine), reopen the Claude terminals that were open, attached to their tmux sessions. Sessions that ended in the meantime are skipped. Off: Claude terminals don't come back; open them from the Claude view.",
+            "order": 1
+          },
+          "devdesk.sessions.leftArrowOpensSidebar": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "In DevDesk's Claude terminals, ← on an empty prompt focuses the Claude view (on that session's row) instead of opening Claude's agent view, and new Claude sessions start without agent view (`CLAUDE_CODE_DISABLE_AGENT_VIEW=1`, which also turns off `/background` and `--bg`). DevDesk adds its ← command to `#terminal.integrated.commandsToSkipShell#` while this is on, and removes it when you turn this off.",
+            "order": 2
+          },
+          "devdesk.sessions.parkAfterDays": {
+            "scope": "machine",
+            "type": "number",
+            "default": 2,
+            "minimum": 0,
+            "markdownDescription": "Park a Claude session DevDesk started that has done nothing for this many days (fractions work): its tmux session and Claude process end, freeing their memory, and its row stays, marked parked. Opening it resumes the conversation (`claude --resume`), and a terminal tab that was open on it comes back with it. Sessions whose terminal is open, that wait on you or that still run subagents or shells are never parked. The settings below park sooner. `0`: never park (also turns off the settings below).",
+            "order": 3
+          },
+          "devdesk.sessions.parkReadAfterMinutes": {
+            "scope": "machine",
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "markdownDescription": "Park sooner, after this many minutes without activity, a finished session you have read whose last turn neither ended on an error nor asks you a question. Unread sessions wait for `#devdesk.sessions.parkAfterDays#`. `0`: only `parkAfterDays`.",
+            "order": 4
+          },
+          "devdesk.sessions.maxLiveSessions": {
+            "scope": "machine",
+            "type": "number",
+            "default": 12,
+            "minimum": 0,
+            "markdownDescription": "Keep at most this many DevDesk Claude sessions running: when more run, park the ones idle for `#devdesk.sessions.idleMinutes#`, read ones and the least recently active first. Working sessions, those waiting on you and those with an open terminal keep running, so more may run. Each running session takes memory (Claude and its MCP servers). `0`: no limit.",
+            "order": 5
+          },
+          "devdesk.sessions.parkBelowFreeMemoryPercent": {
+            "scope": "machine",
+            "type": "number",
+            "default": 10,
+            "minimum": 0,
+            "maximum": 100,
+            "markdownDescription": "While less than this percent of the machine's memory is free (`MemAvailable` on Linux, the memory pressure level on macOS), park one more session idle for `#devdesk.sessions.idleMinutes#` each minute, the least recently active first. `0`: never.",
+            "order": 6
+          },
+          "devdesk.sessions.tabTitleLength": {
+            "type": "number",
+            "default": 24,
+            "minimum": 0,
+            "maximum": 80,
+            "markdownDescription": "A Claude terminal's tab shows its session's board title (a `/rename`, else DevDesk's short title, else Claude's title or the prompt), cut to this many characters; until there is a title, the session's name (`main-39`). When the title changes, the tab follows the next time it is in front. `0`: always the session's name.",
+            "order": 7
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.worktrees",
+        "title": "Worktrees",
+        "order": 4,
+        "properties": {
+          "devdesk.worktrees.root": {
+            "type": "string",
+            "default": "",
+            "description": "Workspace root: a git repository. Empty: the git repository containing the first workspace folder (its main worktree; a linked worktree resolves to it), else that folder as it is. The Claude and Worktrees views are hidden when no local folder is open.",
+            "scope": "machine",
+            "order": 1
+          },
+          "devdesk.worktrees.showSessions": {
+            "type": "boolean",
+            "default": false,
+            "description": "List each worktree's Claude sessions under its row, above its packages, as the Claude view shows them. Toggle it with the Worktrees view's comment button.",
+            "order": 2
+          },
+          "devdesk.worktrees.showCleanPackages": {
+            "type": "boolean",
+            "default": false,
+            "description": "List the packages of a worktree that have no changes (shown as clean). Off: only changed packages are listed.",
+            "order": 3
+          },
+          "devdesk.worktrees.refreshSeconds": {
+            "type": "number",
+            "default": 20,
+            "minimum": 0,
+            "description": "While the Worktrees view is visible, refresh it this many seconds after the previous refresh finished (a refresh never starts while one is running). 0 disables.",
+            "order": 4
+          },
+          "devdesk.worktrees.pauseWhenUnfocused": {
+            "type": "boolean",
+            "default": true,
+            "description": "Pause the Worktrees view's refresh while the VS Code window is in the background. Coming back refreshes at once if the last refresh is older than devdesk.worktrees.refreshSeconds.",
+            "order": 5
+          },
+          "devdesk.worktrees.activeReloadSeconds": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "description": "The packages of a worktree that is expanded, or that a Claude session is busy in, load again at least this often (seconds), for edits git has not seen yet. Saves in VS Code, Claude's edits, a finished Claude turn, commits, checkouts and `git add` reload a package at once. 0: only those.",
+            "order": 6
+          },
+          "devdesk.worktrees.idleReloadMinutes": {
+            "type": "number",
+            "default": 10,
+            "minimum": 0,
+            "description": "The other worktrees' packages load again about this often (minutes), for edits git has not seen yet. They are spread over the refreshes, a few at a time, so one may load up to half an interval later. 0: only when a save, a Claude edit or a git change says they changed.",
+            "order": 7
+          },
+          "devdesk.worktrees.prefetch": {
+            "type": "boolean",
+            "default": true,
+            "description": "While the Worktrees view is visible, load every worktree's changes in the background (after the expanded ones), so expanding a worktree shows them at once and each row shows how many packages changed.",
+            "order": 8
+          },
+          "devdesk.worktrees.maxGitProcesses": {
+            "type": "integer",
+            "default": 8,
+            "minimum": 1,
+            "maximum": 32,
+            "description": "The most git processes the Worktrees view runs at once. An expanded worktree's packages may use all of them; background loads (prefetching every worktree) use up to half, or a quarter while the machine is busy (load average above 1.5 per CPU), and at least one.",
+            "order": 9
+          },
+          "devdesk.worktrees.gitTimeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 0,
+            "description": "Stop a git command of the Worktrees view that runs longer than this (seconds); its package shows an error instead of the view loading forever. 0 never stops it.",
+            "order": 10
+          },
+          "devdesk.worktrees.startPrompt": {
+            "type": "string",
+            "default": "",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Claude's first prompt in a new worktree session: `{task}` is what you typed, `{worktree}` the worktree name, `{dir}` its directory. Empty: `You are working in worktree {worktree} ({dir}) on: {task}`, followed by asking Claude to say which worktree it is in and start on the task.",
+            "order": 13
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.board",
+        "title": "Claude Board",
+        "order": 5,
+        "properties": {
+          "devdesk.board.enabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Show the **Claude Board** (preview): an editor tab whose prompt box starts new Claude sessions (mode, model, effort, where they run, `/` skills and `@` files), keeps *Prompts for later* until you start them, and shows every Claude session as swim lanes by state. Open it with **DevDesk: Open Claude Board** or the board icon in the Claude view.",
+            "order": 1
+          },
+          "devdesk.board.openWhenEmpty": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Open the Claude Board when the editor area has no tabs (when the window starts and when you close the last tab, unless that tab was the board). Applies when `#devdesk.board.enabled#` is on.",
+            "order": 2
+          },
+          "devdesk.board.openWithSidebar": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Open the Claude Board the first time you open the Agent Sessions sidebar in a window, so it is what the sidebar starts on. Applies when `#devdesk.board.enabled#` is on.",
+            "order": 3
+          },
+          "devdesk.board.editorTitleButton": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show a colored Claude Board button at the top right of each editor group (next to the editor actions, such as Claude Code's), that opens the board. Applies when `#devdesk.board.enabled#` is on.",
+            "order": 4
+          },
+          "devdesk.board.promptPlacement": {
+            "type": "string",
+            "enum": [
+              "bottom",
+              "top"
+            ],
+            "enumDescriptions": [
+              "In a square of its own under the lanes, its top edge in the mode's colour; it grows up into the board for a long prompt",
+              "In the same square above the lanes, its bottom edge in the mode's colour; it grows down into the board for a long prompt"
+            ],
+            "default": "bottom",
+            "markdownDescription": "Where the Claude Board's prompt box sits.",
+            "order": 5
+          },
+          "devdesk.board.afterStart": {
+            "type": "string",
+            "enum": [
+              "board",
+              "session"
+            ],
+            "enumDescriptions": [
+              "Stay on the board: the session starts in the background and its card shows in Working; open it from there",
+              "Open the new session's terminal"
+            ],
+            "default": "board",
+            "markdownDescription": "What happens after the Claude Board's prompt box starts a session (Enter, or **Start** / **Plan** / **Spec** on a prompt for later).",
+            "order": 6
+          },
+          "devdesk.board.sessionsBeside": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "enumDescriptions": [
+              "Beside the board when the editor area is wide enough for the full board and a terminal at least as wide",
+              "Beside the board, however wide the editor area (the board takes at most half)",
+              "Over the board, in its editor group"
+            ],
+            "default": "auto",
+            "markdownDescription": "Where a session opened from the Claude Board shows its terminal when the board has the editor area to itself: beside it, the board keeping room for every lane (`#devdesk.board.laneWidth#`) and the terminal taking the rest, or over it. Once a Claude terminal is open in an editor group, the next ones open there.",
+            "order": 7
+          },
+          "devdesk.board.cardLine": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show one line under the title of Working cards (what Claude is doing now) and Needs you cards (what Claude asks or wants approved). The ☰ button in the board header turns it on or off. The card's hover always shows both.",
+            "order": 8
+          },
+          "devdesk.board.cardTitle": {
+            "type": "string",
+            "enum": [
+              "objective",
+              "latest"
+            ],
+            "enumDescriptions": [
+              "What the whole session sets out to do (its goal and tasks, from DevDesk's insights), with the latest step in smaller text under it.",
+              "What the latest prompt is about."
+            ],
+            "default": "objective",
+            "markdownDescription": "What the title of a session's card on the Claude Board says. `objective` (a prototype) needs `#devdesk.insights.enabled#`; until a session's objective is known its card shows the latest prompt's title. A name given with /rename always wins.",
+            "order": 9
+          },
+          "devdesk.board.laneWidth": {
+            "type": "number",
+            "default": 220,
+            "minimum": 180,
+            "markdownDescription": "How wide (px) each of the Claude Board's lanes is when a session opens beside the board (`#devdesk.board.sessionsBeside#`): wider shows more of each card's summary, and the terminal gets less.",
+            "order": 10
+          },
+          "devdesk.board.models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Models the Claude Board's prompt box offers, first one preselected: aliases (`opus`, `sonnet`, `haiku`, `fable`) or full model names, passed as `--model` to the next session it starts. `Default` adds no `--model` (your Claude settings' model). Empty: the Claude CLI's own model list, else `Default`, `opus`, `sonnet`, `haiku`, `fable`, `opus[1m]`, `sonnet[1m]`, `fable[1m]` when the CLI does not answer.",
+            "order": 11
+          },
+          "devdesk.board.specPrompt": {
+            "type": "string",
+            "default": "",
+            "editPresentation": "multilineText",
+            "markdownDescription": "What **Spec** on a prompt for later puts before the prompt: a skill or command (`/name`, on the same line) or an instruction (on its own lines). Empty: `/superpowers:brainstorming` when that skill is installed and enabled, else *Before changing any code, write a design spec for the following and wait for my review of it.*",
+            "order": 12
+          },
+          "devdesk.board.pastedImagesDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Folder where images pasted into the Claude Board's prompt box are saved (the prompt mentions each with `@`, so Claude reads it). Pasted images older than 30 days are deleted from it. Empty: `~/.claude/devdesk/pasted-images`.",
+            "order": 13
+          },
+          "devdesk.board.claudeConfigFile": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Claude Code's global config file, read (never written) before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
+            "order": 14
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.insights",
+        "title": "Insights",
+        "order": 6,
+        "properties": {
+          "devdesk.insights.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Ask a small model (`#devdesk.insights.model#`) what each Claude session is doing: a live status line on working cards, a short summary, and whether a finished turn waits for you (the 💬 asked look). Runs `claude -p --bare` next to your sessions, with your own Claude login; never touches the sessions themselves.",
+            "order": 1
+          },
+          "devdesk.insights.model": {
+            "type": "string",
+            "default": "haiku",
+            "markdownDescription": "The model insight calls use: an alias (`haiku`) or a full model name. Empty: `haiku`.",
+            "order": 2
+          },
+          "devdesk.insights.refreshSeconds": {
+            "type": "number",
+            "default": 45,
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "A working session's status is refreshed after new activity, at most this often (seconds).",
+            "order": 3
+          },
+          "devdesk.insights.maxConcurrent": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20,
+            "description": "How many insight calls run at the same time, across all sessions.",
+            "order": 4
+          },
+          "devdesk.insights.claudePath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Claude Code binary insight calls run. Empty: the one new sessions run (`#devdesk.sessions.claudePath#`), without `#devdesk.sessions.claudeArgs#`.",
+            "order": 5
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.boardSearch",
+        "title": "Board search",
+        "order": 7,
+        "properties": {
+          "devdesk.boardSearch.model": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "The model the Claude Board's ✨ search asks (Enter in the search box), through `claude -p --bare` with your own Claude login. Empty: `haiku`. Not used when `#devdesk.boardSearch.command#` is set.",
+            "order": 1
+          },
+          "devdesk.boardSearch.command": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "A program or script (with arguments) that answers the ✨ search instead of `claude -p`, for example a script around a local model (Ollama, llama.cpp). It is run in a login shell as `exec <command>`, so pipes or `;` need a wrapper script. It gets the search as JSON on stdin and prints `{\"matches\":[{\"id\":\"…\",\"reason\":\"…\"}]}`; see the manual. A leading `~` is your home directory. Empty: `claude -p` with `#devdesk.boardSearch.model#`.",
+            "order": 2
+          },
+          "devdesk.boardSearch.timeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 5,
+            "maximum": 300,
+            "markdownDescription": "How long a ✨ search may take before it is stopped.",
+            "order": 3
+          },
+          "devdesk.boardSearch.history": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Also search past Claude sessions (their transcripts) from the board's search box: matches show in a **Found in history** lane, and ✨ can pick them. The index stays on this machine, in `#devdesk.sessions.stateDir#`.",
+            "order": 4
+          },
+          "devdesk.boardSearch.historyScope": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "all"
+            ],
+            "enumDescriptions": [
+              "Sessions that ran in this workspace's folders and worktrees",
+              "Every Claude session on this machine"
+            ],
+            "default": "workspace",
+            "markdownDescription": "Which past sessions the board's search looks through.",
+            "order": 5
+          },
+          "devdesk.boardSearch.historyDays": {
+            "type": "number",
+            "default": 90,
+            "minimum": 1,
+            "maximum": 3650,
+            "markdownDescription": "Past sessions not changed for this many days are not searched.",
+            "order": 6
+          },
+          "devdesk.boardSearch.historyMaxSessions": {
+            "scope": "machine",
+            "type": "number",
+            "default": 5000,
+            "minimum": 100,
+            "maximum": 100000,
+            "markdownDescription": "At most this many past sessions, the most recently changed, are searched. Each one indexed takes memory in the extension host (up to about 100 KB), so a folder with tens of thousands of transcripts (agents run with `claude -p`) is cut to the newest ones.",
+            "order": 7
+          },
+          "devdesk.boardSearch.historyDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Where Claude Code keeps its transcripts. Empty: `projects` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`). A leading `~` is your home directory.",
+            "order": 8
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.usage",
+        "title": "Usage history",
+        "order": 8,
+        "properties": {
+          "devdesk.usage.defaultScope": {
+            "type": "string",
+            "enum": [
+              "project",
+              "all"
+            ],
+            "enumDescriptions": [
+              "This window's project: its workspace, git repository or folder",
+              "All projects on this machine"
+            ],
+            "default": "project",
+            "markdownDescription": "What the board's 📊 popup and the Claude Usage page show first, until you choose a project in them.",
+            "order": 1
+          },
+          "devdesk.usage.historyDays": {
+            "scope": "machine",
+            "type": "number",
+            "default": 365,
+            "minimum": 1,
+            "markdownDescription": "Days of token usage history kept for the Claude Board's 📊 and the Claude Usage page, after Claude Code deletes old transcripts (`cleanupPeriodDays`, 30 by default). Older days are dropped from `usage-history.jsonl` in `#devdesk.sessions.stateDir#`.",
+            "order": 2
+          },
+          "devdesk.usage.historyMaxMB": {
+            "scope": "machine",
+            "type": "number",
+            "default": 10,
+            "minimum": 0.1,
+            "markdownDescription": "The most disk space the token usage history may take (MB). Past it, the oldest days are dropped, whatever `#devdesk.usage.historyDays#` allows. A day takes a few KB.",
+            "order": 3
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.tmux",
+        "title": "tmux",
+        "order": 9,
+        "properties": {
+          "devdesk.sessions.tmuxServer": {
+            "type": "string",
+            "default": "devdesk",
+            "scope": "machine",
+            "description": "tmux server (tmux -L <name>) that DevDesk starts and lists Claude sessions on, kept apart from your own tmux. Empty means devdesk; \"default\" uses tmux's own server. Attach from a shell with: tmux -L devdesk attach.",
+            "order": 1
+          },
+          "devdesk.sessions.tmuxPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "tmux binary DevDesk runs Claude sessions with, for example `~/.local/bin/tmux`. Empty: `tmux` on PATH. Another binary needs tmux 3.0 or later (DevDesk passes its path to the status hook with `new-session -e`).",
+            "order": 2
+          },
+          "devdesk.sessions.tmuxConfigFile": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "tmux config file DevDesk's tmux server loads (`tmux -f <file>`), for example `~/.tmux-devdesk.conf`. Empty: tmux's own (`~/.tmux.conf`). tmux reads it when the server starts: run `tmux -L devdesk kill-server` (this stops every DevDesk session), or `source-file` it, to apply a change to a running server.",
+            "order": 3
+          },
+          "devdesk.sessions.tmuxOptions": {
+            "type": "object",
+            "default": {},
+            "scope": "machine",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            },
+            "markdownDescription": "tmux options DevDesk sets on each Claude session when it opens its terminal (`set-option -t <session>`), for example `{ \"mouse\": true, \"history-limit\": 50000, \"status\": \"off\" }`. `true`/`false` become `on`/`off`. Window options apply to the session's current window. Empty: none, so your tmux config decides.",
+            "order": 4
+          },
+          "devdesk.sessions.tmuxInstallCommand": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Shell command **Install tmux** runs in a terminal, offered when DevDesk cannot run tmux. Empty: `brew install tmux` on macOS, else `sudo yum install -y tmux`.",
+            "order": 5
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.advanced",
+        "title": "Advanced",
+        "order": 10,
+        "properties": {
+          "devdesk.sessions.stateDir": {
+            "type": "string",
+            "default": "~/.claude/devdesk/state",
+            "scope": "machine",
+            "description": "Directory where the Claude status hook writes one JSON file per session.",
+            "order": 1
+          },
+          "devdesk.sessions.claudeSessionsDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Directory where Claude Code lists its running sessions (`<pid>.json`), read for the names the agent view and /rename show. Empty means `sessions` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/sessions`.",
+            "order": 2
+          },
+          "devdesk.sessions.claudeJobsDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Directory where Claude Code keeps its background jobs (`<job id>/state.json`), read to list the /fork forks of a listed session. Empty means `jobs` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/jobs`.",
+            "order": 3
+          },
+          "devdesk.diagnostics.debugLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "Write DevDesk's debug lines (tree loads, git and refresh timings) to the DevDesk output at info level, without changing VS Code's log level.",
+            "order": 4
+          },
+          "devdesk.diagnostics.slowOperationSeconds": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "description": "Log a warning once when a DevDesk operation (git, tmux, a sessions refresh, a tree load) has been running this many seconds. 0 disables.",
+            "order": 5
+          },
+          "devdesk.diagnostics.latencyOutlierFactor": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "description": "Log an info line when a command, a sessions refresh, a Claude Board render or a tmux call takes this many times as long as it usually does (its median of the last 50), with what else DevDesk was doing, so a slow moment can be debugged later. 0 disables.",
+            "order": 6
+          },
+          "devdesk.diagnostics.latencyOutlierMinMs": {
+            "type": "number",
+            "default": 50,
+            "minimum": 0,
+            "description": "Only log a slow moment (devdesk.diagnostics.latencyOutlierFactor) that took at least this many milliseconds longer than usual.",
+            "order": 7
+          },
+          "devdesk.diagnostics.dir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Where the extension host writes a Node diagnostic report (native stack, heap spaces, resource usage) when it dies of a fatal error such as running out of memory. Empty: ~/.cache/devdesk/diagnostics.",
+            "order": 8
+          },
+          "devdesk.diagnostics.heapSnapshotNearLimit": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "description": "Write one V8 heap snapshot (Heap.*.heapsnapshot, several GB) to the extension host's working directory when its heap nears the limit, to find which extension is allocating. Turning it off takes effect after a reload.",
+            "order": 9
+          },
+          "devdesk.diagnostics.keepDays": {
+            "scope": "machine",
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "description": "Delete heap snapshots (Heap.*.heapsnapshot in the extension host's working directory, usually ~) and fatal-error reports (in devdesk.diagnostics.dir) older than this many days. Checked when a window starts and every 6 hours. 0 keeps them.",
+            "order": 10
+          },
+          "devdesk.diagnostics.heapWarnMB": {
+            "type": "number",
+            "default": 1500,
+            "minimum": 0,
+            "description": "Log the extension host's memory every 10 s at info level (DevDesk output) once its heap is this big. 0 disables.",
+            "order": 11
+          },
+          "devdesk.diagnostics.heapGrowthWarnMB": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "description": "Log a warning, with the DevDesk operations in flight, when the extension host's heap grows this much in 10 s. 0 disables.",
+            "order": 12
+          }
+        }
+      }
+    ],
+    "submenus": [
+      {
+        "id": "devdesk.sessions.color",
+        "label": "Color"
+      }
+    ]
+  },
+  "bugs": {
+    "url": "https://github.com/roniburd/devdesk-agent/issues"
+  },
+  "homepage": "https://github.com/roniburd/devdesk-agent#readme"
+}

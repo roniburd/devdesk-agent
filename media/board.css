@@ -1,0 +1,530 @@
+/* The Claude Board: theme colours only, so it follows light, dark and high contrast themes. */
+:root {
+  --yellow: var(--vscode-charts-yellow);
+  --blue: var(--vscode-charts-blue);
+  --green: var(--vscode-charts-green);
+  --red: var(--vscode-charts-red);
+  --orange: var(--vscode-charts-orange);
+  --purple: var(--vscode-charts-purple);
+  --dim: var(--vscode-disabledForeground);
+  --border: var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+  /* The composer's and its popups' hairlines. */
+  --widget-border: var(--vscode-widget-border, #7f7f7f66);
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+button {
+  font: inherit;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: none;
+  border-radius: 2px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+button:hover { background: var(--vscode-button-hoverBackground); }
+button:disabled { opacity: 0.5; cursor: default; }
+button:focus-visible, .card:focus-visible, select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+button.ghost, button.act:not(.primary), button.plus, button.addcard {
+  color: var(--vscode-foreground);
+  background: var(--vscode-button-secondaryBackground, transparent);
+}
+button.ghost:hover, button.act:not(.primary):hover, button.plus:hover, button.addcard:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+/* The header's icon buttons (☰ card line, ⚙ settings), as tall as the 📊 one. */
+.bar #cardline, .bar #settings { display: inline-flex; align-items: center; justify-content: center; padding: 3px 7px; }
+.bar #cardline .ico, .bar #settings .ico { width: 18px; height: 18px; }
+.bar #cardline { border: 1px solid transparent; }
+/* On: VS Code's toggle look (like the search box's Aa). Off: plain, with the icon's slash. */
+.bar #cardline[aria-pressed='true'] {
+  color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+  background: var(--vscode-inputOption-activeBackground, var(--vscode-toolbar-activeBackground));
+  border-color: var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+}
+.bar #cardline[aria-pressed='false'] { color: var(--vscode-descriptionForeground); }
+.bar h1 { margin: 0; font-size: 1.1em; font-weight: 600; }
+.spacer { flex: 1; }
+.chip {
+  border-radius: 10px;
+  padding: 1px 9px;
+  font-size: 0.9em;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+.chip.needs { background: transparent; color: var(--yellow); border: 1px solid var(--yellow); }
+.filter { display: flex; align-items: center; gap: 6px; color: var(--vscode-descriptionForeground); }
+select {
+  font: inherit;
+  color: var(--vscode-dropdown-foreground);
+  background: var(--vscode-dropdown-background);
+  border: 1px solid var(--vscode-dropdown-border, transparent);
+  padding: 2px 4px;
+}
+
+#lanes {
+  order: 2;
+  flex: 1;
+  min-height: 160px;
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow-x: auto;
+}
+
+/*
+ * The prompt pane (devdesk.board.promptPlacement). Bottom, the default: a square of its own under the lanes, 250px
+ * tall with the box centred in it, its top edge in the mode's colour; it grows up into the board for a long prompt
+ * (to 60% of the window), the lanes giving way. Top: the same square above the lanes, mirrored: its bottom edge (the
+ * one facing the lanes) in the mode's colour, growing down into the board, and its popups opening downward.
+ */
+.pane {
+  --pane-h: 250px;
+  order: 3;
+  flex: none;
+  display: flex;
+  box-sizing: border-box;
+  min-height: var(--pane-h);
+  max-height: 60vh;
+  padding: 2px 14px 14px;
+  border-top: 1px solid var(--border);
+}
+/* The lanes and the prompt's square: panels on the editor background. */
+.lane, .square {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+.square {
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  border-top: 2px solid color-mix(in srgb, var(--tone) 70%, transparent);
+}
+.pane .composer { width: 100%; max-width: 760px; margin: 0; }
+.hint { margin-top: 10px; font-size: 0.85em; color: var(--vscode-descriptionForeground); text-align: center; }
+.hint kbd { font-family: inherit; padding: 0 4px; margin: 0 2px 0 8px; border: 1px solid var(--vscode-widget-border, var(--border)); border-radius: 3px; }
+.hint > kbd:first-child { margin-left: 0; }
+/* The textarea grows until the pane reaches 60% of the window: less the square's padding, the footer and the hint. */
+.pane .composer textarea { max-height: calc(60vh - 140px); }
+/* At the bottom, popups open upward, over the lanes. */
+.pane .popup { top: auto; bottom: calc(100% + 4px); }
+
+body[data-placement='top'] .pane { order: 1; padding: 14px 14px 2px; border-top: none; border-bottom: 1px solid var(--border); }
+body[data-placement='top'] .square {
+  border-top: 1px solid var(--border);
+  border-bottom: 2px solid color-mix(in srgb, var(--tone) 70%, transparent);
+}
+/* Above the lanes, popups open downward, over them. */
+body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
+.loading { color: var(--vscode-descriptionForeground); }
+.lane {
+  flex: 1 1 0;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.lane h2 {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 0.95em;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.lane .count { color: var(--vscode-descriptionForeground); font-weight: 400; }
+/* A lane a query leaves empty: a narrow column, its heading read sideways, so the matching lanes and the history fit. */
+.lane.collapsed { flex: 0 0 auto; min-width: 0; }
+.lane.collapsed h2 { writing-mode: vertical-rl; border-bottom: none; padding: 10px 6px; white-space: nowrap; color: var(--vscode-descriptionForeground); }
+.lane.collapsed .body { display: none; }
+.lane .plus { margin-left: auto; padding: 0 7px; font-size: 1.2em; line-height: 1.3; }
+.lane .body { padding: 8px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.lane .divider { display: flex; align-items: center; gap: 8px; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.lane .divider::before, .lane .divider::after { content: ''; flex: 1; border-top: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 35%, transparent); }
+.lane .more { padding: 4px 8px; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+.empty { margin: 4px 2px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+.addcard { text-align: left; border: 1px dashed var(--border); background: transparent; color: var(--vscode-descriptionForeground); }
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--dim);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { background: var(--vscode-list-hoverBackground); }
+.card.look-yellow { border-left-color: var(--yellow); }
+.card.look-blue { border-left-color: var(--blue); }
+.card.look-green { border-left-color: var(--green); }
+.card.look-red { border-left-color: var(--red); }
+.card.look-orange { border-left-color: var(--orange); }
+.card.look-purple { border-left-color: var(--purple); }
+.card.task { border-left-style: dashed; }
+/* The session whose Claude terminal is the active one. */
+.card.focused {
+  background: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-hoverBackground));
+  border-top-color: var(--vscode-focusBorder);
+  border-right-color: var(--vscode-focusBorder);
+  border-bottom-color: var(--vscode-focusBorder);
+}
+.card.focused.clickable:hover { background: var(--vscode-list-hoverBackground); }
+.card .title {
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card .title.unread { font-weight: 700; }
+.card .title .unread-dot { margin-left: 6px; font-size: 0.8em; color: var(--blue); }
+.card.read .title { color: var(--vscode-descriptionForeground); font-weight: 400; }
+/* A color given by hand (right-click Color ▸): the title, over a read card's grey. */
+.card.color-red .title { color: var(--red); }
+.card.color-orange .title { color: var(--orange); }
+.card.color-yellow .title { color: var(--yellow); }
+.card.color-green .title { color: var(--green); }
+.card.color-blue .title { color: var(--blue); }
+.card.color-purple .title { color: var(--purple); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+/* Session cards: the worktree, quiet, and when (right). */
+.card .meta { flex-wrap: nowrap; min-width: 0; }
+.card .meta .wt { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .meta .wt .ico { width: 11px; height: 11px; flex: none; opacity: 0.7; }
+.card .meta .model { white-space: nowrap; opacity: 0.85; }
+.card .meta .when { margin-left: auto; white-space: nowrap; flex: none; }
+.card .meta .when .glyph { margin-right: 2px; font-size: 0.9em; }
+.card.task .wt {
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.95em;
+  background: var(--vscode-textCodeBlock-background, var(--vscode-badge-background));
+  color: var(--vscode-foreground);
+}
+/* devdesk.board.cardTitle `objective`: the latest step, small under the objective title. */
+.card .latest { font-size: 0.9em; color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A small `>` marks the line as what the session is on now (left out for screen readers). */
+.card .latest::before { content: '>' / ''; margin-right: 4px; font-size: 0.85em; opacity: 0.7; font-family: var(--vscode-editor-font-family, monospace); }
+/* Working: what Claude is doing now, one line under the title (the hover has all of it). */
+.card .doing { color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Needs you: what Claude asks, boxed under the title (scoped to cards: the header's ✨ button is #ask). */
+.card .ask {
+  padding: 5px 8px;
+  border-radius: 3px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+}
+.ask-kind { font-size: 0.78em; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+.ask-text { line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* The cards' hover (showHover in board.js). */
+.hovercard {
+  position: fixed;
+  z-index: 50;
+  max-width: 380px;
+  min-width: 220px;
+  max-height: calc(100vh - 8px);
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--widget-border));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0006);
+  font-size: 0.95em;
+}
+.hovercard[hidden] { display: none; }
+.hc-title { font-weight: 600; margin-bottom: 4px; overflow-wrap: anywhere; }
+.hc-row { margin-top: 6px; }
+.hc-label { font-size: 0.8em; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.04em; }
+.hc-text { line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.hc-excerpt { -webkit-line-clamp: 3; }
+.hc-excerpt + .hc-excerpt { margin-top: 4px; }
+.hc-excerpt mark { background: var(--vscode-editor-findMatchHighlightBackground); color: inherit; border-radius: 2px; }
+.hc-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--widget-border); color: var(--vscode-descriptionForeground); font-size: 0.88em; }
+.acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.acts .act { padding: 0 6px; font-size: 0.8em; line-height: 1.5; white-space: nowrap; }
+/* Session cards' Fork / End: quiet text buttons until you hover the card. */
+.card:not(.task) .acts .act { background: transparent; color: var(--vscode-descriptionForeground); opacity: 0.7; }
+.card:not(.task):hover .acts .act, .card:not(.task):focus-within .acts .act { opacity: 1; }
+.card:not(.task) .acts .act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+
+.yellow { color: var(--yellow); }
+.blue { color: var(--blue); }
+.green { color: var(--green); }
+.red { color: var(--red); }
+.orange { color: var(--orange); }
+.purple { color: var(--purple); }
+.dim { color: var(--dim); }
+.spin .glyph { display: inline-block; animation: spin 1.5s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin .glyph { animation: none; } }
+
+/* Prompts for later */
+.card .prompt {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card.starting { opacity: 0.7; }
+
+/* The composer: Claude Code's prompt box (rounded, border tinted by the permission mode, footer of icon buttons). */
+.pane,
+.composer {
+  --tone: #d97757;
+  --send-bg: #c6613f;
+  --send-fg: #faf9f5;
+}
+.composer {
+  position: relative;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-inlineChatInput-border, var(--vscode-input-border, var(--widget-border)));
+  border-radius: 8px;
+  background: var(--vscode-input-background);
+  box-shadow: 0 1px 2px #0000001a;
+}
+[data-tone='edits'] { --tone: var(--vscode-foreground); --send-bg: var(--vscode-foreground); --send-fg: var(--vscode-editor-background); }
+[data-tone='plan'] { --tone: var(--vscode-focusBorder); --send-bg: var(--vscode-button-background); --send-fg: var(--vscode-button-foreground); }
+[data-tone='danger'] { --tone: var(--vscode-errorForeground); --send-bg: var(--vscode-errorForeground); --send-fg: var(--vscode-editor-background); }
+.composer:focus-within { border-color: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 12%, transparent); }
+.composer textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  /* Three lines at least; grows with the text up to its max-height (set by the pane rules above), then scrolls. */
+  min-height: calc(4.5em + 20px);
+  max-height: 40vh;
+  padding: 10px 14px;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--vscode-input-foreground);
+  font: inherit;
+  line-height: 1.5;
+}
+.composer textarea::placeholder { color: var(--vscode-input-placeholderForeground); }
+.composer .editing {
+  padding: 6px 14px 0;
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground);
+}
+/* A message from the extension about what the box did (or will not do), with its action buttons. */
+.composer .notice {
+  margin: 8px 10px 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--vscode-notificationsInfoIcon-foreground, var(--vscode-focusBorder));
+  font-size: 0.85em;
+  color: var(--vscode-foreground);
+  background: var(--vscode-textBlockQuote-background, transparent);
+}
+.composer .notice[data-tone='warning'] { border-left-color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground)); }
+.composer .notice[data-tone='error'] { border-left-color: var(--vscode-errorForeground); }
+/* A notice's lines (such as /help's) stay lines. */
+.composer .notice .notice-text { margin-right: 6px; white-space: pre-line; }
+.composer .adddirs { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 10px 0; }
+.composer .adddirs[hidden] { display: none; }
+.composer .adddir { display: inline-flex; align-items: center; gap: 2px; font-size: 0.85em; }
+.composer .adddir button { padding: 0 3px; line-height: 1; }
+button.link { padding: 0 4px; background: none; color: var(--vscode-textLink-foreground); }
+button.link:hover { background: none; text-decoration: underline; }
+.composer .footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-top: 0.5px solid var(--vscode-widget-border, #7f7f7f33);
+}
+.composer .footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--vscode-descriptionForeground);
+  background: transparent;
+}
+.composer .footer button:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+.composer .icon { width: 26px; padding: 0; justify-content: center; }
+.composer .icon.mode { width: auto; padding: 0 6px; }
+.composer .pill { padding: 0 8px; font-size: 0.85em; }
+.composer .pill .ico:last-child { width: 12px; height: 12px; }
+.composer .label { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.composer .mode .label { font-size: 0.85em; }
+.composer .mode .ico { color: var(--tone); }
+.ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.composer .wtname {
+  height: 22px;
+  width: 170px;
+  padding: 0 6px;
+  border: 1px solid var(--vscode-input-border, var(--widget-border));
+  border-radius: 4px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-input-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.85em;
+  outline: none;
+}
+.composer .wtname:focus { border-color: var(--vscode-focusBorder); }
+.composer .later.on { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+/* The send button takes the mode's colours (set with --tone above). */
+.composer .footer .send,
+.composer .footer .send:hover:not(:disabled) {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+  margin-left: 2px;
+  color: var(--send-fg);
+  background: var(--send-bg);
+}
+.composer .footer .send:hover:not(:disabled) { filter: brightness(1.1); }
+.composer .error { color: var(--vscode-errorForeground); font-size: 0.85em; margin-right: 6px; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The composer's popups (+, /, @, where, model, mode): Claude Code's menu rows. */
+.popup {
+  position: absolute;
+  z-index: 10;
+  left: 6px;
+  right: 6px;
+  top: calc(100% + 4px);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--widget-border));
+  border-radius: 6px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, #0000004d);
+}
+.pop-head { display: flex; justify-content: space-between; gap: 12px; padding: 4px 8px 6px; font-size: 0.85em; }
+.pop-title { font-weight: 600; }
+.pop-hint, .pop-section { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+.pop-section { padding: 6px 8px 2px; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.75em; }
+.pop-row { position: relative; padding: 4px 26px 4px 8px; border-radius: 4px; cursor: pointer; }
+.pop-row.active { background: var(--vscode-list-activeSelectionBackground, var(--vscode-menu-selectionBackground)); color: var(--vscode-list-activeSelectionForeground, var(--vscode-menu-selectionForeground)); }
+.pop-main { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.pop-label { white-space: nowrap; }
+.pop-detail, .pop-desc { color: var(--vscode-descriptionForeground); font-size: 0.85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop-row.active .pop-detail, .pop-row.active .pop-desc { color: inherit; opacity: 0.8; }
+.pop-check { position: absolute; right: 8px; top: 4px; }
+.pop-empty { padding: 6px 8px; color: var(--vscode-descriptionForeground); }
+.popup.anchored { right: auto; width: max-content; min-width: 260px; max-width: min(520px, calc(100% - 12px)); }
+/* `/` rows: what the board does with a built-in (core/commandMenu.ts `Badge`). */
+.pop-badge {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--widget-border);
+  border-radius: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.75em;
+  line-height: 1.4;
+}
+.pop-badge[data-badge='terminal'] { display: inline-flex; padding: 0; border: none; align-self: center; }
+.pop-badge[data-badge='terminal'] .ico { width: 14px; height: 14px; }
+.pop-row[data-category='E'] .pop-label { opacity: 0.6; }
+.pop-row.active .pop-badge { color: inherit; border-color: currentColor; }
+/* After Tab put a command in the box: its arguments, until one is typed. */
+.composer .arghint { padding: 0 10px 4px; color: var(--vscode-descriptionForeground); font-family: var(--vscode-editor-font-family); font-size: 0.85em; }
+.composer .arghint .arghint-cmd { margin-right: 6px; color: var(--vscode-foreground); }
+.composer kbd { font-family: inherit; font-size: 0.9em; opacity: 0.7; }
+
+/* The 📊 popover under the board header. */
+.stats-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 8px;
+  z-index: 20;
+  min-width: 360px;
+  max-width: min(520px, 90vw);
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background);
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  font-size: 0.9em;
+}
+.stats-title { font-weight: 600; margin-bottom: 4px; }
+.stats-section { margin-top: 8px; font-weight: 600; color: var(--vscode-descriptionForeground); }
+.stats-row { display: grid; grid-template-columns: minmax(0, 1fr) 5em 7.5em; column-gap: 8px; align-items: baseline; }
+.stats-row .stats-extra { grid-column: 1 / -1; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.stats-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stats-num { text-align: right; font-variant-numeric: tabular-nums; }
+.stats-num.cached { color: var(--vscode-descriptionForeground); }
+.stats-head { font-size: 0.8em; color: var(--vscode-descriptionForeground); }
+.stats-empty, .stats-note { color: var(--vscode-descriptionForeground); }
+.stats-note { margin-top: 8px; font-size: 0.8em; }
+.stats-progress { display: block; width: 100%; margin-top: 6px; }
+.stats-more { display: block; margin: 8px 0 0 auto; }
+.stats-scope { display: flex; gap: 6px; margin: 2px 0 6px; }
+.stats-scope select { min-width: 0; flex: 1 1 auto; max-width: 100%; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; padding: 1px 4px; text-overflow: ellipsis; }
+.stats-place { cursor: pointer; border-radius: 3px; }
+.stats-place:hover, .stats-place:focus-visible { background: var(--vscode-list-hoverBackground); }
+.stats-place:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+/* The header's controls share one height, so the search box, ✨, the Worktree select and the icon buttons line up. */
+.bar { --bar-control-h: 26px; }
+.bar .search input, .bar .search .ask, .bar select, .bar > button { box-sizing: border-box; height: var(--bar-control-h); }
+.bar .search { display: flex; align-items: center; gap: 4px; }
+.bar .search .ask { display: inline-flex; align-items: center; justify-content: center; padding: 0 7px; line-height: 1; }
+.bar .search input {
+  width: 16em;
+  font: inherit;
+  padding: 0 6px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+}
+.bar .search input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.bar .search .ask.busy { animation: spin 1s linear infinite; }
+.search-banner { padding: 4px 12px; color: var(--vscode-descriptionForeground); }
+.search-banner .error { color: var(--vscode-errorForeground); }
+.card .reason { color: var(--vscode-descriptionForeground); font-style: italic; }
+
+.lane.history .card { opacity: 0.92; min-width: 0; }
+/* A narrow history lane: Resume, Fork and Copy id wrap as whole buttons, none wider than the card. */
+.lane.history .acts { min-width: 0; }
+.lane.history .acts .act { max-width: 100%; }
+/* A long worktree name ends in an ellipsis instead of widening the card. */
+.lane.history .card .meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .excerpt { color: var(--vscode-descriptionForeground); margin-top: 2px; overflow-wrap: anywhere; }
+.card .excerpt mark { background: var(--vscode-editor-findMatchHighlightBackground); color: inherit; border-radius: 2px; }
+.lane.history .indexing { color: var(--vscode-descriptionForeground); font-style: italic; padding: 4px 0; }

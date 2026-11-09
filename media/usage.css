@@ -1,0 +1,83 @@
+/* The Claude Usage page. Series colors are the dataviz reference palette's slots 1 and 2, stepped per theme (validated
+ * light and dark: CVD and normal-vision separation, contrast against the surface). */
+body {
+  --series-new: #2a78d6;
+  --series-cached: #eb6834;
+  margin: 0;
+  padding: 0 16px 24px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+}
+body.vscode-dark, body.vscode-high-contrast {
+  --series-new: #3987e5;
+  --series-cached: #d95926;
+}
+.bar { display: flex; align-items: center; gap: 8px; padding: 10px 0; position: sticky; top: 0; background: var(--vscode-editor-background); z-index: 2; }
+.bar h1 { font-size: 1.15em; margin: 0 12px 0 0; font-weight: 600; }
+.spacer { flex: 1; }
+.scope { display: flex; gap: 6px; margin-left: 12px; min-width: 0; }
+.scope select { max-width: 32em; min-width: 0; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; padding: 2px 4px; font: inherit; text-overflow: ellipsis; }
+.scope select:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--vscode-foreground); }
+th.sortable:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+th[aria-sort='ascending']::after { content: ' ▲'; }
+th[aria-sort='descending']::after { content: ' ▼'; }
+.units { display: inline-flex; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 4px; overflow: hidden; }
+.units button {
+  border: 0; padding: 3px 12px; background: transparent; color: var(--vscode-foreground); cursor: pointer; font: inherit;
+}
+.units button[aria-checked='true'] { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.units button:focus-visible, .ghost:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.ghost { border: 0; background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 1.1em; padding: 2px 6px; border-radius: 4px; }
+.ghost:hover { background: var(--vscode-toolbar-hoverBackground); }
+.block { margin: 12px 0 20px; }
+h2 { font-size: 1em; font-weight: 600; margin: 0 0 8px; }
+h2.sub { margin-top: 16px; color: var(--vscode-descriptionForeground); }
+.muted { color: var(--vscode-descriptionForeground); }
+.error { color: var(--vscode-errorForeground); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.tile { padding: 8px 10px; border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 4px; }
+.tile-label { font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.tile-value { font-size: 1.5em; font-weight: 600; font-variant-numeric: tabular-nums; margin: 2px 0; }
+.tile-sub { font-size: 0.8em; color: var(--vscode-descriptionForeground); }
+.legend { display: flex; gap: 16px; font-size: 0.85em; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.swatch.new { background: var(--series-new); }
+.swatch.cached { background: var(--series-cached); }
+svg.chart { display: block; overflow: visible; }
+.grid { stroke: var(--vscode-widget-border, rgba(128, 128, 128, 0.2)); stroke-opacity: 0.5; stroke-width: 1; }
+.axis { stroke: var(--vscode-descriptionForeground); stroke-opacity: 0.5; stroke-width: 1; }
+.tick { fill: var(--vscode-descriptionForeground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.tick.strong { fill: var(--vscode-foreground); font-weight: 600; }
+.seg.new { fill: var(--series-new); }
+.seg.cached { fill: var(--series-cached); }
+.col .seg { opacity: 0.7; transition: opacity 0.1s; }
+.col.selected .seg, .col:hover .seg { opacity: 1; }
+.hit { fill: transparent; cursor: pointer; }
+.hit:focus-visible { outline: none; fill: var(--vscode-list-hoverBackground); fill-opacity: 0.5; }
+.share-line { fill: none; stroke: var(--series-cached); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.dot { fill: var(--series-cached); stroke: var(--vscode-editor-background); stroke-width: 2; }
+.dot.selected { r: 5; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: left; font-weight: 600; font-size: 0.85em; color: var(--vscode-descriptionForeground); padding: 3px 6px; border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+td { padding: 3px 6px; border-bottom: 1px solid var(--vscode-widget-border, transparent); border-bottom-color: rgba(128, 128, 128, 0.12); }
+.num { text-align: right; white-space: nowrap; }
+td.name { max-width: 0; width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.text { white-space: nowrap; }
+details summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
+.foot { font-size: 0.85em; margin-top: 24px; }
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; padding: 6px 8px; border-radius: 4px; font-size: 0.9em;
+  background: var(--vscode-editorHoverWidget-background); color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3)); font-variant-numeric: tabular-nums;
+}
+.tip-title { font-weight: 600; margin-bottom: 2px; }
+.status { margin-bottom: 16px; }
+.status p { margin: 4px 0; }
+.status progress { width: min(480px, 100%); height: 6px; accent-color: var(--vscode-progressBar-background); }

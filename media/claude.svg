@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+  <mask id="badge"><rect width="24" height="24" fill="#fff"/><circle cx="19.2" cy="19.2" r="5.4" fill="#000"/></mask>
+  <g mask="url(#badge)"><rect x="2.5" y="3.5" width="19" height="17" rx="2.5"/><path d="M6.2 8l2.6 2.6-2.6 2.6"/><path stroke-width="1.25" d="M13.80 10.60L14.31 7.24M13.80 10.60L15.84 8.80M13.80 10.60L17.03 10.52M13.80 10.60L15.77 12.17M13.80 10.60L14.41 13.60M13.80 10.60L12.43 13.11M13.80 10.60L10.63 11.84M13.80 10.60L11.35 9.78M13.80 10.60L12.24 8.05"/></g>
+  <g stroke-width="1.3"><circle cx="17" cy="16.4" r="1.1"/><circle cx="17" cy="21.8" r="1.1"/><circle cx="21.9" cy="17.2" r="1.1"/><path d="M17 17.5v3.2"/><path d="M21.9 18.3c0 2-4.9 1.3-4.9 2.6"/></g>
+</svg>
