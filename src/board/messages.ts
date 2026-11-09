@@ -1,4 +1,5 @@
-import type { Completion } from '../boardComposer';
+import type { Completion, ComposerInfo } from '../boardComposer';
+import type { BoardData } from '../core/board';
 import type { HistoryAnswer } from '../core/boardHistory';
 import { type KeepPatch, type KeptState, parseKeep } from '../core/boardKept';
 import type { HistoryHit } from '../core/historySearch';
@@ -25,9 +26,25 @@ export type HostMessage =
    */
   | { type: 'composed'; ok: boolean; keep?: boolean; started?: boolean; error?: string };
 
-/** Every other message the extension posts (`board`, the board and `ComposerInfo`, is built in `BoardPanel.post`). */
+/**
+ * The board and the composer's choices, posted by `BoardPanel.post` when they changed. `loaded`: the sessions are
+ * listed (else the lanes show "Loading…"); `readStyle`: `devdesk.sessions.dimRead` and `unreadBadge`; `cardLine`:
+ * `devdesk.board.cardLine`; `postedAt`: the host's clock, sent back in `rendered`.
+ */
+export interface BoardPost {
+  type: 'board';
+  loaded: boolean;
+  board: BoardData;
+  composer: ComposerInfo;
+  readStyle: { dimRead: boolean; badge: boolean };
+  cardLine: boolean;
+  postedAt?: number;
+}
+
+/** Every message the extension posts to the board's webview. */
 export type PanelMessage =
   | HostMessage
+  | BoardPost
   /** Focuses the box: `later` saves on Enter; `text`, `choice` and `editing` load a prompt for later to edit. */
   | { type: 'focus'; text?: string; later?: boolean; choice?: unknown; editing?: string }
   /**

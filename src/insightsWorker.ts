@@ -23,6 +23,7 @@ import { removeOldFiles } from './core/oldFiles';
 import { FileLockBusy, withFileLock } from './core/fileLock';
 import { createPriorityLimiter } from './core/limit';
 import type { SessionCard } from './core/sessions';
+import { STATE_INFO } from './core/sessionStates';
 import { oneLine } from './core/text';
 import { headlessClaudeCommand } from './core/shellRun';
 import { log } from './log';
@@ -63,6 +64,13 @@ export interface InsightsOptions {
   model: () => string;
   /** The Claude binary, in shell syntax. */
   claude: () => string;
+  /**
+   * A session's insight as the sessions model last read it (kept current by its watcher); else its file is read. The
+   * call itself always reads the file, under the lock.
+   */
+  readInsight?: (sessionId: string) => Promise<Insight | undefined>;
+  /** A transcript's size as the last sessions refresh saw it, if it did; else it is looked up. */
+  transcriptSize?: (path: string) => number | undefined;
   /** Runs one call; tests replace it. */
   run?: (command: string, input: string) => Promise<{ stdout: string; error?: string }>;
 }
@@ -102,7 +110,7 @@ export class InsightsWorker implements vscode.Disposable {
     }
     for (const card of cards) {
       if (!card.sessionId || !card.transcriptPath || this.busy.has(card.sessionId)) continue;
-      if (card.state !== 'working' && card.state !== 'done' && card.state !== 'waiting') continue;
+      if (!STATE_INFO[card.state].insights) continue;
       void this.consider(card);
     }
   }
@@ -112,8 +120,10 @@ export class InsightsWorker implements vscode.Disposable {
     if (this.busy.has(id)) return;
     this.busy.add(id);
     try {
-      const insight = await readInsight(this.o.stateDir(), id);
-      const kind = insightDue(card, insight, Date.now(), this.o.refreshMs(), await transcriptSize(card.transcriptPath!));
+      const insight = await (this.o.readInsight ? this.o.readInsight(id) : readInsight(this.o.stateDir(), id));
+      const path = card.transcriptPath!;
+      const bytes = this.o.transcriptSize?.(path) ?? (await transcriptSize(path));
+      const kind = insightDue(card, insight, Date.now(), this.o.refreshMs(), bytes);
       if (!kind) {
         this.busy.delete(id);
         return;

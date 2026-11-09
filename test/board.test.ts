@@ -6,7 +6,8 @@ import type { StateLook } from '../src/core/sessionsView';
 
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
-const opts = { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unread: new Set<string>(), unreadFirst: true };
+const view = { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unread: new Set<string>(), unreadFirst: true };
+const opts = { view };
 
 const card = (id: string, over: Partial<SessionCard> = {}): SessionCard => ({
   id,
@@ -103,7 +104,7 @@ describe('buildBoard', () => {
     const board = buildBoard(
       [card('old', { updatedAt: NOW - 2 * MIN }), card('new', { updatedAt: NOW - MIN })],
       [],
-      { ...opts, unread: new Set(['old']) },
+      { ...opts, view: { ...view, unread: new Set(['old']) } },
     );
     const review = board.lanes.find((l) => l.id === 'review')!;
     expect(review.sessions.map((s) => [s.id, s.unread])).toEqual([
@@ -153,14 +154,14 @@ describe('buildBoard', () => {
   it('keeps a parked session under the Done / idle divider with the look its last turn ended with', () => {
     const board = buildBoard([card('p', { state: 'parked', lastState: 'done', tmuxSession: undefined, endReason: 'exited', updatedAt: NOW - MIN })], [], opts);
     const s = board.lanes.find((l) => l.id === 'review')!.sessions[0];
-    expect(s).toMatchObject({ look: 'done', lookLabel: 'DONE · PARKED (NOT RUNNING)', parked: true, idle: true });
+    expect(s).toMatchObject({ look: 'done', lookLabel: 'DONE · PARKED (NOT RUNNING)', glyph: '✓', glyphClass: 'green', parked: true, idle: true });
     expect(s.search.is).toContain('idle / stopped');
     const done = buildBoard([card('d')], [], opts).lanes.find((l) => l.id === 'review')!.sessions[0];
     expect(done.search.is).toContain('done / to review');
   });
 
   it('keeps unread idle sessions above the divider, to review', () => {
-    const board = buildBoard([card('u', { state: 'idle', detail: 'Ready' }), card('r', { state: 'idle', detail: 'Ready', updatedAt: NOW - 2 * MIN })], [], { ...opts, unread: new Set(['u']) });
+    const board = buildBoard([card('u', { state: 'idle', detail: 'Ready' }), card('r', { state: 'idle', detail: 'Ready', updatedAt: NOW - 2 * MIN })], [], { ...opts, view: { ...view, unread: new Set(['u']) } });
     const review = board.lanes.find((l) => l.id === 'review')!;
     expect(review.sessions.map((s) => [s.id, !!s.idle])).toEqual([
       ['u', false],
@@ -171,7 +172,7 @@ describe('buildBoard', () => {
   it('keeps unread parked sessions to review past the parked limit; read ones past it only count in more', () => {
     const parked = (id: string, at: number) => card(id, { state: 'parked', lastState: 'done', tmuxSession: undefined, endReason: 'exited', updatedAt: NOW - at * MIN });
     const cards = [parked('r1', 1), parked('r2', 2), parked('r3', 3), parked('u1', 4), parked('u2', 5)];
-    const board = buildBoard(cards, [], { ...opts, unread: new Set(['u1', 'u2']), parkedLimit: 1 });
+    const board = buildBoard(cards, [], { ...opts, view: { ...view, unread: new Set(['u1', 'u2']) }, parkedLimit: 1 });
     const lane = (id: string) => board.lanes.find((l) => l.id === id)!;
     expect(lane('review').sessions.map((s) => [s.id, !!s.idle])).toEqual([
       ['u1', false],

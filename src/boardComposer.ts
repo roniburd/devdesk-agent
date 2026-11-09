@@ -39,8 +39,8 @@ import { boardModels, boardOpensSession, boardPromptPlacement, boardSpecPrompt, 
 import type { SessionCard } from './core/sessions';
 import type { SessionsModel } from './sessionsModel';
 import { hooksInstalled } from './hooksCommands';
-import { startNumbered } from './sessionsCommands';
-import type { SessionsTree } from './sessionsTree';
+import { startNumbered, type SessionRowSelector } from './sessionsCommands';
+import type { SessionViewState } from './sessionViewState';
 import { newWorktreeLaunchDir, newWorktreeSession, noWorktreesReason, type WorktreeTaskStore } from './worktreeSessions';
 
 export const NO_FOLDER = 'Open a folder to start a session.';
@@ -139,7 +139,10 @@ export class BoardComposer implements vscode.Disposable {
 
   constructor(
     readonly model: SessionsModel,
-    readonly tree: SessionsTree,
+    /** The Claude view, to select the row of a session started from the box. */
+    readonly tree: SessionRowSelector,
+    /** What the board shows of the sessions besides the model (`/resume` lists them in attention order). */
+    readonly viewState: SessionViewState,
     private readonly tasks: WorktreeTaskStore,
     state: vscode.Memento,
   ) {

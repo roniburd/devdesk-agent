@@ -18,7 +18,7 @@ import type { SessionCard } from '../src/core/sessions';
 
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
-const baseOpts = { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unread: new Set<string>(), unreadFirst: true };
+const baseOpts = { view: { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unread: new Set<string>(), unreadFirst: true } };
 const opts = (over: Record<string, unknown> = {}) => ({ ...baseOpts, ...over });
 const card = (over: Partial<SessionCard> & { id: string }): SessionCard => ({
   sessionId: '0b7d1c9e-1111-4222-8333-944455556666',

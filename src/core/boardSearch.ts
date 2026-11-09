@@ -1,67 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { BoardData, BoardSession } from './board';
+import { foldText } from './boardQuery';
 import { promptText } from './insights';
 import { parseObject } from './json';
 import type { SessionCard } from './sessions';
 import { clip as cut } from './text';
 
-// Searching the Claude Board's sessions: the as-you-type matcher (media/board.js has a copy; keep them the same, see
-// test/boardSearchWebview.test.ts) and, for Enter, the digests, request and answer of the model's search.
-
-/** Lowercase, accents removed (whitespace kept): `foldText` without the collapsing, also used a character at a time. */
-export const foldChars = (s: string): string => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
-/** Lowercase, accents removed, whitespace collapsed: what queries and card texts are compared as. */
-export function foldText(s: string): string {
-  return foldChars(s).replace(/\s+/g, ' ').trim();
-}
-
-/** A card's texts as the matcher reads them: everything, the worktree name, and its lane, look and state. */
-export interface SearchFields {
-  all: string;
-  wt: string;
-  is: string;
-}
-
-/** One word of a query: `wt:name` looks at the worktree only, `is:state` at the state only, any other word at everything. */
-export interface QueryTerm {
-  field: keyof SearchFields;
-  text: string;
-}
+// Searching the Claude Board's sessions: the as-you-type matcher (in ./boardQuery, which media/board.js imports too)
+// and, for Enter, the digests, request and answer of the model's search.
 
 /** How many parked sessions `parkedLimit` hides are still sent to the board, to be searched (the newest). */
 export const HIDDEN_PARKED_MAX = 150;
 
-export function parseQuery(query: string): QueryTerm[] {
-  return foldText(query)
-    .split(' ')
-    .filter(Boolean)
-    .flatMap((word): QueryTerm[] => {
-      const m = /^(wt|is):(.*)$/.exec(word);
-      if (!m) return [{ field: 'all', text: word }];
-      return m[2] ? [{ field: m[1] as 'wt' | 'is', text: m[2] }] : [];
-    });
-}
-
-/** Every term is a substring of its field; true with no terms. */
-export function matchesQuery(fields: SearchFields, terms: readonly QueryTerm[]): boolean {
-  return terms.every((t) => fields[t.field].includes(t.text));
-}
-
-export function searchFields(o: {
-  title: string;
-  worktree: string;
-  laneTitle: string;
-  lookLabel: string;
-  state: string;
-  model?: string;
-  texts: readonly (string | undefined)[];
-}): SearchFields {
-  const is = foldText(`${o.laneTitle} ${o.lookLabel} ${o.state}`);
-  const wt = foldText(o.worktree);
-  const all = foldText([o.title, ...o.texts.filter(Boolean), o.worktree, is, o.model ?? ''].join(' '));
-  return { all, wt, is };
-}
+export { foldChars, foldText, matchesQuery, parseQuery, type QueryTerm, searchFields, type SearchFields } from './boardQuery';
 
 // ---- Enter: the model's search --------------------------------------------------------------------------------
 

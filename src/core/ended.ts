@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs';
-import { readFile, unlink } from 'node:fs/promises';
+import { access, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
 import { withFileLock } from './fileLock';
@@ -79,7 +78,7 @@ export async function removeEndedRecord(dir: string, sessionId: string): Promise
 export function listableEnded(
   ended: readonly EndedRecord[],
   live: ReadonlyMap<string, number>,
-  exists: (path: string) => boolean = existsSync,
+  exists: (path: string) => boolean,
 ): { listed: EndedRecord[]; stale: EndedRecord[] } {
   const listed: EndedRecord[] = [];
   const stale: EndedRecord[] = [];
@@ -91,4 +90,73 @@ export function listableEnded(
     else listed.push(r);
   }
   return { listed, stale };
+}
+
+/** How often `EndedRecords` checks again that the transcripts it saw before still exist (the park check's pace). */
+export const TRANSCRIPT_CHECK_MS = 60_000;
+
+/**
+ * The ended records in a directory, kept across reads: a record is written whole (renamed into place) and rarely
+ * again, so each read stats the files and parses only new or rewritten ones. Whether each record's transcript exists is checked when the record is
+ * first seen, then again every `checkMs` (Claude Code deletes old transcripts rarely), so a record whose transcript goes
+ * away stops being listed within one interval.
+ */
+export class EndedRecords {
+  private files = new Map<string, { ino: number; mtimeMs: number; size: number; record: EndedRecord | undefined }>();
+  private transcripts = new Map<string, boolean>();
+  private lastCheck: number | undefined;
+
+  constructor(
+    private readonly checkMs = TRANSCRIPT_CHECK_MS,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /** The valid records in `dir` (unreadable or invalid files are skipped), and whether a record's transcript exists. */
+  async read(dir: string): Promise<{ records: EndedRecord[]; exists: (path: string) => boolean }> {
+    let names: string[];
+    try {
+      names = (await readdir(dir)).filter((n) => n.endsWith('.json'));
+    } catch {
+      names = [];
+    }
+    const files = new Map<string, { ino: number; mtimeMs: number; size: number; record: EndedRecord | undefined }>();
+    const records = await Promise.all(
+      names.map(async (n) => {
+        const path = join(dir, n);
+        try {
+          const info = await stat(path);
+          const kept = this.files.get(path);
+          if (kept && kept.ino === info.ino && kept.mtimeMs === info.mtimeMs && kept.size === info.size) {
+            files.set(path, kept);
+            return kept.record;
+          }
+          const record = parseEndedRecord(await readFile(path, 'utf8'));
+          files.set(path, { ino: info.ino, mtimeMs: info.mtimeMs, size: info.size, record });
+          return record;
+        } catch {
+          return undefined;
+        }
+      }),
+    );
+    this.files = files;
+    const listed = records.filter((r): r is EndedRecord => r !== undefined);
+    await this.checkTranscripts(listed);
+    const transcripts = this.transcripts;
+    return { records: listed, exists: (path) => transcripts.get(path) !== false };
+  }
+
+  private async checkTranscripts(records: readonly EndedRecord[]): Promise<void> {
+    const now = this.now();
+    const all = this.lastCheck === undefined || now - this.lastCheck >= this.checkMs;
+    if (all) this.lastCheck = now;
+    const paths = new Set(records.flatMap((r) => (r.transcriptPath ? [r.transcriptPath] : [])));
+    const next = new Map<string, boolean>();
+    await Promise.all(
+      [...paths].map(async (path) => {
+        const known = this.transcripts.get(path);
+        next.set(path, !all && known !== undefined ? known : await access(path).then(() => true, () => false));
+      }),
+    );
+    this.transcripts = next;
+  }
 }

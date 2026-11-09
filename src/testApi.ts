@@ -49,7 +49,7 @@ export function testApi(
       const children = item.collapsibleState ? claudeRows(sessionsTree.getChildren(node)) : [];
       const expanded = item.collapsibleState === vscode.TreeItemCollapsibleState.Expanded;
       const tooltip = item.tooltip instanceof vscode.MarkdownString ? item.tooltip.value : item.tooltip;
-      return { label, description: item.description, tooltip, icon, contextValue: item.contextValue, unread: node.kind === 'session' && sessionsTree.unreadIds.has(node.card.id), expanded, command: item.command, children };
+      return { label, description: item.description, tooltip, icon, contextValue: item.contextValue, unread: node.kind === 'session' && sessionsTree.state.unreadIds.has(node.card.id), expanded, command: item.command, children };
     });
   return {
     /** A Claude view session row's decoration (read state and color), with its theme color's id. */
@@ -68,7 +68,7 @@ export function testApi(
     /** The session of the Claude view's selected row, if any. */
     selectedSessionId: () => sessionsTree.selectedSessionId(),
     /** The ids of the sessions the Claude view shows as unread. */
-    unreadIds: () => [...sessionsTree.unreadIds],
+    unreadIds: () => [...sessionsTree.state.unreadIds],
     /** The Claude view's session nodes, as a right-click on a multi-selection passes them to a command. */
     claudeSessionNodes: () =>
       sessionsTree
@@ -128,40 +128,7 @@ export function testApi(
     worktreeRootDiscoveries: () => tree.rootDiscoveries,
     /** How many Worktrees package loads ran git so far. */
     worktreeGitLoads: () => tree.gitLoads,
-    /** Whether the Claude Board's tab is open, and what it shows. */
-    boardOpen: () => board.isOpen,
-    /** How many times the board's webview loaded (a hidden board keeps its webview, so showing it again loads none). */
-    boardWebviewLoads: () => board.webviewLoads,
-    /** How many times the board was told to focus its prompt box. */
-    boardPromptEnters: () => board.promptEnters,
-    /** The next showing of the Claude view opens the board again (`devdesk.board.openWithSidebar`). */
-    boardForgetSidebarShown: () => board.forgetSidebarShown(),
-    boardData: () => board.data(),
-    /** The last ✨ search answer the board posted. */
-    boardSearchResult: () => board.lastSearchResult,
-    /** How far the board's history index is, a refresh of it now, and the last history results the board posted. */
-    boardHistoryStatus: () => board.historyStatus(),
-    boardHistoryRefresh: () => board.forceHistoryRefresh(),
-    boardHistoryResults: () => board.lastHistoryResults,
-    /** The board composer's choices, and a message as if its webview sent it. */
-    boardComposer: () => board.composerInfo(),
-    boardMessage: (m: unknown) => board.receive(m),
-    /** What the board's prompt box keeps for this project folder (as posted to a webview that loads), and the file of its prompts for later. */
-    boardKept: () => board.keptState(),
-    boardBacklogFile: () => board.backlogFile,
-    boardForgetKept: () => board.forgetKept(),
-    /**
-     * The prompt box messages (notice, setChoice, openPicker, clearBox, composed) posted since the last call and the
-     * shown notice's action ids (click one with `boardMessage({ type: 'noticeAction', id })`), and what a submitted text
-     * is classified as.
-     */
-    boardUi: () => board.takeUiMessages(),
-    boardClassify: (text: string, where?: string) => board.classify(text, where),
-    /** The `/` menu's rows for a query (`stacked`: after other commands; `kind: '@'`: the file menu's). */
-    boardComplete: (query: string, options?: { where?: string; stacked?: boolean; kind?: '/' | '@' }) => board.complete(query, options),
-    boardMakeRoomBeside: () => board.makeRoomBeside(),
-    /** What the board's 📊 popover shows, for the window's scope or `scope`. */
-    boardUsage: (scope?: UsageScope) => board.usage(scope),
+    ...board.testHooks(),
     /** Whether the Claude Usage page is open, and what it shows (for the window's scope or `scope`). */
     usagePageOpen: () => usagePanel.isOpen,
     usagePage: (scope?: UsageScope) => usagePanel.data(scope),

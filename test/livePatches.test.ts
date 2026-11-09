@@ -10,6 +10,7 @@ import {
   withRecords,
 } from '../src/core/livePatches';
 import { type HookRecord, MOVED_DETAIL, type SessionCard } from '../src/core/sessions';
+import { type Insight, withInsight, withInsights } from '../src/core/insights';
 
 const NOW = 1_800_000_000_000;
 
@@ -64,33 +65,23 @@ describe('withRecord', () => {
     }
   });
 
-  it('keeps the insight status only for the same working turn, and drops what was asked', () => {
-    const working = card({ state: 'working', turnStartedAt: NOW - 5000, turnEndedAt: undefined, liveStatus: 'Editing', updatedAt: NOW - 1000 });
-    expect(withRecord(working, rec({ event: 'PreToolUse', detail: 'Bash', turnStartedAt: NOW - 5000 })).liveStatus).toBe('Editing');
-    expect(withRecord(working, rec({ turnStartedAt: NOW })).liveStatus).toBeUndefined();
-    expect(withRecord(working, rec({ state: 'done', detail: 'Done', turnStartedAt: NOW - 5000, turnEndedAt: NOW })).liveStatus).toBeUndefined();
-    const waiting = card({ state: 'waiting', askSummary: 'Approve the edit?' });
-    expect(withRecord(waiting, rec()).askSummary).toBeUndefined();
-  });
-
   it('keeps the prompt when the record has none, and takes asksQuestion from it', () => {
     const next = withRecord(card({ state: 'working' }), rec({ event: 'Stop', state: 'done', detail: 'Shall I?', prompt: undefined, asksQuestion: true }));
     expect(next).toMatchObject({ prompt: 'run the tests', asksQuestion: true });
   });
 });
 
-describe('withRecord after the transcript and insights', () => {
+describe('withRecord after the transcript', () => {
   it('keeps a card whose conversation moved to a background job', () => {
     const moved = card({ state: 'idle', detail: MOVED_DETAIL });
     expect(withRecord(moved, rec({ state: 'waiting', detail: 'Claude needs your permission' }))).toBe(moved);
   });
 
-  it("keeps the insight's asked-you answer when the same finished turn is rewritten", () => {
+  it("takes the question mark from the record, which keeps it when the same finished turn is rewritten", () => {
     const done = card({ asksQuestion: true });
-    const reminder = rec({ event: 'Notification', state: 'done', detail: 'All tests pass.', prompt: undefined, turnStartedAt: done.turnStartedAt, turnEndedAt: done.turnEndedAt });
+    const reminder = rec({ event: 'Notification', state: 'done', detail: 'All tests pass.', prompt: undefined, turnStartedAt: done.turnStartedAt, turnEndedAt: done.turnEndedAt, asksQuestion: true });
     expect(withRecord(done, reminder).asksQuestion).toBe(true);
-    // A new finished turn takes the record's.
-    expect(withRecord(done, { ...reminder, event: 'Stop', turnEndedAt: NOW }).asksQuestion).toBeUndefined();
+    expect(withRecord(done, { ...reminder, event: 'Stop', turnEndedAt: NOW, asksQuestion: undefined }).asksQuestion).toBeUndefined();
   });
 });
 
@@ -163,5 +154,55 @@ describe('withPendingTurns', () => {
     expect(withPendingTurns([idle], [{ ...pending, at }], NOW - 1000).cards[0]).toMatchObject({ state: 'working' });
     const other = starting({ tmuxServer: 'default' });
     expect(withPendingTurns([other], [pending], NOW).cards[0]).toBe(other);
+  });
+});
+
+/** What the card of a refresh shows with a newer hook record read since, and its session's insight. */
+function shown(c: SessionCard, record: HookRecord, insight: Insight | undefined): SessionCard {
+  const [next] = withInsights(withRecords([c], new Map([[record.sessionId, record]])), new Map([[record.sessionId, insight]]));
+  return next;
+}
+
+describe('a record patch with and without a matching insight', () => {
+  const working = card({ state: 'working', turnStartedAt: NOW - 5000, turnEndedAt: undefined, updatedAt: NOW - 1000 });
+
+  it('keeps the status for the same working turn only', () => {
+    const insight: Insight = { statusFor: NOW - 5000, status: 'Editing', summary: 'Half done', title: 'Fix build' };
+    const tool = rec({ event: 'PreToolUse', detail: 'Bash', turnStartedAt: NOW - 5000 });
+    expect(shown(working, tool, insight)).toMatchObject({ liveStatus: 'Editing', insightSummary: 'Half done', insightTitle: 'Fix build', detail: 'Bash' });
+    expect(shown(working, tool, undefined).liveStatus).toBeUndefined();
+    const next = shown(working, rec({ turnStartedAt: NOW }), insight);
+    expect(next.liveStatus).toBeUndefined();
+    expect(next).toMatchObject({ insightSummary: 'Half done', insightTitle: 'Fix build', turnStartedAt: NOW });
+    const done = shown(working, rec({ event: 'Stop', state: 'done', detail: 'Done', turnStartedAt: NOW - 5000, turnEndedAt: NOW }), insight);
+    expect(done.liveStatus).toBeUndefined();
+    expect(done.asksQuestion).toBeUndefined();
+  });
+
+  it('drops the ask of a wait that ended', () => {
+    const waiting = card({ state: 'waiting', updatedAt: NOW - 1000, turnEndedAt: undefined });
+    const insight: Insight = { askFor: NOW - 1000, ask: 'Approve the edit?' };
+    expect(withInsight(waiting, insight).askSummary).toBe('Approve the edit?');
+    expect(shown(waiting, rec({ event: 'PostToolUse', detail: 'Edit', turnStartedAt: waiting.turnStartedAt }), insight).askSummary).toBeUndefined();
+    expect(shown(waiting, rec({ state: 'waiting', detail: 'Claude needs your permission' }), insight).askSummary).toBeUndefined();
+  });
+
+  it("keeps the insight's waiting-for-you answer when the same finished turn is rewritten", () => {
+    const done = card();
+    const reminder = rec({ event: 'Notification', state: 'done', detail: 'All tests pass.', prompt: undefined, turnStartedAt: done.turnStartedAt, turnEndedAt: done.turnEndedAt });
+    expect(shown(done, { ...reminder, asksQuestion: true }, { doneFor: done.turnEndedAt, waitingForUser: false }).asksQuestion).toBeUndefined();
+    expect(shown(done, reminder, { doneFor: done.turnEndedAt, waitingForUser: true }).asksQuestion).toBe(true);
+    // An insight about another turn: the hook's heuristic, which the hook keeps when it rewrites the same turn.
+    expect(shown(card({ asksQuestion: true }), { ...reminder, asksQuestion: true }, { doneFor: NOW - 99_000, waitingForUser: false }).asksQuestion).toBe(true);
+  });
+
+  it("takes a new finished turn's question mark from its record", () => {
+    const done = card();
+    const insight: Insight = { doneFor: done.turnEndedAt, waitingForUser: true };
+    const stop = rec({ event: 'Stop', state: 'done', detail: 'Shall I?', turnStartedAt: NOW - 3000, turnEndedAt: NOW });
+    expect(shown(done, stop, insight).asksQuestion).toBeUndefined();
+    expect(shown(done, { ...stop, asksQuestion: true }, insight).asksQuestion).toBe(true);
+    expect(shown(done, { ...stop, asksQuestion: true }, undefined).asksQuestion).toBe(true);
+    expect(shown(done, stop, undefined).asksQuestion).toBeUndefined();
   });
 });

@@ -2,7 +2,8 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type DiffMode, diffSides } from './core/git';
 import { featureForCwd } from './core/sessions';
-import { LOOK_TEXT, stateLook } from './core/sessionsView';
+import { stateLook } from './core/sessionsView';
+import { LOOKS } from './core/stateLooks';
 import type { SessionCard } from './core/sessions';
 import { tickLoop } from './core/tickLoop';
 import { type SeenCards, sessionSignals } from './core/worktreeSignals';
@@ -56,7 +57,7 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
   describeMode();
   const updateUrgent = () => {
     const now = Date.now();
-    const next = new Map([...sessionsTree.urgentByWorktree()].map(([dir, c]) => [dir, LOOK_TEXT[stateLook(c, now, sessionsStuckMs())]]));
+    const next = new Map([...sessionsTree.state.urgentByWorktree()].map(([dir, c]) => [dir, LOOKS[stateLook(c, { now, stuckMs: sessionsStuckMs() })].text]));
     if (JSON.stringify([...next]) === JSON.stringify([...urgent])) return;
     urgent = next;
     // Only the worktree rows' state text changed: keep the packages' changes as loaded, without running git again.

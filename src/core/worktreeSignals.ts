@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { isWithin } from './paths';
+import { stateInfo } from './sessionStates';
 
 /** What the Worktrees view needs of a Claude session card. */
 export interface CardLike {
@@ -16,8 +17,6 @@ export type SeenCards = ReadonlyMap<string, { state: string; detail: string; upd
 
 /** How active a worktree's sessions are: `busy` while one works, `session` while one runs, else absent. */
 export type Activity = 'busy' | 'session';
-
-const LIVE = new Set(['working', 'waiting', 'blocked', 'done', 'idle', 'unknown']);
 
 export interface SessionSignals {
   /** Each worktree's activity, by worktree directory. */
@@ -45,7 +44,7 @@ export function sessionSignals(prev: SeenCards, cards: readonly CardLike[]): Ses
     const dir = card.featureDir;
     if (!dir) continue;
     if (card.state === 'working') activity.set(dir, 'busy');
-    else if (LIVE.has(card.state) && !activity.has(dir)) activity.set(dir, 'session');
+    else if (stateInfo(card.state)?.live && !activity.has(dir)) activity.set(dir, 'session');
     const old = prev.get(card.id);
     if (!old || (old.updatedAt === card.updatedAt && old.detail === card.detail && old.state === card.state)) continue;
     const editing = /^Editing (.+)$/.exec(card.detail);

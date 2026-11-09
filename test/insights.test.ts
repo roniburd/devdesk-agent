@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyInsight,
+  withInsight,
   buildExcerpt,
   earlierPromptsPart,
   firstPrompts,
+  freshInsights,
   latestPrompt,
   insightDue,
   insightFileName,
@@ -28,7 +29,7 @@ const card = (o: Partial<SessionCard> = {}): SessionCard => ({
 
 describe('insightDue', () => {
   it('asks once per finished turn', () => {
-    const done = card({ state: 'done', turnEndedAt: 200 });
+    let done = card({ state: 'done', turnEndedAt: 200 });
     expect(insightDue(done, undefined, 1000, 45_000, 10)).toBe('done');
     expect(insightDue(done, { doneFor: 200, title: 'Fix parser', objectiveAsked: true }, 1000, 45_000, 10)).toBeUndefined();
     // Answered before insights had objectives: asked once more.
@@ -38,10 +39,10 @@ describe('insightDue', () => {
     expect(insightDue(done, mergeAnswer({ doneFor: 200 }, 'done', 200, { waitingForUser: false }, 1000, 10), 1000, 45_000, 10)).toBeUndefined();
     expect(insightDue(done, { doneFor: 150 }, 1000, 45_000, 10)).toBe('done');
     // An older hook script's record: its last update stands for the end.
-    const old = card({ state: 'done', updatedAt: 180 });
+    let old = card({ state: 'done', updatedAt: 180 });
     expect(insightDue(old, { doneFor: 180, title: 'Old', objectiveAsked: true }, 1000, 45_000, 10)).toBeUndefined();
-    const asked = card({ state: 'done', updatedAt: 180 });
-    applyInsight(asked, { doneFor: 180, waitingForUser: true });
+    let asked = card({ state: 'done', updatedAt: 180 });
+    asked = withInsight(asked, { doneFor: 180, waitingForUser: true });
     expect(asked.asksQuestion).toBe(true);
   });
 
@@ -74,14 +75,14 @@ describe('asks about a wait', () => {
   it('shows the ask only while that wait lasts, and the title always', () => {
     const insight = mergeAnswer({ summary: 'old' }, 'ask', 300, { ask: 'Allow npm uninstall aws-sdk?', title: 'Upgrade to SDK v3', waitingForUser: true }, 1000, 50);
     expect(insight).toMatchObject({ askFor: 300, ask: 'Allow npm uninstall aws-sdk?', title: 'Upgrade to SDK v3', summary: 'old' });
-    const waiting = card({ state: 'waiting', updatedAt: 300 });
-    applyInsight(waiting, insight);
+    let waiting = card({ state: 'waiting', updatedAt: 300 });
+    waiting = withInsight(waiting, insight);
     expect([waiting.askSummary, waiting.insightTitle]).toEqual(['Allow npm uninstall aws-sdk?', 'Upgrade to SDK v3']);
-    const later = card({ state: 'waiting', updatedAt: 400 });
-    applyInsight(later, insight);
+    let later = card({ state: 'waiting', updatedAt: 400 });
+    later = withInsight(later, insight);
     expect(later.askSummary).toBeUndefined();
-    const working = card({ updatedAt: 300 });
-    applyInsight(working, insight);
+    let working = card({ updatedAt: 300 });
+    working = withInsight(working, insight);
     expect([working.askSummary, working.insightTitle]).toEqual([undefined, 'Upgrade to SDK v3']);
     // A wait answered with nothing to ask drops the last one.
     expect(mergeAnswer(insight, 'ask', 400, { waitingForUser: true }, 1000, 50)).not.toHaveProperty('ask');
@@ -104,31 +105,31 @@ describe('asks about a wait', () => {
   });
 });
 
-describe('applyInsight', () => {
+describe('withInsight', () => {
   it('shows the status only for the turn it is about, while working', () => {
-    const c = card();
-    applyInsight(c, { statusFor: 100, status: 'Running tests', summary: 'Parser fixed' });
+    let c = card();
+    c = withInsight(c, { statusFor: 100, status: 'Running tests', summary: 'Parser fixed' });
     expect(c).toMatchObject({ liveStatus: 'Running tests', insightSummary: 'Parser fixed' });
-    const old = card({ turnStartedAt: 300 });
-    applyInsight(old, { statusFor: 100, status: 'Running tests' });
+    let old = card({ turnStartedAt: 300 });
+    old = withInsight(old, { statusFor: 100, status: 'Running tests' });
     expect(old.liveStatus).toBeUndefined();
-    const done = card({ state: 'done', turnEndedAt: 200 });
-    applyInsight(done, { statusFor: 100, status: 'Running tests' });
+    let done = card({ state: 'done', turnEndedAt: 200 });
+    done = withInsight(done, { statusFor: 100, status: 'Running tests' });
     expect(done.liveStatus).toBeUndefined();
   });
 
   it("overrides the hook's question mark only for the finished turn it read", () => {
-    const asked = card({ state: 'done', turnEndedAt: 200 });
-    applyInsight(asked, { doneFor: 200, waitingForUser: true });
+    let asked = card({ state: 'done', turnEndedAt: 200 });
+    asked = withInsight(asked, { doneFor: 200, waitingForUser: true });
     expect(asked.asksQuestion).toBe(true);
-    const rhetorical = card({ state: 'done', turnEndedAt: 200, asksQuestion: true });
-    applyInsight(rhetorical, { doneFor: 200, waitingForUser: false });
+    let rhetorical = card({ state: 'done', turnEndedAt: 200, asksQuestion: true });
+    rhetorical = withInsight(rhetorical, { doneFor: 200, waitingForUser: false });
     expect(rhetorical.asksQuestion).toBeUndefined();
-    const later = card({ state: 'done', turnEndedAt: 300, asksQuestion: true });
-    applyInsight(later, { doneFor: 200, waitingForUser: false });
+    let later = card({ state: 'done', turnEndedAt: 300, asksQuestion: true });
+    later = withInsight(later, { doneFor: 200, waitingForUser: false });
     expect(later.asksQuestion).toBe(true);
-    const parked = card({ state: 'parked', lastState: 'done', turnEndedAt: 200 });
-    applyInsight(parked, { doneFor: 200, waitingForUser: true });
+    let parked = card({ state: 'parked', lastState: 'done', turnEndedAt: 200 });
+    parked = withInsight(parked, { doneFor: 200, waitingForUser: true });
     expect(parked.asksQuestion).toBe(true);
   });
 });
@@ -251,8 +252,30 @@ describe('objective', () => {
     const kept = mergeAnswer(next, 'status', 300, { waitingForUser: false, status: 'Running tests' }, 2000, 20);
     expect(kept.objective).toBe('Add OAuth login and migrate storage');
     expect(parseInsight(JSON.stringify(kept))).toMatchObject({ objective: 'Add OAuth login and migrate storage', objectiveAsked: true });
-    const c = card({ state: 'done' });
-    applyInsight(c, kept);
+    let c = card({ state: 'done' });
+    c = withInsight(c, kept);
     expect(c.insightObjective).toBe('Add OAuth login and migrate storage');
+  });
+});
+
+describe('freshInsights', () => {
+  const i1 = { title: 'old' } as never;
+  const i2 = { title: 'new' } as never;
+  it('keeps what a refresh read while each file is still as read', () => {
+    const r = {};
+    const out = freshInsights(new Map([['s', { insight: i1, read: r }]]), new Map([['s', r]]), new Map([['s', i2]]));
+    expect(out.insights.get('s')).toBe(i1);
+    expect(out.changed).toEqual([]);
+  });
+  it('keeps the shown insight of a file that changed after the refresh read it, and lists it to read again', () => {
+    // The watcher already showed I2 while the refresh still held I1: the refresh must not put I1 back.
+    const out = freshInsights(new Map([['s', { insight: i1, read: {} }]]), new Map([['s', {}]]), new Map([['s', i2]]));
+    expect(out.insights.get('s')).toBe(i2);
+    expect(out.changed).toEqual(['s']);
+  });
+  it('uses what the refresh read for a changed file it did not show before', () => {
+    const out = freshInsights(new Map([['s', { insight: i1, read: {} }]]), new Map(), new Map());
+    expect(out.insights.get('s')).toBe(i1);
+    expect(out.changed).toEqual(['s']);
   });
 });

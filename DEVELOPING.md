@@ -27,7 +27,7 @@ Run all four before you call a change done:
 | Command | What it does |
 |---|---|
 | `npm test` | Unit tests (Vitest) of the pure logic in `src/core/` and `src/board/`, and of the webviews in `media/` (with jsdom). |
-| `npm run typecheck` | `tsc` over the sources and tests. |
+| `npm run typecheck` | `tsc` over the sources and tests, and the webviews' scripts (`tsconfig.webview.json`). |
 | `npm run build` | Bundles the extension with esbuild into `dist/extension.js` (and the usage worker into `dist/usageWorker.js`). |
 | `npm run package` | Builds, then packages `dist/devdesk-claude.vsix`. |
 
@@ -72,7 +72,7 @@ real sessions too.
 | `src/sessions*.ts`, `src/claudeSessions.ts` | The Claude view, its commands, read and unread, the Claude terminals. |
 | `src/worktreesView.ts`, `src/featuresTree.ts` | The Worktrees view and its diffs. |
 | `src/boardPanel.ts`, `src/boardComposer.ts`, `src/board/` | The Claude Board and its prompt box. |
-| `media/` | The webviews' scripts and styles: `board.js`, `usage.js`. |
+| `media/` | The webviews' scripts and styles: `board.js`, `usage.js` (`// @ts-check`). `npm run build` bundles each script, with the `src/core/` modules it imports (`boardQuery.ts`, `usageProgress.ts`; nothing that needs Node), into `dist/webview/` (`scripts/webviews.mjs`), which the webview loads. |
 | `src/log.ts` | The **DevDesk** output channel. |
 
 `src/core/workspaceProvider.ts` is where the development repository plugs in support for other kinds of multi-package

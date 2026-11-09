@@ -1,6 +1,7 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readJson } from '../src/core/json';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChildrenReader, limitFinished, runningBackground, runningCount, type SessionChild, TranscriptScan } from '../src/core/sessionChildren';
 
@@ -19,6 +20,96 @@ const agentLaunch = (id: string, agentId: string, description: string, type = 'E
 const shellLaunch = (id: string, taskId: string, description: string) =>
   use(id, 'Bash', { command: 'npm test', description, run_in_background: true }) +
   result(id, { stdout: '', backgroundTaskId: taskId }, `Command running in background with ID: ${taskId}. Output is being written to: /tmp/t/${taskId}.output. You will be notified.`);
+
+/** The reader as it was before it kept anything: reads every file whole on each call. */
+async function reference(transcript: string, options: { finishedLimit: number; live: boolean }): Promise<SessionChild[]> {
+  const sessionDir = transcript.replace(/\.jsonl$/, '');
+  const scanned = new Map<string, TranscriptScan>();
+  const scan = async (file: string) => {
+    let text: string;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch {
+      return scanned.get(file);
+    }
+    const s = new TranscriptScan();
+    s.feed(text);
+    scanned.set(file, s);
+    return s;
+  };
+  const STATES: Record<string, SessionChild['state']> = { completed: 'done', done: 'done', failed: 'failed', error: 'failed', cancelled: 'stopped', canceled: 'stopped', stopped: 'stopped', killed: 'stopped', running: 'running', queued: 'running' };
+  const stopAll = (n: SessionChild): void => {
+    if (n.state === 'running') n.state = 'stopped';
+    n.children.forEach(stopAll);
+  };
+  type WfAgent = { agentId?: string; label: string; phase: string; state: SessionChild['state']; startedAt?: number };
+  const byPhase = (id: string, agents: WfAgent[], dir: string): SessionChild[] => {
+    const phases = new Map<string, SessionChild>();
+    for (const a of agents) {
+      let phase = phases.get(a.phase);
+      if (!phase) phases.set(a.phase, (phase = { id: `${id}/phase:${a.phase}`, kind: 'phase', label: a.phase || 'Agents', state: 'done', background: true, children: [] }));
+      phase.children.push({ id: `${id}/agent:${a.agentId ?? a.label}`, kind: 'agent', label: a.label, detail: 'workflow agent', state: a.state, startedAt: a.startedAt, background: true, file: a.agentId ? join(dir, `agent-${a.agentId}.jsonl`) : undefined, children: [] });
+    }
+    for (const p of phases.values()) {
+      const cs = p.children;
+      p.state = cs.some((c) => c.state === 'running') ? 'running' : cs.some((c) => c.state === 'failed') ? 'failed' : cs.some((c) => c.state === 'stopped') ? 'stopped' : 'done';
+      p.children = limitFinished(p.children, options.finishedLimit);
+    }
+    return [...phases.values()];
+  };
+  const under = async (file: string, depth: number): Promise<SessionChild[]> => {
+    const s = await scan(file);
+    if (!s) return [];
+    const children = await Promise.all(
+      s.list().map(async (l) => {
+        const base: SessionChild = { id: l.id, kind: l.kind, label: l.label, detail: l.detail, state: l.state, startedAt: l.startedAt, background: l.background, children: [] };
+        if (l.kind === 'shell') base.file = l.outputPath;
+        else if (l.kind === 'agent' && l.agentId) {
+          const f = join(sessionDir, 'subagents', `agent-${l.agentId}.jsonl`);
+          base.file = f;
+          if (depth < 4) base.children = await under(f, depth + 1);
+          const meta = await readJson(f.replace(/\.jsonl$/, '.meta.json'));
+          if (base.state === 'running' && (meta?.finished === true || scanned.get(f)?.finished === true)) base.state = 'done';
+        } else if (l.kind === 'workflow' && l.runId) {
+          const dir = join(sessionDir, 'subagents', 'workflows', l.runId);
+          const summaryPath = join(sessionDir, 'workflows', `${l.runId}.json`);
+          const summary = await readJson(summaryPath);
+          if (summary) {
+            base.file = summaryPath;
+            if (base.state === 'running') base.state = STATES[String(summary.status)] ?? 'running';
+            const progress = Array.isArray(summary.workflowProgress) ? (summary.workflowProgress as Record<string, unknown>[]) : [];
+            const agents = progress
+              .filter((p) => p && p.type === 'workflow_agent')
+              .map((p) => ({ agentId: typeof p.agentId === 'string' ? p.agentId : undefined, label: String(p.label ?? 'agent'), phase: String(p.phaseTitle ?? ''), state: STATES[String(p.state)] ?? (base.state === 'running' ? 'running' : 'stopped'), startedAt: typeof p.startedAt === 'number' ? p.startedAt : undefined }));
+            base.children = byPhase(base.id, agents, dir);
+          } else {
+            base.file = l.scriptPath;
+            const names = await readdir(dir).catch(() => undefined);
+            if (names) {
+              const agents = await Promise.all(
+                names
+                  .filter((n) => n.endsWith('.meta.json'))
+                  .map(async (n) => {
+                    const agentId = n.slice('agent-'.length, -'.meta.json'.length);
+                    const f = join(dir, `agent-${agentId}.jsonl`);
+                    const [meta, sc, info] = await Promise.all([readJson(join(dir, n)), scan(f), stat(f).catch(() => undefined)]);
+                    const state: SessionChild['state'] = meta?.finished === true || sc?.finished === true ? 'done' : 'running';
+                    return { agentId, label: typeof meta?.description === 'string' ? meta.description : agentId, phase: typeof meta?.workflowPhase === 'string' ? meta.workflowPhase : '', state, startedAt: info?.birthtimeMs };
+                  }),
+              );
+              agents.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+              base.children = byPhase(base.id, agents, dir);
+            }
+          }
+        }
+        if (!options.live) stopAll(base);
+        return base;
+      }),
+    );
+    return limitFinished(children, options.finishedLimit);
+  };
+  return under(transcript, 0);
+}
 
 const flat = (cs: SessionChild[], d = 0): string[] =>
   cs.flatMap((c) => [`${'  '.repeat(d)}${c.kind}:${c.label}:${c.state}`, ...flat(c.children, d + 1)]);
@@ -209,6 +300,78 @@ describe('ChildrenReader', () => {
       '    agent:implement:1:done',
       '    agent:review:1:running',
     ]);
+  });
+
+  it('gives the same trees, keeping finished subtrees, as reading every file whole each time, while the transcripts grow', async () => {
+    const sub = (id: string) => join(session, 'subagents', `agent-${id}.jsonl`);
+    const fg = (id: string, agentId: string, description: string) =>
+      use(id, 'Agent', { description, subagent_type: 'Explore', prompt: 'p' }) + result(id, { status: 'completed', agentId });
+    const steps: (() => Promise<unknown>)[] = [
+      () => writeFile(transcript, agentLaunch('t1', 'a1', 'Parent') + shellLaunch('t2', 'b2', 'Server')),
+      () => writeFile(sub('a1'), agentLaunch('u1', 'a2', 'Child') + shellLaunch('u2', 'b3', 'Child tests')),
+      () => writeFile(sub('a2'), use('r1', 'Read', {})),
+      () => appendFile(sub('a2'), result('r1', {}) + reply('found it')),
+      async () => {
+        for (const n of [3, 4, 5, 6, 7]) {
+          await writeFile(sub(`f${n}`), shellLaunch(`v${n}`, `c${n}`, `Inner ${n}`) + notify(`<tool-use-id>v${n}</tool-use-id><status>completed</status>`) + reply('ok'));
+          await appendFile(transcript, fg(`t${n}`, `f${n}`, `Done ${n}`));
+        }
+      },
+      () => appendFile(sub('a1'), notify('<tool-use-id>u2</tool-use-id><status>completed</status>') + reply('all done')),
+      () => appendFile(transcript, notify('<tool-use-id>t2</tool-use-id><status>completed</status>')),
+      () => writeFile(join(session, 'subagents', 'agent-a1.meta.json'), JSON.stringify({ description: 'Parent', finished: true })),
+      () => appendFile(transcript, use('w1', 'Workflow', { script: 'x' }) + result('w1', { status: 'async_launched', runId: 'wf_1', workflowName: 'impl' })),
+      async () => {
+        const agents = join(session, 'subagents', 'workflows', 'wf_1');
+        await mkdir(agents, { recursive: true });
+        await writeFile(join(agents, 'agent-p.meta.json'), JSON.stringify({ description: 'implement:1', workflowPhase: 'Implement' }));
+        await writeFile(join(agents, 'agent-p.jsonl'), use('r', 'Read', {}));
+      },
+      async () => {
+        await mkdir(join(session, 'workflows'), { recursive: true });
+        await writeFile(
+          join(session, 'workflows', 'wf_1.json'),
+          JSON.stringify({ status: 'completed', workflowProgress: [{ type: 'workflow_agent', label: 'implement:1', phaseTitle: 'Implement', agentId: 'p', state: 'done' }] }),
+        );
+      },
+      // The finished parent agent is resumed: its transcript grows again.
+      () => appendFile(sub('a1'), shellLaunch('u3', 'b4', 'Resumed build')),
+      () => appendFile(sub('a1'), notify('<tool-use-id>u3</tool-use-id><status>failed</status>') + reply('done again')),
+      () => appendFile(transcript, notify('<tool-use-id>t1</tool-use-id><status>failed</status>')),
+      () => appendFile(transcript, fg('t8', 'f8', 'Done 8')),
+    ];
+    const limits = [0, 1, 2, 10];
+    const kept = new Map(limits.map((l) => [l, new ChildrenReader()]));
+    for (const step of steps) {
+      await step();
+      for (const finishedLimit of limits) {
+        for (const live of [true, false, true]) {
+          const reader = kept.get(finishedLimit)!;
+          const cached = await reader.read(transcript, { finishedLimit, live });
+          reader.prune();
+          expect(cached).toStrictEqual(await reference(transcript, { finishedLimit, live }));
+          expect(await new ChildrenReader().read(transcript, { finishedLimit, live })).toStrictEqual(cached);
+          // Read twice: the second read comes from what was kept.
+          expect(await reader.read(transcript, { finishedLimit, live })).toStrictEqual(cached);
+          reader.prune();
+        }
+      }
+    }
+    expect(flat(await kept.get(10)!.read(transcript, opts))).toContain('  shell:Resumed build:failed');
+  });
+
+  it('reads a finished subtree once, and a gone session once until its transcript grows', async () => {
+    await writeFile(transcript, agentLaunch('t1', 'a1', 'Parent'));
+    await writeFile(join(session, 'subagents', 'agent-a1.jsonl'), shellLaunch('u1', 'b1', 'Inner') + notify('<tool-use-id>u1</tool-use-id><status>completed</status>') + reply('done'));
+    await appendFile(transcript, notify('<tool-use-id>t1</tool-use-id><status>completed</status>'));
+    const reader = new ChildrenReader();
+    const first = await reader.read(transcript, opts);
+    expect(flat(first)).toEqual(['agent:Parent:done', '  shell:Inner:done']);
+    expect((await reader.read(transcript, opts))[0]).toBe(first[0]);
+    const gone = await reader.read(transcript, { ...opts, live: false });
+    expect(await reader.read(transcript, { ...opts, live: false })).toBe(gone);
+    await appendFile(transcript, shellLaunch('t2', 'b2', 'Later'));
+    expect(flat(await reader.read(transcript, { ...opts, live: false }))).toEqual(['agent:Parent:done', '  shell:Inner:done', 'shell:Later:stopped']);
   });
 
   it('returns nothing for a missing transcript', async () => {

@@ -1,7 +1,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodeProjectDir } from '../src/core/historyIndex';
 import { buildDocs } from '../src/core/historySearch';
 import { HistoryIndexer, historyFilePath, UNUSED_INDEX_MS, unusedHistoryFiles } from '../src/historyIndexer';
@@ -448,6 +448,77 @@ describe('HistoryIndexer', () => {
     appendFileSync(join(s.dir('/w/app'), 'a.jsonl'), user('a', 'y'));
     await ix.refresh(true);
     expect(statSync(file).mtimeMs).not.toBe(mtime);
+  });
+
+  it('saves a growing index at most every saveIntervalMs, but uses it at once, and saves it on release', async () => {
+    const s = setup();
+    let now = 1_000_000;
+    const a = join(s.dir('/w/app'), 'a.jsonl');
+    writeFileSync(a, user('a', 'x'));
+    const ix = s.make({ now: () => now, saveIntervalMs: () => 5 * 60_000 });
+    const file = historyFilePath(s.state, '/w/app', 'workspace', 90);
+    const saved = () => JSON.parse(readFileSync(file, 'utf8')).transcripts as Record<string, { entry: { turns: { text: string }[] } }>;
+    const texts = () => ix.entries().flatMap((e) => e.turns.map((t) => t.text));
+    await ix.refresh();
+    expect(Object.keys(saved())).toEqual([a]);
+    const mtime = statSync(file).mtimeMs;
+    // Grown: this window sees it and its revision moves, but the file waits.
+    appendFileSync(a, user('a', 'y'));
+    now += 60_000;
+    const revision = ix.revision;
+    await ix.refresh();
+    expect(texts()).toEqual(['x', 'y']);
+    expect(ix.revision).toBeGreaterThan(revision);
+    expect(statSync(file).mtimeMs).toBe(mtime);
+    expect(saved()[a].entry.turns.map((t) => t.text)).toEqual(['x']);
+    // Nothing new, still within the interval: nothing written; past it, what was kept unsaved is written.
+    now += 60_000;
+    const unchanged = ix.revision;
+    await ix.refresh();
+    expect(statSync(file).mtimeMs).toBe(mtime);
+    // The unsaved index did not change: its revision stays, so the board does not rebuild its docs.
+    expect(ix.revision).toBe(unchanged);
+    now += 3 * 60_000;
+    const before = ix.revision;
+    await ix.refresh();
+    expect(saved()[a].entry.turns.map((t) => t.text)).toEqual(['x', 'y']);
+    expect(ix.revision).toBe(before);
+    // A transcript gone: saved at once.
+    const b = join(s.dir('/w/app'), 'b.jsonl');
+    writeFileSync(b, user('b', 'z'));
+    now += 60_000;
+    await ix.refresh();
+    expect(Object.keys(saved()).sort()).toEqual([a]);
+    rmSync(b);
+    now += 60_000;
+    await ix.refresh();
+    expect(Object.keys(saved())).toEqual([a]);
+    // The board closes with unsaved text: it is saved before the index is let go.
+    appendFileSync(a, user('a', 'w'));
+    now += 60_000;
+    await ix.refresh();
+    expect(saved()[a].entry.turns.map((t) => t.text)).toEqual(['x', 'y']);
+    ix.release();
+    await vi.waitFor(() => expect(saved()[a].entry.turns.map((t) => t.text)).toEqual(['x', 'y', 'w']));
+  });
+
+  it('another window reads the unsaved index again from the file, and this one then loads what that one saved', async () => {
+    const s = setup();
+    let now = 1_000_000;
+    const a = join(s.dir('/w/app'), 'a.jsonl');
+    writeFileSync(a, user('a', 'x'));
+    const one = s.make({ now: () => now, saveIntervalMs: () => 5 * 60_000 });
+    await one.refresh();
+    appendFileSync(a, user('a', 'y'));
+    now += 60_000;
+    await one.refresh();
+    const other = s.make({ now: () => now, saveIntervalMs: () => 5 * 60_000 });
+    await other.refresh();
+    expect(other.entries().flatMap((e) => e.turns.map((t) => t.text))).toEqual(['x', 'y']);
+    appendFileSync(a, user('a', 'z'));
+    now += 60_000;
+    await one.refresh();
+    expect(one.entries().flatMap((e) => e.turns.map((t) => t.text))).toEqual(['x', 'y', 'z']);
   });
 
   // withFileLock keeps the lock fresh during the run (test/fileLock.test.ts).

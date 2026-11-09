@@ -1,26 +1,15 @@
-import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
+import { webviewPage } from '../webviewPage';
 
 export const BOARD_TITLE = 'Claude Board';
 
-/**
- * The board's page: its markup, `media/board.css` and `media/board.js` (the only script, by nonce). `test/boardWebview.test.ts`
- * loads the `<body>` from this file.
- */
+/** The board's page: its markup (`BODY`), `media/board.css` and `media/board.js`. */
 export function boardHtml(webview: vscode.Webview, extensionUri: vscode.Uri, placement: string): string {
-  const nonce = randomBytes(16).toString('base64');
-  const media = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file));
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="${media('board.css')}">
-<title>${BOARD_TITLE}</title>
-</head>
-<body data-placement="${placement}">
-<header class="bar">
+  return webviewPage(webview, extensionUri, { css: 'board.css', js: 'board.js', title: BOARD_TITLE, bodyAttrs: ` data-placement="${placement}"`, body: BODY });
+}
+
+/** The page's markup (the tests load it from here, see `test/webviewBody.ts`). */
+const BODY = `<header class="bar">
   <h1>${BOARD_TITLE}</h1>
   <span class="chip needs" id="needs" hidden></span>
   <span class="chip" id="working" hidden></span>
@@ -62,8 +51,4 @@ export function boardHtml(webview: vscode.Webview, extensionUri: vscode.Uri, pla
 </section>
 <div class="hint" id="hint"><kbd>Enter</kbd> starts a session here <kbd id="hint-later">⌥⏎</kbd> saves it for later <kbd>/</kbd> commands and skills<span id="hint-nav"><span id="hint-cards"><kbd id="hint-cards-key">↑</kbd> cards</span> <kbd>←</kbd> sessions<span id="hint-earlier"> <kbd id="hint-history">⌥↑</kbd> earlier prompts</span></span></div>
 </div>
-</div>
-<script nonce="${nonce}" src="${media('board.js')}"></script>
-</body>
-</html>`;
-}
+</div>`;

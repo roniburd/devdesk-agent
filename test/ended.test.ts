@@ -1,9 +1,10 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   type EndedRecord,
+  EndedRecords,
   listableEnded,
   parseEndedRecord,
   readEndedRecords,
@@ -82,6 +83,50 @@ describe('ended records', () => {
     expect(await readdir(dir)).toEqual(['s1.json']);
   });
 
+  it('keeps parsed records across reads, re-reading only new or rewritten files', async () => {
+    const reader = new EndedRecords();
+    const a = join(dir, 'a.json');
+    await writeFile(a, JSON.stringify(ended({ sessionId: 'a', detail: 'first' })));
+    const at = new Date(NOW);
+    await utimes(a, at, at);
+    await writeFile(join(dir, 'bad.json'), 'not json');
+    expect((await reader.read(dir)).records.map((r) => [r.sessionId, r.detail])).toEqual([['a', 'first']]);
+    // Same size and times: what was parsed before is used.
+    await writeFile(a, JSON.stringify(ended({ sessionId: 'a', detail: 'other' })));
+    await utimes(a, at, at);
+    expect((await reader.read(dir)).records.map((r) => r.detail)).toEqual(['first']);
+    await writeFile(a, JSON.stringify(ended({ sessionId: 'a', detail: 'rewritten' })));
+    await utimes(a, at, new Date(NOW + 5000));
+    await writeFile(join(dir, 'b.json'), JSON.stringify(ended({ sessionId: 'b' })));
+    expect((await reader.read(dir)).records.map((r) => [r.sessionId, r.detail])).toEqual([
+      ['a', 'rewritten'],
+      ['b', 'All tests pass.'],
+    ]);
+    await rm(a);
+    expect((await reader.read(dir)).records.map((r) => r.sessionId)).toEqual(['b']);
+    expect((await new EndedRecords().read(join(dir, 'missing'))).records).toEqual([]);
+  });
+
+  it('checks a new record\'s transcript at once, and seen ones again only once the interval has passed', async () => {
+    let now = NOW;
+    const reader = new EndedRecords(60_000, () => now);
+    const transcript = join(dir, 't.jsonl');
+    await writeFile(transcript, '');
+    await writeFile(join(dir, 'a.json'), JSON.stringify(ended({ sessionId: 'a', transcriptPath: transcript })));
+    await writeFile(join(dir, 'b.json'), JSON.stringify(ended({ sessionId: 'b', transcriptPath: join(dir, 'never.jsonl') })));
+    let read = await reader.read(dir);
+    expect(read.exists(transcript)).toBe(true);
+    expect(read.exists(join(dir, 'never.jsonl'))).toBe(false);
+    await rm(transcript);
+    now += 59_000;
+    read = await reader.read(dir);
+    expect(read.exists(transcript)).toBe(true);
+    now += 1_000;
+    read = await reader.read(dir);
+    expect(read.exists(transcript)).toBe(false);
+    expect(listableEnded(read.records, new Map(), read.exists).stale.map((r) => r.sessionId)).toEqual(['a', 'b']);
+  });
+
   it('lists ended records that do not run and still have a transcript', () => {
     const records = [
       ended({ sessionId: 'resumed' }),
@@ -134,9 +179,9 @@ describe('parked cards', () => {
     const live = card({ state: 'done', detail: 'All tests pass.' });
     const parked = card({ state: 'parked', lastState: 'done', detail: 'All tests pass.', tmuxSession: undefined });
     expect(cardSignature(parked)).toBe(cardSignature(live));
-    expect(stateLook(parked, NOW, 1)).toBe('parked');
-    expect(stateLook({ ...parked, crashed: true }, NOW, 1)).toBe('crashed');
-    const order = attentionOrder([parked, card({ id: 'idle', state: 'idle', updatedAt: NOW - 9 * DAY })], NOW, 1, new Set());
+    expect(stateLook(parked, { now: NOW, stuckMs: 1 })).toBe('parked');
+    expect(stateLook({ ...parked, crashed: true }, { now: NOW, stuckMs: 1 })).toBe('crashed');
+    const order = attentionOrder([parked, card({ id: 'idle', state: 'idle', updatedAt: NOW - 9 * DAY })], { now: NOW, idleMs: 1, unread: new Set() });
     expect(order.map((c) => c.id)).toEqual(['idle', 's1']);
   });
 
@@ -150,7 +195,7 @@ describe('parked cards', () => {
 
   it('go under the divider of the Done / idle lane on the board, newest first up to the limit, can be resumed and removed', () => {
     const cards = ['p1', 'p2', 'p3'].map((id, i) => card({ id, sessionId: id, state: 'parked', tmuxSession: undefined, updatedAt: NOW - i * DAY }));
-    const board = buildBoard(cards, [], { now: NOW, idleMs: 1, stuckMs: 1, unread: new Set(), unreadFirst: false, parkedLimit: 2 });
+    const board = buildBoard(cards, [], { view: { now: NOW, idleMs: 1, stuckMs: 1, unread: new Set(), unreadFirst: false }, parkedLimit: 2 });
     const idle = board.lanes.find((l) => l.id === 'review')!;
     expect(idle.sessions.map((s) => [s.id, s.look, s.canOpen, s.canEnd, s.parked, s.idle])).toEqual([
       ['p1', 'parked', true, true, true, true],

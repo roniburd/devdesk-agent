@@ -1,5 +1,6 @@
 import { DEFAULT_SERVER } from './tmux';
-import { type HookRecord, MOVED_DETAIL, type SessionCard, type SessionState } from './sessions';
+import { type HookRecord, MOVED_DETAIL, type SessionCard } from './sessions';
+import { STATE_INFO } from './sessionStates';
 
 /**
  * Updates that show before the next full refresh of the sessions (tmux, processes, transcripts): a hook record just
@@ -8,35 +9,25 @@ import { type HookRecord, MOVED_DETAIL, type SessionCard, type SessionState } fr
 
 /**
  * `card` with what a newer hook record of its session says (state, detail, prompt, turn times), or `card` itself when
- * the record is not newer or the card does not show a running session's record. What an insight said for the turn
- * or the wait that ended goes with it.
+ * the record is not newer or the card does not show a running session's record. Insights are applied after this
+ * (`withInsights`), keyed by turn, so nothing they said needs undoing here.
  */
 export function withRecord(card: SessionCard, record: HookRecord): SessionCard {
-  if (card.sessionId !== record.sessionId || !hasRecord(card.state)) return card;
+  if (card.sessionId !== record.sessionId || !STATE_INFO[card.state].fromRecord) return card;
   if (card.updatedAt !== undefined && record.updatedAt <= card.updatedAt) return card;
   // Its conversation went on in a background job, as its transcript says: the pane's Claude still writes records
   // under this id, which the refresh corrects again.
   if (card.detail === MOVED_DETAIL) return card;
   const next: SessionCard = { ...card, state: record.state, detail: record.detail, updatedAt: record.updatedAt };
   if (record.prompt) next.prompt = record.prompt;
-  // The same finished turn (an idle reminder rewrote it): keep what the card says, which may be the insight's answer.
-  const sameDone = record.state === 'done' && card.state === 'done' && record.turnEndedAt !== undefined && record.turnEndedAt === card.turnEndedAt;
-  if (!sameDone) {
-    if (record.asksQuestion) next.asksQuestion = true;
-    else delete next.asksQuestion;
-  }
+  if (record.asksQuestion) next.asksQuestion = true;
+  else delete next.asksQuestion;
   delete next.turnStartedAt;
   delete next.turnEndedAt;
   if (record.turnStartedAt !== undefined) next.turnStartedAt = record.turnStartedAt;
   if (record.turnEndedAt !== undefined) next.turnEndedAt = record.turnEndedAt;
-  if (next.state !== 'working' || next.turnStartedAt !== card.turnStartedAt) delete next.liveStatus;
-  // A wait is identified by its record's time, which just changed.
-  delete next.askSummary;
   return next;
 }
-
-/** States a card takes from its session's hook record (a live session with hooks). */
-const hasRecord = (state: SessionState) => state === 'working' || state === 'waiting' || state === 'done' || state === 'idle' || state === 'blocked';
 
 /** `cards` with each newer record in `records` (by session id) applied; the same array when none applies. */
 export function withRecords(cards: SessionCard[], records: ReadonlyMap<string, HookRecord>): SessionCard[] {
@@ -97,7 +88,7 @@ export function withPendingTurns(cards: SessionCard[], pending: readonly Pending
       continue;
     }
     // Not `working`: a card shown working by this pending turn is it (Claude's own working records have a turn start).
-    if ((card.turnStartedAt !== undefined && card.turnStartedAt >= p.at) || card.state === 'waiting' || card.state === 'blocked' || card.state === 'done') continue;
+    if ((card.turnStartedAt !== undefined && card.turnStartedAt >= p.at) || STATE_INFO[card.state].endsPendingTurn) continue;
     if (card.state === 'stopped' && age >= PENDING_STOPPED_MS) continue;
     if (card.state === 'idle' && card.updatedAt !== undefined && now - card.updatedAt >= PENDING_IDLE_MS) continue;
     left.push(p);

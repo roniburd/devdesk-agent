@@ -16,6 +16,31 @@ export function runCommand(file: string, args: string[], opts: { cwd: string; en
   });
 }
 
+/** The error `execText` rejects with: `(stderr || err.message).trim()`, and whether the program was killed (for example on timeout). */
+export class ExecError extends Error {
+  constructor(message: string, readonly killed: boolean) {
+    super(message);
+  }
+}
+
+/**
+ * Runs `file` with `args` and resolves with its stdout; rejects with an `ExecError` carrying the trimmed stderr, or the
+ * error message when there is no stderr. The rejecting variant of `runCommand`.
+ */
+export function execText(file: string, args: string[], opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number } = {}): Promise<string> {
+  const execOpts = {
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    ...(opts.timeoutMs ? { timeout: opts.timeoutMs } : {}),
+    ...(opts.maxBuffer !== undefined ? { maxBuffer: opts.maxBuffer } : {}),
+  };
+  return new Promise((resolve, reject) => {
+    execFile(file, args, execOpts, (err, stdout, stderr) => {
+      if (err) reject(new ExecError((stderr || err.message).trim(), !!err.killed));
+      else resolve(stdout);
+    });
+  });
+}
+
 /** `bin` (shell syntax, for example `$HOME/.toolbox/bin/claude`) followed by `args`, each quoted. */
 export function shellCommand(bin: string, args: readonly string[]): string {
   return `${bin} ${args.map(shellQuote).join(' ')}`;

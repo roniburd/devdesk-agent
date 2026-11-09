@@ -8,8 +8,7 @@ import { FIELD_SEP, isShellCommand, paneTarget, sendKeysArgs } from '../core/tmu
 import { sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
-import { openSessionCard } from '../sessionsCommands';
-import type { SessionsTree } from '../sessionsTree';
+import { openSessionCard, type SessionRowSelector } from '../sessionsCommands';
 
 /** How long Claude gets to show what was typed (and its `/` menu) before Enter submits it. */
 const SUBMIT_DELAY_MS = 150;
@@ -22,7 +21,7 @@ const SUBMIT_DELAY_MS = 150;
 export class BoardSessions {
   constructor(
     private readonly model: SessionsModel,
-    private readonly tree: SessionsTree,
+    private readonly tree: SessionRowSelector,
   ) {}
 
   /** Sessions a command can go to (main and the worktrees), those in `preferDir` first. */

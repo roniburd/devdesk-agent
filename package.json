@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -19,8 +19,9 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "color-menu": "node scripts/color-menu.mjs",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.webview.json",
     "package": "npm run build && mkdir -p dist && vsce package --no-dependencies --skip-license --no-rewrite-relative-links -o dist/devdesk-claude.vsix"
   },
   "devDependencies": {
@@ -1459,12 +1460,20 @@
             "markdownDescription": "At most this many past sessions, the most recently changed, are searched. Each one indexed takes memory in the extension host (up to about 100 KB), so a folder with tens of thousands of transcripts (agents run with `claude -p`) is cut to the newest ones.",
             "order": 7
           },
+          "devdesk.boardSearch.historySaveMinutes": {
+            "type": "number",
+            "default": 5,
+            "minimum": 0,
+            "maximum": 60,
+            "markdownDescription": "How often (minutes) the window indexing past sessions saves the index file while they grow. This window's search sees new text at once; other windows see it once it is saved. It is also saved when the board closes, when sessions drop out of the index, and after reading a lot. 0: after every check (once a minute).",
+            "order": 8
+          },
           "devdesk.boardSearch.historyDir": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Where Claude Code keeps its transcripts. Empty: `projects` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`). A leading `~` is your home directory.",
-            "order": 8
+            "order": 9
           }
         }
       },

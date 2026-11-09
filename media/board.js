@@ -1,6 +1,14 @@
+// @ts-check
 // The Claude Board webview: renders the board the extension posts, and the composer that starts new sessions. Builds
 // the DOM with textContent only (session prompts and details are untrusted text), and sends back only messages the
 // extension validates: { type, id } actions, compose requests that name the posted choices, completion queries.
+import { matchesQuery, parseQuery } from '../src/core/boardQuery';
+import { slashWord } from '../src/core/slashTrigger';
+import { countHead, timeLeftText } from '../src/core/usageProgress';
+
+/** @typedef {import('../src/board/messages').PanelMessage} PanelMessage What the extension posts. */
+/** @typedef {import('../src/board/messages').BoardMessage} BoardMessage What this script posts back. */
+/** @typedef {import('../src/board/messages').BoardPost} BoardPost */
 (function () {
   const vscode = acquireVsCodeApi();
   /** The model and effort choice meaning "no --model / --effort" (`DEFAULT_CHOICE` in src/core/composer.ts). */
@@ -11,6 +19,7 @@
    * What the box keeps for this project folder: the extension saves it (`keep` messages, in its `workspaceState`) and
    * posts it back when the webview loads (`restore`), so it outlasts the tab, a reload and the webview. Until then (and
    * for what this project has not saved), the defaults: the posted default mode, the first model row, Default effort.
+   * @type {{ filter: string, query: string, mode?: string, model?: string, effort?: string, ultracode: boolean, history: string[], draft: string }}
    */
   const state = {
     filter: '',
@@ -34,55 +43,30 @@
   const keep = (fields) => send('keep', fields);
   /** Alt+Enter saves for later; Macs call the key Option. */
   const ALT_ENTER = /Mac/.test(navigator.platform) ? '⌥⏎' : 'Alt+⏎';
-  const $ = (id) => document.getElementById(id);
+  /** An element of the page, by id (src/board/html.ts has them all). */
+  const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
   const lanesEl = $('lanes');
-  const filterEl = $('filter');
+  const filterEl = /** @type {HTMLSelectElement} */ ($('filter'));
   const needsEl = $('needs');
   const workingEl = $('working');
 
-  /** Glyph and colour class per state look (each look its own shape, so colour is never the only cue). */
-  const LOOKS = {
-    question: ['?', 'yellow'],
-    permission: ['🛡', 'yellow'],
-    plan: ['☑', 'yellow'],
-    input: ['🔔', 'yellow'],
-    limited: ['◷', 'orange'],
-    error: ['✕', 'red'],
-    working: ['⟳', 'blue spin'],
-    stuck: ['⌚', 'orange'],
-    background: ['⟳', 'blue spin'],
-    done: ['✓', 'green'],
-    asked: ['💬', 'green'],
-    interrupted: ['■', 'purple'],
-    idle: ['○', 'dim'],
-    unknown: ['●', 'dim'],
-    crashed: ['⚡', 'red'],
-    stopped: ['⊘', 'dim'],
-    parked: ['⏸', 'dim'],
-  };
   const LANE_GLYPHS = { needs: ['●', 'yellow'], working: ['⟳', 'blue'], review: ['✓', 'green'] };
 
+  /** @type {BoardPost | undefined} The board last posted. */
   let last;
 
   /** `o`'s fields named in `keys` that are set. */
   const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o[k] !== undefined).map((k) => [k, o[k]]));
-  /** Posts `{ type, ...fields }` to the extension (`parseBoardMessage` in src/board/messages.ts checks it). */
+  /**
+   * Posts `{ type, ...fields }` to the extension (`parseBoardMessage` in src/board/messages.ts checks it).
+   * @param {BoardMessage['type']} type
+   * @param {object} [fields]
+   */
   const send = (type, fields) => vscode.postMessage({ type, ...fields });
   /** The prompt box sits above the lanes (devdesk.board.promptPlacement). */
   const placedOnTop = () => document.body.dataset.placement === 'top';
   /** A key pressed without modifiers. */
   const plain = (ev) => !(ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey);
-
-  // ---- Search: the same matcher as src/core/boardSearch.ts (test/boardSearchWebview.test.ts checks they agree) ----
-  const fold = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  function parseQuery(query) {
-    return fold(query).split(' ').filter(Boolean).flatMap((word) => {
-      const m = /^(wt|is):(.*)$/.exec(word);
-      if (!m) return [{ field: 'all', text: word }];
-      return m[2] ? [{ field: m[1], text: m[2] }] : [];
-    });
-  }
-  const matchesQuery = (fields, terms) => terms.every((t) => (fields?.[t.field] ?? '').includes(t.text));
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -206,7 +190,14 @@
     return d;
   }
 
-  /** A lane: its heading (`glyph`, the title, the count, then `extra`) over its `cards`. */
+  /**
+   * A lane: its heading (`glyph`, the title, the count, then `extra`) over its `cards`.
+   * @param {string} cls
+   * @param {string} title
+   * @param {string | number} count
+   * @param {Node[]} cards
+   * @param {{ glyph?: string[], extra?: Node }} [_]
+   */
   function laneSection(cls, title, count, cards, { glyph, extra } = {}) {
     const section = el('section', cls);
     section.setAttribute('aria-label', title);
@@ -237,7 +228,7 @@
     // Shown only because its transcript has the query's words: where they are.
     const textHit = search.textHit(s);
     const showLine = !last || last.cardLine !== false;
-    const readStyle = (last && last.readStyle) || {};
+    const readStyle = /** @type {Partial<BoardPost['readStyle']>} */ ((last && last.readStyle) || {});
     // What the card draws: the search fields only filter the lanes.
     const { search: _fields, ...drawn } = s;
     const sig = JSON.stringify([drawn, readStyle, showLine, reason, textHit]);
@@ -249,7 +240,9 @@
       standIns.set(same, () => sessionCard(s, new Map()));
       return same;
     }
-    const [glyph, color] = LOOKS[s.look] || ['●', 'dim'];
+    // The look's glyph and colour class (`LOOKS` in src/core/stateLooks.ts).
+    const glyph = s.glyph || '●';
+    const color = s.glyphClass || 'dim';
     rebuiltCards++;
     const card = cardEl(`card look-${color.split(' ')[0]}${s.canOpen ? ' clickable' : ''}`, key, `${s.lookLabel}${s.unread ? ', unread' : ''}: ${s.title}, ${s.worktree}`);
     sigs.set(card, sig);
@@ -328,6 +321,7 @@
   const HOVER_CARDS = '.card[data-session], .card[data-history]';
   const HOVERED_CARD = HOVER_CARDS.split(',').map((sel) => `${sel.trim()}:hover`).join(', ');
   function historyHover(h) {
+    /** @type {{ label?: string, text?: string, excerpts?: any[] }[]} */
     const parts = [{ text: h.title }];
     // Each excerpt on a line of its own, its matches marked as on the card.
     const excerpts = (h.excerpts || []).slice(0, 3);
@@ -409,7 +403,8 @@
     }
   });
   lanesEl.addEventListener('focusin', (ev) => {
-    if (ev.target.matches && ev.target.matches(HOVER_CARDS)) hoverSoon(ev.target);
+    const t = /** @type {HTMLElement} */ (ev.target);
+    if (t.matches && t.matches(HOVER_CARDS)) hoverSoon(t);
   });
   lanesEl.addEventListener('focusout', (ev) => {
     if (!sessionCardOf(ev.relatedTarget)) hideHover();
@@ -427,14 +422,16 @@
   /** The openable session card `node` is in. */
   const openableCard = (node) => node.closest && node.closest('.card.clickable[data-session]');
   lanesEl.addEventListener('dblclick', (ev) => {
-    const card = openableCard(ev.target);
-    if (card && !ev.target.closest('button')) send('open', { id: card.dataset.session });
-    const past = ev.target.closest && ev.target.closest('.card[data-history]');
-    if (past && !ev.target.closest('button')) resumeHistory(past.dataset.history);
+    const t = /** @type {HTMLElement} */ (ev.target);
+    const card = openableCard(t);
+    if (card && !t.closest('button')) send('open', { id: card.dataset.session });
+    const past = /** @type {HTMLElement | null} */ (t.closest && t.closest('.card[data-history]'));
+    if (past && !t.closest('button')) resumeHistory(past.dataset.history);
   });
   lanesEl.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter' && ev.target === openableCard(ev.target)) send('open', { id: ev.target.dataset.session });
-    else if (ev.key === 'Enter' && ev.target.matches && ev.target.matches('.card[data-history]')) resumeHistory(ev.target.dataset.history);
+    const t = /** @type {HTMLElement} */ (ev.target);
+    if (ev.key === 'Enter' && t === openableCard(t)) send('open', { id: t.dataset.session });
+    else if (ev.key === 'Enter' && t.matches && t.matches('.card[data-history]')) resumeHistory(t.dataset.history);
   });
 
   /** Whether `have` (shown) can be updated to look like `want` (just built): the same kind of node with the same key. */
@@ -507,12 +504,13 @@
     if (!last) return;
     const { board, loaded } = last;
     // Rebuilding replaces every element: put the focus back on the one that had it (same data-key).
-    const focused = document.activeElement && lanesEl.contains(document.activeElement) ? document.activeElement : undefined;
+    const active = /** @type {HTMLElement | null} */ (document.activeElement);
+    const focused = active && lanesEl.contains(active) ? active : undefined;
     const focusKey = focused?.dataset.key;
     // A focused card that goes away (its session ended) leaves the focus on its lane's neighbour, so the keys still work.
     const laneEls = () => [...lanesEl.querySelectorAll('.lane')];
     const focusLane = focused?.classList.contains('card') ? laneEls().findIndex((l) => l.contains(focused)) : -1;
-    const focusAt = focusLane >= 0 ? [...laneEls()[focusLane].querySelectorAll('.card')].indexOf(focused) : -1;
+    const focusAt = focusLane >= 0 ? [...laneEls()[focusLane].querySelectorAll('.card')].indexOf(/** @type {HTMLElement} */ (focused)) : -1;
     // Keep the filter's options in sync (only when they changed, so an open dropdown stays open), keeping a chosen
     // worktree that has no cards right now.
     const names = new Set(board.worktrees);
@@ -546,7 +544,7 @@
     workingEl.textContent = `${working} working`;
 
     // The cards each lane shows, by key: a card stands in for one shown in the same lane only, which it is morphed into.
-    const shownLanes = laneEls().map((l) => new Map([...l.querySelectorAll('.card[data-session]')].map((c) => [c.dataset.key, c])));
+    const shownLanes = laneEls().map((l) => new Map(/** @type {HTMLElement[]} */ ([...l.querySelectorAll('.card[data-session]')]).map((c) => [c.dataset.key, c])));
     const lanes = board.lanes.map((lane, i) => {
       if (lane.id === 'backlog') {
         const plus = labelled(button('plus', '+', () => composer.focus({ later: true })), 'Write a prompt for later');
@@ -586,10 +584,10 @@
     composer.hints();
     // A card that stayed in place keeps the focus; one that moved (or went away) gets it back.
     if (focusKey && document.activeElement !== focused) {
-      const again = [...lanesEl.querySelectorAll('[data-key]')].find((e) => e.dataset.key === focusKey);
+      const again = /** @type {HTMLButtonElement[]} */ ([...lanesEl.querySelectorAll('[data-key]')]).find((e) => e.dataset.key === focusKey);
       if (again && !again.disabled) again.focus({ preventScroll: true });
       else if (focusLane >= 0) {
-        const left = [...laneEls()[focusLane].querySelectorAll('.card')];
+        const left = /** @type {HTMLElement[]} */ ([...laneEls()[focusLane].querySelectorAll('.card')]);
         if (left.length) left[Math.min(focusAt, left.length - 1)].focus({ preventScroll: true });
         else composer.refocus();
       }
@@ -603,7 +601,7 @@
     let lastKey;
     const top = placedOnTop;
     /** The cards shown, per lane that has any, left to right. */
-    const lanes = () => [...lanesEl.querySelectorAll('.lane')].map((l) => [...l.querySelectorAll('.card')]).filter((c) => c.length);
+    const lanes = () => [...lanesEl.querySelectorAll('.lane')].map((l) => /** @type {HTMLElement[]} */ ([...l.querySelectorAll('.card')])).filter((c) => c.length);
 
     function focusCard(card) {
       card.focus({ preventScroll: true });
@@ -636,14 +634,15 @@
     }
 
     lanesEl.addEventListener('focusin', (ev) => {
-      if (!ev.target.classList.contains('card')) return;
-      lastKey = ev.target.dataset.key;
+      const t = /** @type {HTMLElement} */ (ev.target);
+      if (!t.classList.contains('card')) return;
+      lastKey = t.dataset.key;
       // A popup left open in the prompt box (the focus came from the Claude view, with no mousedown to close it) would
       // take the card's keys: Enter would run its highlighted row, the arrows would move its highlight.
       if (popup.isOpen) popup.close();
     });
     lanesEl.addEventListener('keydown', (ev) => {
-      const card = ev.target;
+      const card = /** @type {HTMLElement} */ (ev.target);
       if (!card.classList.contains('card') || !plain(ev) || popup.isOpen) return;
       const all = lanes();
       const li = all.findIndex((l) => l.includes(card));
@@ -772,6 +771,7 @@
      * badge?, pick, enter?, keep? } or { section }); `header` and `hint` go on top, `empty` shows when there are no
      * items, `active` is the row to highlight (else the checked one). `pick` runs on Tab, and on Enter or click unless
      * the item has `enter`; the popup closes unless the item says `keep`.
+     * @param {{ anchor?: HTMLElement, header?: string, hint?: string, items: any[], empty?: string, close?: () => void, active?: number }} _
      */
     function open({ anchor, header, hint, items, empty, close: closed, active: start }) {
       box.classList.toggle('anchored', !!anchor);
@@ -880,7 +880,8 @@
       if (key(ev)) ev.preventDefault();
     });
     document.addEventListener('mousedown', (ev) => {
-      if (!box.hidden && !box.contains(ev.target) && !ev.target.closest('.composer .footer')) close();
+      const t = /** @type {HTMLElement} */ (ev.target);
+      if (!box.hidden && !box.contains(t) && !t.closest('.composer .footer')) close();
     });
     return {
       open,
@@ -900,13 +901,13 @@
   // ---- Composer ----------------------------------------------------------------------------------------------------
 
   const composerEl = $('composer');
-  const prompt = $('prompt');
+  const prompt = /** @type {HTMLTextAreaElement} */ ($('prompt'));
   const whereBtn = $('where');
-  const nameInput = $('wtname');
+  const nameInput = /** @type {HTMLInputElement} */ ($('wtname'));
   const modelBtn = $('model');
   const modeBtn = $('mode');
-  const laterBtn = $('later');
-  const sendBtn = $('send');
+  const laterBtn = /** @type {HTMLButtonElement} */ ($('later'));
+  const sendBtn = /** @type {HTMLButtonElement} */ ($('send'));
   const errorEl = $('cerror');
   const editingEl = $('editing');
   const noticeEl = $('notice');
@@ -915,7 +916,8 @@
   const argHintEl = $('arghint');
 
   const composer = (function () {
-    let info = { notReady: '', modes: [], defaultMode: '', models: [{ value: DEFAULT, label: DEFAULT, description: '', efforts: [] }], worktrees: [] };
+    /** @type {import('../src/boardComposer').ComposerInfo} The composer's choices, from the last board posted. */
+    let info = /** @type {any} */ ({ notReady: '', modes: [], defaultMode: '', models: [{ value: DEFAULT, label: DEFAULT, description: '', efforts: [] }], worktrees: [] });
     let where = 'main';
     let later = false;
     let busy = false;
@@ -961,7 +963,7 @@
     const model = () => modelRow().value;
     /** The chosen model's effort choices: Default, then its levels (none for a model without effort). */
     const efforts = () => [DEFAULT, ...(modelRow().efforts || [])];
-    const effort = () => (efforts().includes(state.effort) ? state.effort : DEFAULT);
+    const effort = () => /** @type {string} */ (efforts().includes(/** @type {string} */ (state.effort)) ? state.effort : DEFAULT);
     const modelLabel = (r) => (r.value === DEFAULT ? 'Default model' : r.label);
     const worktree = () => info.worktrees.find((w) => w.dir === where);
 
@@ -1254,6 +1256,7 @@
         pickChoice(patch);
         modelMenu(info.models.length + row);
       };
+      /** @type {any[]} */
       const items = info.models.map((r) => ({ label: modelLabel(r), description: r.description, checked: r.value === model(), pick: () => pickChoice({ model: r.value }) }));
       items.push({ section: 'Options' });
       if (hasEffort) {
@@ -1344,25 +1347,15 @@
     /**
      * The `/` or `@` word the caret is in, if any: `/` at the very start, or after whitespace (`stacked`: skills only,
      * after fewer than `info.maxStacked` `/commands`, else `inline`, as in the middle of the text), unless the text
-     * starts with a built-in the board handles (`info.unstackable`). The same rule as `slashTrigger` in
-     * src/core/commandMenu.ts, which tests it.
+     * starts with a built-in the board handles (`info.unstackable`): `slashWord` in src/core/slashTrigger.ts.
      */
     function trigger() {
       const at = prompt.selectionStart;
       if (at !== prompt.selectionEnd) return undefined;
       const before = prompt.value.slice(0, at);
-      const slash = /^\/([\w:.-]*)$/.exec(before);
-      if (slash) return { kind: '/', start: 0, query: slash[1], stacked: false };
-      const word = /(?:^|\s)\/([\w:.-]*)$/.exec(before);
-      if (word) {
-        const start = at - word[1].length - 1;
-        const prefix = before.slice(0, start);
-        const lead = /^(?:\/[\w:.-]+[ \t]+)*/.exec(prefix)[0];
-        const leading = lead.match(/\/[\w:.-]+/g) || [];
-        if (leading.some((c) => (info.unstackable || []).includes(c.slice(1).toLowerCase()))) return undefined;
-        const inline = lead.length < prefix.length || leading.length >= info.maxStacked;
-        return { kind: '/', start, query: word[1], stacked: true, inline };
-      }
+      const slash = slashWord(before, info.unstackable || [], info.maxStacked);
+      if (slash) return { kind: '/', ...slash };
+      // (A `/` word no menu opens for, after an unstackable built-in, is never an `@` one.)
       const mention = /(^|\s)@([^\s@]*)$/.exec(before);
       if (mention) return { kind: '@', start: at - mention[2].length - 1, query: mention[2] };
       return undefined;
@@ -1425,7 +1418,7 @@
     /** Where the `/` or `@` word the caret is in ends (a completion replaces all of it, never splicing it). */
     function wordEnd(kind) {
       const at = prompt.selectionEnd;
-      const end = at + (kind === '/' ? /^[\w:.-]*/ : /^[^\s@]*/).exec(prompt.value.slice(at))[0].length;
+      const end = at + /** @type {RegExpExecArray} */ ((kind === '/' ? /^[\w:.-]*/ : /^[^\s@]*/).exec(prompt.value.slice(at)))[0].length;
       return kept === undefined ? end : Math.max(at, Math.min(end, prompt.value.length - kept));
     }
 
@@ -1548,7 +1541,7 @@
 
     // The shortcut as this keyboard shows it: Option on a Mac, Alt elsewhere.
     prompt.placeholder = prompt.placeholder.replace('⌥⏎', ALT_ENTER);
-    laterBtn.querySelector('kbd').textContent = ALT_ENTER;
+    /** @type {HTMLElement} */ (laterBtn.querySelector('kbd')).textContent = ALT_ENTER;
     $('hint-later').textContent = ALT_ENTER;
     const PLACEHOLDER = prompt.placeholder;
     prompt.value = state.draft;
@@ -1563,7 +1556,7 @@
     prompt.addEventListener('paste', (ev) => {
       const images = Array.from((ev.clipboardData && ev.clipboardData.items) || [])
         .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-        .map((item) => item.getAsFile())
+        .map((item) => /** @type {File} */ (item.getAsFile()))
         .filter(Boolean);
       if (!images.length) return;
       ev.preventDefault();
@@ -1623,7 +1616,10 @@
       hints,
       /** Focuses the box as it is (from the cards). */
       refocus: () => prompt.focus(),
-      /** Focuses the box: `later` saves on Enter, `text` and `choice` load a prompt for later to edit. */
+      /**
+       * Focuses the box: `later` saves on Enter, `text` and `choice` load a prompt for later to edit.
+       * @param {{ text?: string, later?: boolean, choice?: any, editing?: string }} [_]
+       */
       focus({ text, later: asLater, choice, editing: id } = {}) {
         // A prompt for later taking the box keeps what was typed there, for when its edit ends.
         if (id && draftBeforeEdit === undefined) draftBeforeEdit = prompt.value;
@@ -1686,63 +1682,45 @@
       return r;
     };
     const section = (title) => el('div', 'stats-section', title);
-    const ALL = '__all__';
-    const DEVDESK = '(DevDesk)';
-    const OTHER = '*';
-    const KIND = { workspace: 'workspace', git: 'git', folder: 'folder' };
-    /** A special project (Unknown, the other projects): no kind after its name. */
-    const special = (project) => project.startsWith('(') || project === OTHER;
-    const add = (sel, value, text, title) => {
-      const o = document.createElement('option');
-      o.value = value;
-      o.textContent = text;
-      if (title) o.title = title;
-      sel.append(o);
-    };
+    /** A select of the scope (`selects` is one of the popover's, from `scopeSelects` in src/core/usageScope.ts). */
+    function scopeSelect(label, selects) {
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', label);
+      for (const o of selects.options) {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.text;
+        if (o.title) opt.title = o.title;
+        sel.append(opt);
+      }
+      sel.value = selects.value;
+      sel.addEventListener('change', () => {
+        const o = selects.options[sel.selectedIndex];
+        if (o) send('usageScope', { scope: o.scope });
+      });
+      return sel;
+    }
     /** The scope's selects: project (this window's first, All projects, the others), then its worktrees. */
     function scopeLine(u) {
       const line = el('div', 'stats-scope');
-      const project = document.createElement('select');
-      project.setAttribute('aria-label', 'Project');
-      const label = (c) => `${c.label}${c.project === u.windowProject ? ' (this window)' : ''}${special(c.project) ? '' : ` · ${c.kindLabel ?? KIND[c.kind] ?? c.kind}`}`;
-      const [mine, ...rest] = u.choices[0] && u.choices[0].project === u.windowProject ? u.choices : [undefined, ...u.choices];
-      if (mine) add(project, mine.project, label(mine), mine.title);
-      add(project, ALL, 'All projects');
-      for (const c of rest) add(project, c.project, label(c), c.title);
-      project.value = u.scope.kind === 'all' ? ALL : u.scope.project;
-      project.addEventListener('change', () => send('usageScope', { scope: project.value === ALL ? { kind: 'all' } : { kind: 'project', project: project.value } }));
-      line.append(project);
-      const chosen = u.scope.kind === 'project' && u.choices.find((c) => c.project === u.scope.project);
-      // Shown on a worktree scope too, so All worktrees stays reachable when the project has only that one.
-      if (chosen && (chosen.worktrees.length > 1 || u.scope.worktree)) {
-        const wt = document.createElement('select');
-        wt.setAttribute('aria-label', 'Worktree');
-        add(wt, '', 'All worktrees');
-        for (const w of chosen.worktrees) add(wt, w.worktree, w.worktree);
-        if (u.scope.worktree && !chosen.worktrees.some((w) => w.worktree === u.scope.worktree)) add(wt, u.scope.worktree, u.scope.worktree);
-        wt.value = u.scope.worktree || '';
-        wt.addEventListener('change', () =>
-          send('usageScope', { scope: wt.value ? { kind: 'project', project: chosen.project, worktree: wt.value } : { kind: 'project', project: chosen.project } }),
-        );
-        line.append(wt);
-      }
+      line.append(scopeSelect('Project', u.selects.project));
+      if (u.selects.worktree) line.append(scopeSelect('Worktree', u.selects.worktree));
       return line;
     }
     /**
-     * A breakdown row. Where it narrows (under All projects, a project other than DevDesk's or the other projects;
-     * under a project, a worktree while none is chosen), clicking it narrows the scope to its project, or its worktree.
+     * A breakdown row. Where it narrows (`narrow`, see `narrowScope` in src/core/usageScope.ts), clicking it narrows
+     * the scope to its project, or its worktree.
      */
-    function placeRow(p, u) {
+    function placeRow(p) {
       const r = row(p.label, p, `${p.share}%`);
       r.title = p.title;
-      const narrows = p.project !== DEVDESK && p.project !== OTHER && !(u.scope.kind === 'project' && u.scope.worktree);
-      if (!narrows) return r;
+      if (!p.narrow) return r;
       r.classList.add('stats-place');
       r.tabIndex = 0;
       r.setAttribute('role', 'button');
       // The name a screen reader reads replaces the row's text: it carries the numbers too.
       r.setAttribute('aria-label', `Show ${p.label}: ${p.totalText} total, ${p.cachedText} cached, ${p.share}%`);
-      const go = () => send('usageScope', { scope: p.worktree !== undefined ? { kind: 'project', project: p.project, worktree: p.worktree } : { kind: 'project', project: p.project } });
+      const go = () => send('usageScope', { scope: p.narrow });
       r.addEventListener('click', go);
       r.addEventListener('keydown', (ev) => {
         if (ev.key !== 'Enter' && ev.key !== ' ') return;
@@ -1770,26 +1748,12 @@
       btn.setAttribute('aria-expanded', 'true');
       send('usage');
     }
-    const n = (v) => v.toLocaleString();
-    /** `3 min`, `1 h 5 min` */
-    const duration = (ms) => {
-      const m = Math.max(1, Math.round(ms / 60_000));
-      return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
-    };
-    /** What the count is doing, as `Reading 12 of 340 transcripts…` (the counting phases of `CountProgress`). */
-    function progressText(p) {
-      if (p.phase === 'listing') {
-        if (p.listed && p.found) return `Checking which transcripts changed: ${n(p.listed)} of ${n(p.found)}…`;
-        return p.found ? `Listing transcripts: ${n(p.found)} found…` : 'Listing transcripts…';
-      }
-      if (p.phase === 'reading') return `Reading ${n(p.files)} of ${n(p.totalFiles)} transcripts…`;
-      return 'Counting today…';
-    }
     /** How far the count has got, while the popup waits for it (shows "Counting…", not the numbers). */
     function progress(p) {
       const waiting = pop.querySelector('.stats-counting');
       if (pop.hidden || !waiting || !p) return;
-      const parts = [el('div', 'stats-counting-head', progressText(p))];
+      // What the count is doing, as `Reading 12 of 340 transcripts…`.
+      const parts = [el('div', 'stats-counting-head', countHead(p, 'transcripts'))];
       if (p.phase === 'reading' && p.totalFiles) {
         const bar = el('progress', 'stats-progress');
         bar.max = Math.max(1, p.totalBytes || p.totalFiles);
@@ -1797,7 +1761,7 @@
         bar.setAttribute('aria-label', 'Counting progress');
         parts.push(bar);
       }
-      const left = p.etaMs === undefined ? '' : p.etaMs < 60_000 ? 'less than a minute left' : `about ${duration(p.etaMs)} left`;
+      const left = timeLeftText(p.etaMs, false);
       if (left) parts.push(el('div', 'stats-note', left));
       parts.push(el('div', 'stats-note', 'It keeps counting when you close this, and what is counted is saved.'));
       waiting.replaceChildren(...parts);
@@ -1811,7 +1775,7 @@
       const places = (u.today.places || []).slice(0, 5);
       if (places.length > (all ? 0 : 1)) {
         parts.push(section(all ? 'Today by project' : 'Today by worktree'));
-        for (const p of places) parts.push(placeRow(p, u));
+        for (const p of places) parts.push(placeRow(p));
       }
       if (u.today.models.length) {
         parts.push(section('Today by model'));
@@ -1830,11 +1794,11 @@
       parts.push(more());
       // Rebuilding drops the select or breakdown row being used: give focus back to the select with the same label,
       // or, when that element is gone (a row, or the Worktree select of a project with one worktree), to the Project select.
-      const active = document.activeElement;
+      const active = /** @type {HTMLElement} */ (document.activeElement);
       const hadFocus = pop.contains(active) && (active.tagName === 'SELECT' || active.classList.contains('stats-place'));
       const label = hadFocus && active.tagName === 'SELECT' ? active.getAttribute('aria-label') : undefined;
       pop.replaceChildren(...parts);
-      if (hadFocus) (label && pop.querySelector(`select[aria-label="${label}"]`) || pop.querySelector('select[aria-label="Project"]'))?.focus();
+      if (hadFocus) (/** @type {HTMLElement | null} */ ((label && pop.querySelector(`select[aria-label="${label}"]`)) || pop.querySelector('select[aria-label="Project"]')))?.focus();
     }
     btn.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -1854,7 +1818,7 @@
   // ---- Search box: filters the lanes as you type; Enter asks the extension's model search (Task 6) -------------
 
   const search = (function () {
-    const input = $('search');
+    const input = /** @type {HTMLInputElement} */ ($('search'));
     const askBtn = $('ask');
     const banner = $('search-banner');
     let terms = parseQuery(state.query);
@@ -1871,6 +1835,7 @@
      * `phase`: `asked` while a query is scheduled or sent and not answered yet. `onBoard`: the board's sessions whose
      * transcript has the query's words, card id → the excerpt (or null).
      */
+    /** @type {{ phase: string, results: any[], onBoard: Map<string, any>, indexing?: { indexed: number, total: number } }} */
     let history = { phase: 'none', results: [], onBoard: new Map(), indexing: undefined };
     /** History search is turned off (known across a clear, so the lane does not flash back on). */
     let historyOff = false;
@@ -2053,6 +2018,7 @@
    * What each message from the extension does (`src/board/messages.ts` has their shapes). A new message type is one
    * more entry here.
    */
+  /** @type {{ [K in PanelMessage['type']]: (m: Extract<PanelMessage, { type: K }>) => void }} */
   const HOST_MESSAGES = {
     searchResult: (m) => search.result(m),
     historyResults: (m) => search.historyResult(m),

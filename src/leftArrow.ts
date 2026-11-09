@@ -42,7 +42,7 @@ async function leftArrow(tree: SessionsTree): Promise<void> {
       log.debug(`cannot read the prompt of ${target.session}: ${(err as Error).message}`);
     }
   }
-  if (empty) await tree.focus(tree.focusedCard(terminal));
+  if (empty) await tree.focus(tree.state.focusedCard(terminal));
   else terminal.sendText(LEFT, false);
 }
 

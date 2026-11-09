@@ -1,6 +1,7 @@
 import type { EndedRecord } from './ended';
 import { runningCount } from './sessionChildren';
 import type { SessionCard } from './sessions';
+import { STATE_INFO } from './sessionStates';
 import { DEFAULT_SERVER, isSessionId } from './tmux';
 
 /**
@@ -28,9 +29,6 @@ export interface ParkPick {
   reason: ParkReason;
 }
 
-/** A live state a session may be parked in: its turn is over and nothing waits on the user. */
-const PARKABLE: ReadonlySet<string> = new Set(['done', 'idle', 'blocked', 'parked']);
-
 /** A DevDesk (`cc-`) session on `server` with a conversation to resume. */
 const ownSession = (c: SessionCard, server: string) => isSessionId(c.sessionId) && !!c.tmuxSession?.startsWith('cc-') && c.tmuxServer === server;
 
@@ -40,7 +38,7 @@ const ownSession = (c: SessionCard, server: string) => isSessionId(c.sessionId) 
  * included: parking it closes that shell.
  */
 export function parkable(c: SessionCard, server: string): boolean {
-  return ownSession(c, server) && PARKABLE.has(c.state) && !c.attached && runningCount(c.children ?? []) === 0 && c.updatedAt !== undefined;
+  return ownSession(c, server) && STATE_INFO[c.state].parkable && !c.attached && runningCount(c.children ?? []) === 0 && c.updatedAt !== undefined;
 }
 
 /** A session whose last turn still asks something of the user: it ended on an error, asks a question, or is unread. */
@@ -50,7 +48,7 @@ function needsYou(c: SessionCard, read: (c: SessionCard) => boolean): boolean {
 }
 
 /** A DevDesk session whose Claude still runs (counts against `maxLive`). */
-const live = (c: SessionCard, server: string) => ownSession(c, server) && c.state !== 'parked' && c.state !== 'stopped';
+const live = (c: SessionCard, server: string) => ownSession(c, server) && STATE_INFO[c.state].live;
 
 /**
  * The sessions to park now (see `ParkPolicy`), each once:

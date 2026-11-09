@@ -3,8 +3,8 @@ import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { discoverFeatures, type Feature, gitRootFor, isGitWorkspace, isPlainFolder, sameFeature } from '../src/core/worktrees';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { discoverFeatures, type Feature, findGitPlace, gitPlace, gitRootFor, isGitWorkspace, isPlainFolder, parseGitdirFile, sameFeature } from '../src/core/worktrees';
 
 describe('git repositories', () => {
   const git = (cwd: string, ...args: string[]) =>
@@ -101,5 +101,47 @@ describe('sameFeature', () => {
     expect(sameFeature(feature, { ...feature, packages: [] })).toBe(false);
     expect(sameFeature(feature, { ...feature, packages: [...feature.packages, { name: 'PkgB', dir: '/ws/worktrees/feat-a/src/PkgB' }] })).toBe(false);
     expect(sameFeature(feature, { ...feature, packages: [{ name: 'PkgB', dir: '/ws/worktrees/feat-a/src/PkgB' }] })).toBe(false);
+  });
+});
+
+describe('parseGitdirFile', () => {
+  it('resolves the git directory from the folder and finds the main repository', () => {
+    expect(parseGitdirFile('gitdir: ../../../.git/worktrees/fix\n', '/w/repo/.claude/worktrees/fix')).toEqual({ gitDir: '/w/repo/.git/worktrees/fix', repo: '/w/repo' });
+    expect(parseGitdirFile('gitdir: /w/repo/.git/modules/sub\n', '/w/repo/sub')).toEqual({ gitDir: '/w/repo/.git/modules/sub', repo: undefined });
+    expect(parseGitdirFile('nonsense', '/w')).toBeUndefined();
+  });
+
+  it('takes the last .git/worktrees of a nested path, and only when the worktree id ends it', () => {
+    expect(parseGitdirFile('gitdir: /w/old/.git/worktrees/x/repo/.git/worktrees/fix', '/x')?.repo).toBe('/w/old/.git/worktrees/x/repo');
+    expect(parseGitdirFile('gitdir: /w/repo/.git/worktrees/fix/modules/sub', '/x')?.repo).toBeUndefined();
+  });
+});
+
+describe('gitPlace', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = realpathSync(await mkdtemp(join(tmpdir(), 'gitplace-')));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('gives the top and the main repository of a repository, a linked worktree and a submodule', async () => {
+    const repo = join(root, 'repo');
+    await mkdir(join(repo, '.git', 'worktrees', 'side'), { recursive: true });
+    await mkdir(join(repo, 'lib'), { recursive: true });
+    const side = join(root, 'side');
+    await mkdir(join(side, 'deep'), { recursive: true });
+    await writeFile(join(side, '.git'), `gitdir: ${join(repo, '.git', 'worktrees', 'side')}\n`);
+    const sub = join(repo, 'sub');
+    await mkdir(sub);
+    await writeFile(join(sub, '.git'), 'gitdir: ../.git/modules/sub\n');
+
+    expect(gitPlace(repo)).toEqual({ top: repo, repo });
+    expect(gitPlace(join(repo, 'lib'))).toBeUndefined();
+    expect(findGitPlace(join(repo, 'lib'))).toEqual({ top: repo, repo });
+    expect(findGitPlace(join(side, 'deep'))).toEqual({ top: side, repo });
+    expect(findGitPlace(sub)).toEqual({ top: sub, repo: sub });
+    expect(findGitPlace(root)).toBeUndefined();
   });
 });

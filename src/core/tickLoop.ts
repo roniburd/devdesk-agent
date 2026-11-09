@@ -17,6 +17,8 @@ export interface TickLoopOptions {
 export interface TickLoop {
   /** Call when `active()` or `intervalMs()` may have changed: pauses, resumes or reschedules. */
   update(): void;
+  /** A tick's work was just done outside the loop: the next tick waits a full interval from now. */
+  postpone(): void;
   /** True while a tick runs. */
   readonly running: boolean;
   dispose(): void;
@@ -78,6 +80,10 @@ export function tickLoop(o: TickLoopOptions): TickLoop {
   update();
   return {
     update,
+    postpone: () => {
+      lastEnd = now();
+      update();
+    },
     get running() {
       return running;
     },

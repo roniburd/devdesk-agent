@@ -233,42 +233,123 @@ export interface ChildrenOptions {
   live: boolean;
 }
 
+/** A child whose subtree can no longer change, kept so later refreshes skip its files (`ChildrenReader.final`). */
+interface FinalChild {
+  /** The launch as the transcript showed it (JSON), so a later change to it reads the child again. */
+  launch: string;
+  finishedLimit: number;
+  depth: number;
+  node: SessionChild;
+  /** An agent's transcript size and mtime when it was read: it grows again if the agent is resumed. */
+  size?: number;
+  mtimeMs?: number;
+}
+
 /** Transcripts scanned so far, by path. Reuse one across refreshes so each refresh reads only what was appended. */
 export class ChildrenReader {
   private readonly scans = new GrowingFiles(() => new TranscriptScan());
+  /**
+   * Finished children whose subtree can no longer change (nothing in it runs, an agent's transcript says it finished, a
+   * workflow's summary says it ended), by transcript and launch id. Each refresh then stats an agent's transcript
+   * instead of reading it, its meta file and everything under it again.
+   */
+  private final = new Map<string, FinalChild>();
+  /** Summaries of ended workflows, by path: written once when the workflow ends. */
+  private summaries = new Map<string, Record<string, unknown>>();
+  /** The tree of a session whose Claude process is gone, by transcript: it changes only if the transcript does. */
+  private stopped = new Map<string, { scan: TranscriptScan; offset: number; finishedLimit: number; tree: SessionChild[] }>();
+  private touched = { final: new Set<string>(), summaries: new Set<string>(), stopped: new Set<string>() };
 
   /** The tree under a session, from its transcript (`<dir>/<session>.jsonl`). */
   async read(transcriptPath: string, options: ChildrenOptions): Promise<SessionChild[]> {
     const sessionDir = transcriptPath.replace(/\.jsonl$/, '');
-    return this.under(transcriptPath, sessionDir, options, 0);
+    if (options.live) return this.under(transcriptPath, sessionDir, options, 0);
+    this.touched.stopped.add(transcriptPath);
+    const scan = await this.scans.read(transcriptPath);
+    const kept = this.stopped.get(transcriptPath);
+    if (scan && kept && kept.scan === scan && kept.offset === scan.offset && kept.finishedLimit === options.finishedLimit) return kept.tree;
+    const tree = await this.under(transcriptPath, sessionDir, options, 0, scan);
+    if (scan) this.stopped.set(transcriptPath, { scan, offset: scan.offset, finishedLimit: options.finishedLimit, tree });
+    else this.stopped.delete(transcriptPath);
+    return tree;
   }
 
   /** Forgets transcripts not read since the last call (sessions that went away). */
   prune(): void {
     this.scans.prune();
+    const keep = <V>(map: Map<string, V>, touched: Set<string>) => {
+      for (const key of map.keys()) if (!touched.has(key)) map.delete(key);
+      touched.clear();
+    };
+    keep(this.final, this.touched.final);
+    keep(this.summaries, this.touched.summaries);
+    keep(this.stopped, this.touched.stopped);
   }
 
-  private async under(transcript: string, sessionDir: string, options: ChildrenOptions, depth: number): Promise<SessionChild[]> {
-    const scan = await this.scans.read(transcript);
+  private async under(transcript: string, sessionDir: string, options: ChildrenOptions, depth: number, read?: TranscriptScan): Promise<SessionChild[]> {
+    const scan = read ?? (await this.scans.read(transcript));
     if (!scan) return [];
-    const children = await Promise.all(scan.list().map((l) => this.child(l, sessionDir, options, depth)));
+    const launches = scan.list();
+    // A launch the transcript shows finished stays finished (as does every one once the session is gone): when at least
+    // `finishedLimit` of those follow it, limitFinished folds it into the "more" row whatever its subtree is, so it is
+    // not read.
+    const folded = new Array<boolean>(launches.length).fill(false);
+    for (let i = launches.length - 1, after = 0; i >= 0; i--) {
+      if (options.live && launches[i].state === 'running') continue;
+      folded[i] = after >= options.finishedLimit;
+      after++;
+    }
+    const children = await Promise.all(
+      launches.map((l, i) => (folded[i] ? Promise.resolve(foldedChild(l)) : this.child(l, transcript, sessionDir, options, depth))),
+    );
     return limitFinished(children, options.finishedLimit);
   }
 
-  private async child(l: Launch, sessionDir: string, options: ChildrenOptions, depth: number): Promise<SessionChild> {
+  private async child(l: Launch, transcript: string, sessionDir: string, options: ChildrenOptions, depth: number): Promise<SessionChild> {
+    const cacheable = options.live && ((l.kind === 'agent' && !!l.agentId) || (l.kind === 'workflow' && !!l.runId));
+    const key = `${transcript}\0${l.id}`;
+    const launch = cacheable ? JSON.stringify(l) : '';
+    if (cacheable) {
+      this.touched.final.add(key);
+      const kept = this.final.get(key);
+      if (kept && kept.launch === launch && kept.finishedLimit === options.finishedLimit && kept.depth === depth && (await this.unchanged(kept))) return kept.node;
+      this.final.delete(key);
+    }
     const base: SessionChild = { id: l.id, kind: l.kind, label: l.label, detail: l.detail, state: l.state, startedAt: l.startedAt, background: l.background, children: [] };
+    let ended = false;
     if (l.kind === 'shell') {
       base.file = l.outputPath;
     } else if (l.kind === 'agent' && l.agentId) {
       const file = join(sessionDir, 'subagents', `agent-${l.agentId}.jsonl`);
       base.file = file;
       if (depth < MAX_DEPTH) base.children = await this.under(file, sessionDir, options, depth + 1);
-      if (base.state === 'running' && (await this.agentFinished(file))) base.state = 'done';
+      if (base.state === 'running') {
+        ended = await this.agentFinished(file);
+        if (ended) base.state = 'done';
+      } else if (cacheable && !anyRunning(base.children)) {
+        ended = await this.agentFinished(file);
+      }
     } else if (l.kind === 'workflow' && l.runId) {
-      await this.workflow(base, l, sessionDir, options);
+      ended = await this.workflow(base, l, sessionDir, options);
+    }
+    if (cacheable && ended && base.state !== 'running' && !anyRunning(base.children)) {
+      const kept: FinalChild = { launch, finishedLimit: options.finishedLimit, depth, node: base };
+      if (l.kind === 'agent') {
+        const info = await stat(base.file as string).catch(() => undefined);
+        kept.size = info?.size;
+        kept.mtimeMs = info?.mtimeMs;
+      }
+      this.final.set(key, kept);
     }
     if (!options.live) stopAll(base);
     return base;
+  }
+
+  /** Whether a kept agent's transcript is as it was when read (a resumed agent writes to it again). */
+  private async unchanged(kept: FinalChild): Promise<boolean> {
+    if (kept.node.kind !== 'agent') return true;
+    const info = await stat(kept.node.file as string).catch(() => undefined);
+    return info?.size === kept.size && info?.mtimeMs === kept.mtimeMs;
   }
 
   private async agentFinished(file: string): Promise<boolean> {
@@ -277,11 +358,24 @@ export class ChildrenReader {
     return this.scans.peek(file)?.finished === true;
   }
 
-  /** A workflow's phases and agents: from its summary once finished, else from the agents written so far. */
-  private async workflow(node: SessionChild, l: Launch, sessionDir: string, options: ChildrenOptions): Promise<void> {
+  /** A workflow's summary once it has one; kept once it says the workflow ended. */
+  private async summary(path: string): Promise<Record<string, unknown> | undefined> {
+    this.touched.summaries.add(path);
+    const kept = this.summaries.get(path);
+    if (kept) return kept;
+    const summary = await readJson(path);
+    if (summary && workflowEnded(summary)) this.summaries.set(path, summary);
+    return summary;
+  }
+
+  /**
+   * A workflow's phases and agents: from its summary once finished, else from the agents written so far. True when the
+   * summary says the workflow ended.
+   */
+  private async workflow(node: SessionChild, l: Launch, sessionDir: string, options: ChildrenOptions): Promise<boolean> {
     const runId = l.runId as string;
     const agentsDir = join(sessionDir, 'subagents', 'workflows', runId);
-    const summary = await readJson(join(sessionDir, 'workflows', `${runId}.json`));
+    const summary = await this.summary(join(sessionDir, 'workflows', `${runId}.json`));
     if (summary) {
       node.file = join(sessionDir, 'workflows', `${runId}.json`);
       if (node.state === 'running') node.state = WORKFLOW_STATES[String(summary.status)] ?? 'running';
@@ -296,14 +390,14 @@ export class ChildrenReader {
           startedAt: typeof p.startedAt === 'number' ? p.startedAt : undefined,
         }));
       node.children = byPhase(node.id, agents, agentsDir, options.finishedLimit);
-      return;
+      return workflowEnded(summary);
     }
     node.file = l.scriptPath;
     let names: string[];
     try {
       names = await readdir(agentsDir);
     } catch {
-      return;
+      return false;
     }
     const agents = await Promise.all(
       names
@@ -324,7 +418,23 @@ export class ChildrenReader {
     );
     agents.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
     node.children = byPhase(node.id, agents, agentsDir, options.finishedLimit);
+    return false;
   }
+}
+
+/** Whether a workflow summary's status is a final one. */
+function workflowEnded(summary: Record<string, unknown>): boolean {
+  const state = WORKFLOW_STATES[String(summary.status)];
+  return state !== undefined && state !== 'running';
+}
+
+/** A finished launch that limitFinished folds into the "more" row: only its id and (finished) state are used. */
+function foldedChild(l: Launch): SessionChild {
+  return { id: l.id, kind: l.kind, label: l.label, detail: l.detail, state: l.state === 'running' ? 'stopped' : l.state, startedAt: l.startedAt, background: l.background, children: [] };
+}
+
+function anyRunning(children: readonly SessionChild[]): boolean {
+  return children.some((c) => c.state === 'running' || anyRunning(c.children));
 }
 
 /** How deep agents of agents are followed. */

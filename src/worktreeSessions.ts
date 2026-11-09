@@ -23,7 +23,7 @@ import { sessionsClaudeCommand, sessionsWorktreeCreateCommand, sessionsWorktreeK
 import { log } from './log';
 import { JsonFileStore } from './state/jsonFileStore';
 import type { SessionsModel } from './sessionsModel';
-import { startNumbered } from './sessionsCommands';
+import { startNumbered, type SessionRowSelector } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
 
 /** A package workspace's worktree command can take a while (it may set up its packages); give up after this. */
@@ -141,7 +141,7 @@ export interface WorktreeLaunch {
  */
 export async function newWorktreeSession(
   model: SessionsModel,
-  tree: SessionsTree,
+  tree: SessionRowSelector,
   store: WorktreeTaskStore,
   arg?: unknown,
   launch: WorktreeLaunch = {},

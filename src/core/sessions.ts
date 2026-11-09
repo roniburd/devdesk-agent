@@ -7,6 +7,7 @@ import { featureDirs, type Feature } from './worktrees';
 import { isWithin, trimSlashes } from './paths';
 import type { EndedRecord, EndReason } from './ended';
 import type { RegistryEntry } from './sessionInfo';
+import { isRecordState, STATE_INFO } from './sessionStates';
 
 /** `blocked`: the turn ended on an error (StopFailure). */
 export type RecordState = 'working' | 'waiting' | 'done' | 'idle' | 'blocked';
@@ -102,8 +103,6 @@ export interface SessionCard {
 export const NO_HOOKS_DETAIL = 'Install Claude status hooks to see what Claude is doing';
 export const NOT_RUNNING_DETAIL = 'Claude is not running in this session';
 
-const RECORD_STATES: ReadonlySet<string> = new Set(['working', 'waiting', 'done', 'idle', 'blocked']);
-
 /**
  * A "prompt" Claude Code submitted itself, not the user: a background task's result (`<task-notification>`), a system
  * reminder, or a subagent's hand-back or another session's message (`<agent-message from="…">`, which the transcript
@@ -122,7 +121,7 @@ export function parseHookRecord(text: string): HookRecord | undefined {
   if (typeof r.sessionId !== 'string' || !r.sessionId) return undefined;
   if (r.tmuxSession !== null && typeof r.tmuxSession !== 'string') return undefined;
   if (typeof r.cwd !== 'string' || typeof r.event !== 'string' || typeof r.detail !== 'string') return undefined;
-  if (typeof r.state !== 'string' || !RECORD_STATES.has(r.state)) return undefined;
+  if (typeof r.state !== 'string' || !isRecordState(r.state)) return undefined;
   if (!isFiniteNumber(r.updatedAt)) return undefined;
   if (!optionalString(r.tmuxPane) || !optionalString(r.tmuxServer) || !optionalString(r.transcriptPath) || !optionalString(r.prompt)) return undefined;
   if (!optionalString(r.lastEditPath)) return undefined;
@@ -193,6 +192,11 @@ export class TranscriptEnds {
     const read = { size: tail.size, mtimeMs: tail.mtimeMs, end: transcriptEnd(tail.text) };
     this.known.set(path, read);
     return read;
+  }
+
+  /** The transcript's size when last read, if it was. */
+  sizeOf(path: string): number | undefined {
+    return this.known.get(path)?.size;
   }
 
   /** Forgets transcripts not read since the last call. */
@@ -318,10 +322,7 @@ const paneRunsClaude = (p: TmuxPane) => p.claude ?? isClaudeCommand(p.command);
 const paneBusy = (p: TmuxPane) => paneRunsClaude(p) || !isShellCommand(p.command);
 
 /** SessionEnd deletes a session's record, so a dead process with a record that was still in a turn crashed or was killed. */
-const diedMidTurn = (r: HookRecord, p: TmuxPane) =>
-  (r.state === 'working' || r.state === 'waiting' || r.state === 'blocked') && inSession(p, r);
-
-const ORDER: Record<SessionState, number> = { waiting: 0, blocked: 1, working: 2, done: 3, idle: 4, unknown: 5, stopped: 6, parked: 7 };
+const diedMidTurn = (r: HookRecord, p: TmuxPane) => STATE_INFO[r.state].midTurn && inSession(p, r);
 
 /**
  * The cards of sessions working in this workspace: whose cwd is inside one of `dirs` (the workspace root, as opened and
@@ -469,7 +470,7 @@ export function buildSessionCards(
   for (const r of endedLeft) cards.push(parkedCard(r, featureForSession(features, r.cwd, r.lastEditPath)));
 
   return cards.sort(
-    (a, b) => ORDER[a.state] - ORDER[b.state] || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.id.localeCompare(b.id),
+    (a, b) => STATE_INFO[a.state].listOrder - STATE_INFO[b.state].listOrder || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.id.localeCompare(b.id),
   );
 }
 
@@ -518,7 +519,7 @@ export function runningCopy(
   alive: (pid: number) => boolean = processAlive,
 ): SessionCard | 'elsewhere' | undefined {
   const pids = new Set(registry.filter((e) => e.sessionId === sessionId && alive(e.pid)).map((e) => e.pid));
-  const running = (c: SessionCard) => c.state !== 'parked' && c.state !== 'stopped' && !!c.tmuxSession;
+  const running = (c: SessionCard) => STATE_INFO[c.state].live && !!c.tmuxSession;
   const card =
     cards.find((c) => running(c) && c.sessionId === sessionId) ?? cards.find((c) => running(c) && c.pid !== undefined && pids.has(c.pid));
   return card ?? (pids.size ? 'elsewhere' : undefined);

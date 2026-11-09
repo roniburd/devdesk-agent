@@ -1,19 +1,13 @@
-// The Claude Usage page (media/usage.js) in jsdom: the page's own markup from src/usagePanel.ts, with the extension
+// The Claude Usage page (media/usage.js, bundled) in jsdom: the page's own markup from src/usagePanel.ts, with the extension
 // played by this test (it posts progress, partial pages and the final page).
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dayKey } from '../src/core/usageHistory';
 import { scopedPage } from '../src/core/usageScope';
+import { webviewBody } from './webviewBody';
+import { webviewScript } from './webviewScript';
 
-const ROOT = join(__dirname, '..');
-
-function usageHtml(): string {
-  const src = readFileSync(join(ROOT, 'src/usagePanel.ts'), 'utf8');
-  const body = /<body>([\s\S]*?)<script/.exec(src)![1];
-  return `<!DOCTYPE html><html><body>${body.replace(/\$\{[^}]*\}/g, '')}</body></html>`;
-}
+const usageHtml = () => webviewBody('src/usagePanel.ts');
 
 let dom: JSDOM | undefined;
 afterEach(() => dom?.window.close());
@@ -30,7 +24,7 @@ function open(saved: { state?: unknown } = {}) {
     },
     postMessage: (m: Record<string, unknown>) => posted.push(m),
   });
-  win.eval(readFileSync(join(ROOT, 'media/usage.js'), 'utf8'));
+  win.eval(webviewScript('usage'));
   const main = win.document.getElementById('main')!;
   const send = async (m: unknown) => {
     win.postMessage(m, '*');

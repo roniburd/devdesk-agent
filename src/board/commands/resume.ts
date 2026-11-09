@@ -9,7 +9,7 @@ import type { Handler } from '../types';
  */
 export const resume: Handler = async ({ submission, composer, ui }) => {
   const filter = submission.arg;
-  const all = composer.tree.cards;
+  const all = composer.viewState.cards;
   const matched = matchSessions(all, filter);
   const cards = matched.filter((c) => c.tmuxSession);
   if (!cards.length) {

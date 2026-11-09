@@ -3,14 +3,15 @@
  * cached share), with the selected period's models, sessions, projects (or worktrees) and DevDesk insight calls, for
  * the window's scope: one project (and worktree) or all projects, chosen in the header. Data comes from the host
  * (`usagePanel.ts`), already summed and formatted. */
+import { countHead, durationText, timeLeftText } from '../src/core/usageProgress';
+
 (function () {
-  // @ts-ignore acquireVsCodeApi is provided by the webview.
   const vscode = acquireVsCodeApi();
   const SVG = 'http://www.w3.org/2000/svg';
   const main = /** @type {HTMLElement} */ (document.getElementById('main'));
   /** @type {{ unit: 'day' | 'week' | 'month', selected?: string, everyOpen?: boolean, everySort?: { col: number, dir: 1 | -1, for: string } }} */
   const state = Object.assign({ unit: 'day' }, vscode.getState() || {});
-  /** @type {any} */
+  /** @type {any} The page last posted (`ScopedPage` in src/core/usageScope.ts). */
   let page;
   /** How far the count in progress has got (undefined when none runs), and when that arrived (this clock). */
   /** @type {any} */
@@ -31,11 +32,6 @@
   const save = () => vscode.setState(state);
   const projectSel = /** @type {HTMLSelectElement} */ (document.getElementById('scope-project'));
   const worktreeSel = /** @type {HTMLSelectElement} */ (document.getElementById('scope-worktree'));
-  const ALL = '__all__';
-  const OTHER = '*';
-  const KIND = { workspace: 'workspace', git: 'git', folder: 'folder' };
-  /** A special project (Unknown, the other projects): no kind after its name. */
-  const special = (project) => project.startsWith('(') || project === OTHER;
   /** The status line above the page while a count runs (more than a second). */
   const status = el('section', 'status');
   status.setAttribute('role', 'status');
@@ -288,44 +284,33 @@
     return wrap;
   }
 
-  /** The option for a project: `name (this window) · Kind`. */
-  const projectText = (c) => `${c.label}${c.project === page.windowProject ? ' (this window)' : ''}${special(c.project) ? '' : ` · ${c.kindLabel ?? KIND[c.kind] ?? c.kind}`}`;
-  const option = (value, text, title) => {
-    const o = document.createElement('option');
-    o.value = value;
-    o.textContent = text;
-    if (title) o.title = title;
-    return o;
-  };
-  /**
-   * Fills the header's selects from the page: the project (this window's first, All projects, then the others), and
-   * the chosen project's worktree, shown when it has more than one (or one is chosen, so All worktrees stays reachable).
-   */
+  /** The options of a scope select (`page.selects`, from `scopeSelects` in src/core/usageScope.ts). */
+  const options = (sel) =>
+    sel.options.map((o) => {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.text;
+      if (o.title) opt.title = o.title;
+      return opt;
+    });
+  /** The scope the option chosen in `select` picks (`selects` is the page's `project` or `worktree` one). */
+  const chosenScope = (select, selects) => selects && selects.options[select.selectedIndex] && selects.options[select.selectedIndex].scope;
+  /** Fills the header's selects from the page: the project, and the chosen project's worktree when there is one to choose. */
   let scopeKey = '';
   function fillScope() {
-    const choices = page.choices || [];
-    const scope = page.scope || { kind: 'all' };
+    const selects = page.selects;
     // Hidden in the markup until the first page, so a first count does not show an empty select.
     projectSel.hidden = false;
     // Rebuilt only when what they show changes, so a partial page during a count doesn't close an open list.
-    const key = JSON.stringify([scope, page.windowProject, choices.map((c) => [c.project, c.kind, c.label, c.title, c.worktrees.map((w) => w.worktree)])]);
+    const key = JSON.stringify(selects);
     if (key === scopeKey) return;
     scopeKey = key;
-    const [mine, ...rest] = choices[0] && choices[0].project === page.windowProject ? choices : [undefined, ...choices];
-    const opts = [];
-    if (mine) opts.push(option(mine.project, projectText(mine), mine.title));
-    opts.push(option(ALL, 'All projects'));
-    for (const c of rest) opts.push(option(c.project, projectText(c), c.title));
-    projectSel.replaceChildren(...opts);
-    projectSel.value = scope.kind === 'all' ? ALL : scope.project;
-    const chosen = scope.kind === 'project' ? choices.find((c) => c.project === scope.project) : undefined;
-    const showWorktrees = !!chosen && (chosen.worktrees.length > 1 || !!scope.worktree);
-    worktreeSel.hidden = !showWorktrees;
-    if (!chosen || !showWorktrees) return worktreeSel.replaceChildren();
-    const wts = [option('', 'All worktrees'), ...chosen.worktrees.map((w) => option(w.worktree, w.worktree))];
-    if (scope.worktree && !chosen.worktrees.some((w) => w.worktree === scope.worktree)) wts.push(option(scope.worktree, scope.worktree));
-    worktreeSel.replaceChildren(...wts);
-    worktreeSel.value = scope.worktree || '';
+    projectSel.replaceChildren(...options(selects.project));
+    projectSel.value = selects.project.value;
+    worktreeSel.hidden = !selects.worktree;
+    if (!selects.worktree) return worktreeSel.replaceChildren();
+    worktreeSel.replaceChildren(...options(selects.worktree));
+    worktreeSel.value = selects.worktree.value;
   }
 
   const mb = (b) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
@@ -437,27 +422,14 @@
     });
   }
   // The window's scope is the host's: it posts the page again for the new one.
-  projectSel.addEventListener('change', () => vscode.postMessage({ type: 'setScope', scope: projectSel.value === ALL ? { kind: 'all' } : { kind: 'project', project: projectSel.value } }));
-  worktreeSel.addEventListener('change', () => {
-    if (!page || page.scope.kind !== 'project') return;
-    const project = page.scope.project;
-    vscode.postMessage({ type: 'setScope', scope: worktreeSel.value ? { kind: 'project', project, worktree: worktreeSel.value } : { kind: 'project', project } });
-  });
-  /** `512 MB`, `6.1 GB` */
-  function bytes(n) {
-    if (n < 1024 * 1024 * 1024) return `${Math.round(n / (1024 * 1024))} MB`;
-    return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  }
-  /** `45 s`, `4 min`, `1 h 5 min` */
-  function duration(ms) {
-    const s = Math.round(ms / 1000);
-    if (s < 60) return `${s} s`;
-    const m = Math.round(s / 60);
-    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+  for (const [select, which] of /** @type {const} */ ([[projectSel, 'project'], [worktreeSel, 'worktree']])) {
+    select.addEventListener('change', () => {
+      const scope = page && chosenScope(select, page.selects[which]);
+      if (scope) vscode.postMessage({ type: 'setScope', scope });
+    });
   }
   /** `Oct 21` */
   const shortDay = (key) => new Date(`${key}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const n = (v) => v.toLocaleString();
   /**
    * Fills the status line from the count in progress; false when there is none to show (no count, or one under a
    * second, so a quick count doesn't flash it). The time goes on between messages (a big transcript takes a while).
@@ -470,22 +442,18 @@
     if (elapsed < 1000) return false;
     const bar = el('progress');
     bar.setAttribute('aria-label', 'Counting progress');
-    let head;
+    const head = countHead(p, 'Claude transcripts', true);
     const notes = [];
-    if (p.phase === 'listing') {
-      if (p.listed && p.found) {
-        head = `Checking which Claude transcripts changed: ${n(p.listed)} of ${n(p.found)}…`;
-        bar.max = p.found;
-        bar.value = p.listed;
-      } else head = p.found ? `Listing Claude transcripts: ${n(p.found)} found…` : 'Listing Claude transcripts…';
+    if (p.phase === 'listing' && p.listed && p.found) {
+      bar.max = p.found;
+      bar.value = p.listed;
     } else if (p.phase === 'reading') {
-      head = `Reading ${n(p.files)} of ${n(p.totalFiles)} transcripts: ${bytes(p.bytes)} of ${bytes(p.totalBytes)}`;
       bar.max = Math.max(1, p.totalBytes);
       bar.value = p.bytes;
-    } else head = 'Counting today…';
+    }
     const eta = p.etaMs === undefined ? undefined : Math.max(0, p.etaMs - since);
-    const left = eta === undefined ? (p.phase === 'reading' ? 'working out the time left' : '') : eta < 60_000 ? 'less than a minute left' : `about ${duration(eta)} left`;
-    notes.push([`${duration(elapsed)} so far`, left].filter(Boolean).join(' · '));
+    const left = timeLeftText(eta, true, p.phase === 'reading' ? 'working out the time left' : '');
+    notes.push([`${durationText(elapsed, true)} so far`, left].filter(Boolean).join(' · '));
     if (p.savedThrough) notes.push(`Days up to ${shortDay(p.savedThrough)} are counted and shown below. They are saved, so closing the page or the window keeps them.`);
     if (p.phase === 'reading' && p.totalBytes > 1024 * 1024 * 1024) notes.push('The first count reads every transcript; later ones read only what is new.');
     status.replaceChildren(el('p', '', head), bar, ...notes.map((t) => el('p', 'muted', t)));
@@ -508,6 +476,7 @@
     resizeTimer = setTimeout(render, 100);
   });
   window.addEventListener('message', (ev) => {
+    /** @type {import('../src/usage/messages').UsageHostMessage | undefined} */
     const m = ev.data;
     if (m?.type === 'page') {
       page = m.page;

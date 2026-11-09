@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src vscode-resource:; img-src vscode-resource:; script-src 'nonce-BwcHBwcHBwcHBwcHBwcHBw==';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" href="vscode-resource:/ext/media/usage.css">
+<title>Claude Usage</title>
+</head>
+<body>
+<header class="bar">
+  <h1>Claude Usage</h1>
+  <div class="units" role="radiogroup" aria-label="Group by">
+    <button role="radio" data-unit="day" aria-checked="true">Day</button>
+    <button role="radio" data-unit="week" aria-checked="false">Week</button>
+    <button role="radio" data-unit="month" aria-checked="false">Month</button>
+  </div>
+  <div class="scope">
+    <select id="scope-project" aria-label="Project" hidden></select>
+    <select id="scope-worktree" aria-label="Worktree" hidden></select>
+  </div>
+  <span class="spacer"></span>
+  <button class="ghost" id="refresh" title="Count again" aria-label="Count again">↻</button>
+  <button class="ghost" id="settings" title="Usage history settings" aria-label="Usage history settings">⚙</button>
+</header>
+<main id="main" aria-live="polite"><p class="muted">Counting tokens…</p></main>
+<script nonce="BwcHBwcHBwcHBwcHBwcHBw==" src="vscode-resource:/ext/dist/webview/usage.js"></script>
+</body>
+</html>

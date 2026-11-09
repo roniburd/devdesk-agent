@@ -1190,6 +1190,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.boardSearch.historyScope` | `workspace` (or `all`: every session on this machine) |
 | `devdesk.boardSearch.historyDays` | `90` (transcripts not changed for this many days are not searched; 1-3650) |
 | `devdesk.boardSearch.historyMaxSessions` | *machine*, `5000` (at most this many past sessions, the newest, are searched; 100-100000) |
+| `devdesk.boardSearch.historySaveMinutes` | `5` (how often the index file is saved while transcripts grow; other windows see new text once it is; 0-60, 0: every check) |
 | `devdesk.boardSearch.historyDir` | empty (`projects` in Claude's config directory) |
 
 ### Usage history

@@ -2,33 +2,26 @@ import * as vscode from 'vscode';
 import { runningCount, type SessionChild } from './core/sessionChildren';
 import type { SessionCard } from './core/sessions';
 import {
-  attentionOrder,
   badgeFor,
-  cardShown,
-  cardSignature,
+  cardCapabilities,
   cardView,
   foldParked,
   formatAgo,
-  LOOK_ICONS,
   shownLook,
   readDecoration,
-  stateLook,
   truncate,
-  urgentByWorktree,
-  SettledOrder,
-  type Settle,
 } from './core/sessionsView';
+import { LOOKS } from './core/stateLooks';
 import { oneLine } from './core/text';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
-import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
-import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
+import { findByTmux } from './claudeSessions';
+import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsUnreadBadge } from './config';
 import { hooksSettingsShown, hooksStatus, watchHooksSettings } from './hooksCommands';
 import type { HooksStatus } from './core/hooks';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
-import { SessionsReadState } from './sessionsReadState';
-import { hostKey, MementoEntries } from './state/mementoState';
-import { isSessionColorId, rowDecoration, SESSION_COLORS_LIMIT } from './core/sessionColors';
+import { rowDecoration } from './core/sessionColors';
+import type { SessionViewState } from './sessionViewState';
 import type { WorktreeTaskStore } from './worktreeSessions';
 
 export type SessionNode =
@@ -60,8 +53,6 @@ const CHILD_KIND_TEXT: Record<SessionChild['kind'], string> = { agent: 'agent', 
 const PENDING_SELECT_MS = 30_000;
 /** URI scheme of the session rows' `resourceUri`, which only carries their read-state decoration. */
 const SESSION_SCHEME = 'devdesk-session';
-/** `globalState` key (per host, `hostKey`) of the colors given to sessions by hand: `[session id, color id][]`. */
-const COLORS_KEY = 'devdesk.sessions.colors';
 
 /**
  * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in attention
@@ -79,15 +70,9 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   readonly view: vscode.TreeView<SessionNode>;
   private readonly status = vscode.window.createStatusBarItem('devdesk.sessions.needsYou', vscode.StatusBarAlignment.Left, 50);
   private readonly subscriptions: vscode.Disposable[];
-  private readonly read: SessionsReadState;
-  /** Colors given to sessions by hand (**Set Color…**), shared by this host's windows. */
-  private readonly colors: MementoEntries<string>;
-  /** The colors last drawn, to redraw when another window changed them. */
-  private drawnColors: ReadonlyMap<string, string> | undefined;
   private hooksState: HooksStatus = 'installed';
   /** Counts hook reads, so a slow earlier read cannot overwrite a later one. */
   private hooksReads = 0;
-  private readonly settledOrder = new SettledOrder();
   /** A tmux session just started from DevDesk: selected as soon as the model lists it. */
   private pending: { session: string; server: string; until: number } | undefined;
   /** The session whose row was last selected because its Claude terminal came to the front. */
@@ -98,16 +83,14 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   constructor(
     readonly model: SessionsModel,
     private readonly tasks: WorktreeTaskStore,
-    state: vscode.Memento,
+    /** Read state, colors, settled order and the terminal in front, shared with the Claude Board. */
+    readonly state: SessionViewState,
   ) {
     this.hold = this.model.holder();
-    this.read = new SessionsReadState(model, state, () => this.syncRead());
-    this.colors = new MementoEntries(state, hostKey(COLORS_KEY), isSessionColorId, SESSION_COLORS_LIMIT);
     this.view = vscode.window.createTreeView('devdesk.sessions', { treeDataProvider: this, showCollapseAll: true, canSelectMany: true });
     this.status.name = 'Claude sessions needing input';
     this.status.command = 'devdesk.sessions.nextWaiting';
     this.subscriptions = [
-      this.read,
       this.view,
       this.status,
       this.changed,
@@ -118,11 +101,16 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
         if (e.affectsConfiguration('devdesk.sessions.groupByWorktree') || e.affectsConfiguration('devdesk.sessions.resortWorkingMinutes')) this.changed.fire(undefined);
         if (e.affectsConfiguration('devdesk.sessions.dimRead') || e.affectsConfiguration('devdesk.sessions.unreadBadge')) this.decorationsChanged.fire(undefined);
       }),
+      state.onDidChange((change) => {
+        if (change.decorations) this.decorationsChanged.fire(undefined);
+        if (change.rows) this.changed.fire(undefined);
+        if (change.urgent) this.urgentChanged.fire();
+      }),
       model.onDidChange(() => this.update()),
       tasks.onDidChange(() => this.changed.fire(undefined)),
       // Not on showing the view: its reveal would race a closing sidebar and show it again.
       this.view.onDidChangeVisibility(() => this.syncAcquire()),
-      vscode.window.onDidChangeActiveTerminal((t) => this.followTerminal(this.focusedCard(t))),
+      vscode.window.onDidChangeActiveTerminal((t) => this.followTerminal(this.state.focusedCard(t))),
       vscode.window.tabGroups.onDidChangeTabs(() => this.followTab()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.followTab()),
       watchHooksSettings(() => this.refreshHooks()),
@@ -143,8 +131,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
     if (uri.scheme !== SESSION_SCHEME) return undefined;
     const id = uri.path.slice(1);
-    const read = readDecoration(this.read.unread.has(id), { dimRead: sessionsDimRead(), badge: sessionsUnreadBadge() });
-    const d = rowDecoration(read, this.colors.get().get(id));
+    const read = readDecoration(this.state.unreadIds.has(id), { dimRead: sessionsDimRead(), badge: sessionsUnreadBadge() });
+    const d = rowDecoration(read, this.state.colorOf(id));
     return d && new vscode.FileDecoration(d.badge, d.tooltip, d.color ? new vscode.ThemeColor(d.color) : undefined);
   }
 
@@ -161,29 +149,9 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     );
   }
 
-  /** Sessions with something new since the user last looked at them (the Claude Board shows the same). */
-  get unreadIds(): ReadonlySet<string> {
-    return this.read.unread;
-  }
-
-  /** Whether the user has read what `card` shows now (also for sessions this window does not list). */
-  isRead(card: SessionCard): boolean {
-    return this.read.isRead(card);
-  }
-
-  /** Working sessions keep their order between re-sorts, here and on the Claude Board. */
-  get settle(): Settle {
-    return { order: this.settledOrder, everyMs: sessionsResortWorkingMs() };
-  }
-
-  /** Cards in attention order. */
-  get cards(): SessionCard[] {
-    return attentionOrder(this.model.current, Date.now(), sessionsIdleMs(), this.read.unread, sessionsUnreadFirst(), this.settle);
-  }
-
   /** Top-level rows: the worktrees with sessions or a recorded task, each with its cards in attention order. */
   groups(): WorktreeGroup[] {
-    return groupCards(this.cards, this.model.featureList, this.tasks.all());
+    return groupCards(this.state.cards, this.model.featureList, this.tasks.all());
   }
 
   /** A worktree's rows as the Claude view nests them (the Worktrees view lists them too, `devdesk.worktrees.showSessions`). */
@@ -198,12 +166,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
 
   /** The cards a `N earlier finished` row stands for, from the current listing. */
   private cardsOf(groupKey: string): SessionCard[] {
-    return groupKey === ALL_KEY ? this.cards : this.group(groupKey)?.cards ?? [];
-  }
-
-  /** The most urgent session of each worktree directory. */
-  urgentByWorktree(): Map<string, SessionCard> {
-    return urgentByWorktree(this.model.current, Date.now(), sessionsIdleMs(), this.read.unread);
+    return groupKey === ALL_KEY ? this.state.cards : this.group(groupKey)?.cards ?? [];
   }
 
   /** The Claude view is showing (for tests). */
@@ -279,134 +242,11 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     await vscode.commands.executeCommand('devdesk.sessions.focus');
   }
 
-  /** The card whose Claude terminal is in front (or is `terminal`), if any. */
-  focusedCard(terminal = vscode.window.activeTerminal): SessionCard | undefined {
-    const of = claudeTerminalSession(terminal);
-    return of && findByTmux(this.model.current, of.session, of.server);
-  }
-
-  /** Recomputes the unread sessions; when they changed, redraws their rows (and, if `fire`, the views). */
-  private syncRead(fire = true): void {
-    if (!this.read.sync()) return;
-    this.decorationsChanged.fire(undefined);
-    if (fire) {
-      this.changed.fire(undefined);
-      this.urgentChanged.fire();
-    }
-  }
-
-  /** Marks a session read or unread by hand (its row's and card's **Mark as Read/Unread**; see `SessionsReadState.setRead`). */
-  setRead(id: string, read: boolean): void {
-    const changed = this.read.setRead(id, read);
-    if (changed === undefined) return;
-    if (changed) this.decorationsChanged.fire(undefined);
-    this.changed.fire(undefined);
-    this.urgentChanged.fire();
-  }
-
-  /** The color given to a session by hand, if any. */
-  colorOf(id: string): string | undefined {
-    return this.colors.get().get(id);
-  }
-
-  /** The colors given to sessions by hand, by session id (the board draws them too). */
-  get sessionColors(): ReadonlyMap<string, string> {
-    return this.colors.get();
-  }
-
-  /** Gives sessions a color (a `SESSION_COLORS` id), or takes it away (undefined). */
-  async setColor(ids: readonly string[], color: string | undefined): Promise<void> {
-    if (!ids.length) return;
-    await this.colors.apply(new Map(ids.map((id) => [id, color])));
-    this.syncColors();
-    // Redraws the rows (their Color submenu checks) and, through it, the board's cards.
-    this.changed.fire(undefined);
-  }
-
-  /** Redraws the rows' decorations when the saved colors changed (here or in another window). */
-  private syncColors(): void {
-    const now = this.colors.get();
-    if (now === this.drawnColors) return;
-    this.drawnColors = now;
-    this.decorationsChanged.fire(undefined);
-  }
-
-  /**
-   * Everything that decides whether a session reads as unread, for `devdesk.sessions.diagnostics`: the window and its
-   * terminal tabs, and per session what it shows, its signature against the saved one, and why it last changed.
-   */
-  diagnostics(): unknown {
-    const now = Date.now();
-    const readMs = sessionsReadAfterMs();
-    const saved = this.read.savedState;
-    return {
-      at: new Date(now).toISOString(),
-      windowFocused: vscode.window.state.focused,
-      readAfterMs: readMs,
-      idleMs: sessionsIdleMs(),
-      stuckMs: sessionsStuckMs(),
-      unreadFirst: sessionsUnreadFirst(),
-      modelLoaded: this.model.isLoaded,
-      seeded: saved.seeded,
-      savedSeenCount: saved.count,
-      savedSeenKey: saved.key,
-      activeTerminal: vscode.window.activeTerminal?.name,
-      terminals: vscode.window.terminals.map((t) => t.name),
-      tabGroups: vscode.window.tabGroups.all.map((g) => ({
-        active: g.isActive,
-        activeTab: g.activeTab?.label,
-        tabs: g.tabs.map((t) => `${t.label}${t.input instanceof vscode.TabInputTerminal ? ' [terminal]' : ''}`),
-      })),
-      sessions: this.model.current.map((c) => {
-        const v = cardView(c, now, sessionsTmuxServer());
-        const { savedSignature, lastChange, inFrontSince: since } = this.read.sessionState(c.id);
-        return {
-          id: c.id,
-          title: v.title,
-          worktree: v.worktree,
-          look: stateLook(c, now, sessionsStuckMs()),
-          unread: this.read.unread.has(c.id),
-          lastReadChange: lastChange ? { ...lastChange, at: new Date(lastChange.at).toISOString() } : undefined,
-          signature: cardSignature(c),
-          savedSignature,
-          shown: cardShown(c),
-          terminalName: cardTerminal(c)?.name,
-          inFrontForMs: since === undefined ? undefined : now - since,
-          state: c.state,
-          updatedAt: c.updatedAt && new Date(c.updatedAt).toISOString(),
-          attached: c.attached,
-          crashed: c.crashed,
-          tmuxSession: c.tmuxSession,
-          tmuxPane: c.tmuxPane,
-          tmuxServer: c.tmuxServer,
-          sessionId: c.sessionId,
-          pid: c.pid,
-          cwd: c.cwd,
-          featureDir: c.featureDir,
-          transcriptPath: c.transcriptPath,
-          name: c.name,
-          prompt: c.prompt && truncate(c.prompt, 200),
-          summaryAt: c.summaryAt && new Date(c.summaryAt).toISOString(),
-          children: c.children?.map((k) => ({ id: k.id, kind: k.kind, state: k.state, label: k.label })),
-        };
-      }),
-    };
-  }
-
-  /**
-   * The card of the Claude terminal in front: the active editor tab's when it is a terminal, else the active terminal's
-   * (a terminal in the panel, or the one last in front while an editor or the board has the focus).
-   */
-  frontCard(): SessionCard | undefined {
-    const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-    return this.focusedCard(tab?.input instanceof vscode.TabInputTerminal ? claudeTerminalOfTab(tab) : vscode.window.activeTerminal);
-  }
-
   /**
    * Selects the row of the session whose Claude terminal came to the front (or is listed now), once each time, so the
    * user can select other rows meanwhile. Only while the view is visible.
    */
-  private followTerminal(card = this.frontCard()): void {
+  private followTerminal(card = this.state.frontCard()): void {
     if (!card) {
       this.followed = undefined;
       return;
@@ -419,7 +259,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** The active editor tab changed: a Claude terminal tab brought to the front selects its row again. */
   private followTab(): void {
     const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-    if (tab?.input instanceof vscode.TabInputTerminal) this.followTerminal(this.focusedCard(claudeTerminalOfTab(tab)));
+    if (tab?.input instanceof vscode.TabInputTerminal) this.followTerminal(this.state.tabCard(tab));
     else this.followed = undefined;
   }
 
@@ -439,8 +279,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
 
   private update(): void {
     const next = this.model.current;
-    this.syncRead(false);
-    this.syncColors();
+    this.state.syncRead(false);
+    this.state.syncColors();
     const waiting = next.filter((c) => c.state === 'waiting').length;
     this.view.badge = badgeFor(next);
     if (waiting && sessionsStatusBar()) {
@@ -467,14 +307,14 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       return foldParked(this.cardsOf(node.groupKey), sessionsFinishedSessions()).folded.map((card) => ({ kind: 'session', card, flat }));
     }
     if (node) return [];
-    const rows: SessionNode[] = sessionsGroupByWorktree() ? this.groups().map((group) => ({ kind: 'worktree', group })) : worktreeRows(ALL_KEY, this.cards);
+    const rows: SessionNode[] = sessionsGroupByWorktree() ? this.groups().map((group) => ({ kind: 'worktree', group })) : worktreeRows(ALL_KEY, this.state.cards);
     return this.hooksState !== 'installed' ? [{ kind: 'hooks' }, ...rows] : rows;
   }
 
   /** A session's worktree group (needed to reveal session rows); other rows are never revealed. */
   getParent(node: SessionNode): SessionNode | undefined {
     if (!sessionsGroupByWorktree()) {
-      const { folded } = foldParked(this.cards, sessionsFinishedSessions());
+      const { folded } = foldParked(this.state.cards, sessionsFinishedSessions());
       return node.kind === 'session' && folded.some((c) => c.id === node.card.id) ? { kind: 'more', groupKey: ALL_KEY, cards: folded } : undefined;
     }
     if (node.kind === 'more') {
@@ -516,15 +356,16 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     const { card, flat } = node;
     const now = Date.now();
     const v = cardView(card, now, sessionsTmuxServer());
-    const { look, label } = shownLook(card, now, sessionsStuckMs());
-    const unread = this.read.unread.has(card.id);
+    const { look, label } = shownLook(card, { now, stuckMs: sessionsStuckMs() });
+    const unread = this.state.unreadIds.has(card.id);
     const item = new vscode.TreeItem(v.title);
     item.id = `session:${card.id}`;
     // Only for its read-state decoration (provideFileDecoration): tree labels cannot be bold.
     item.resourceUri = vscode.Uri.from({ scheme: SESSION_SCHEME, path: `/${card.id}` });
     const running = runningCount(card.children ?? []);
     // Under a worktree row the worktree is the row above (the tooltip still names it); in the flat list the row names it.
-    const parked = card.state === 'parked';
+    const can = cardCapabilities(card);
+    const parked = can.parked;
     const worktree = flat ? v.worktree : '';
     item.description = [worktree, running ? `${running} running` : '', parked ? 'parked' : '', v.ago, v.liveStatus || v.detail].filter(Boolean).join(' · ');
     // Expanded while something it started runs; after that VS Code keeps the user's choice (by id).
@@ -541,11 +382,11 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     if (parked) tooltip.appendText(`Not running (${card.endReason ?? 'ended'}). Opening it resumes the conversation: claude --resume ${card.sessionId}\n\n`);
     tooltip.appendText(v.location);
     item.tooltip = tooltip;
-    const icon = LOOK_ICONS[look];
-    item.iconPath = new vscode.ThemeIcon(icon.icon, icon.color ? new vscode.ThemeColor(icon.color) : undefined);
+    const icon = LOOKS[look];
+    item.iconPath = new vscode.ThemeIcon(icon.codicon, icon.themeColor ? new vscode.ThemeColor(icon.themeColor) : undefined);
     // `color-<id>` checks the current color in the Color submenu; the read state stays last (the menus' `read$`).
-    const color = this.colorOf(card.id);
-    item.contextValue = ['session', parked ? 'parked' : card.tmuxSession ? 'tmux' : '', card.sessionId && card.cwd ? 'forkable' : '', color ? `color-${color}` : '', unread ? 'unread' : 'read']
+    const color = this.state.colorOf(card.id);
+    item.contextValue = ['session', parked ? 'parked' : can.inTmuxSession ? 'tmux' : '', can.canFork ? 'forkable' : '', color ? `color-${color}` : '', unread ? 'unread' : 'read']
       .filter(Boolean)
       .join(' ');
     item.command = { command: 'devdesk.sessions.openCard', title: parked ? 'Resume Claude Session' : 'Open Claude Session', arguments: [node] };

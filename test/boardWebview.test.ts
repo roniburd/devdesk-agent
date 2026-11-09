@@ -1,15 +1,13 @@
-// The Claude Board webview (media/board.js) in jsdom: the page's own markup from src/board/html.ts, with the extension
+// The Claude Board webview (media/board.js, bundled) in jsdom: the page's own markup from src/board/html.ts, with the extension
 // played by this test (it answers `complete` queries and records what the webview posts).
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MAX_STACKED, UNSTACKABLE } from '../src/core/commandMenu';
 import { dayKey } from '../src/core/usageHistory';
 import { scopedPopover } from '../src/core/usageScope';
 import { projectFolder } from './boardProjectFolder';
-
-const ROOT = join(__dirname, '..');
+import { webviewBody } from './webviewBody';
+import { webviewScript } from './webviewScript';
 
 type Item = { label: string; insert: string; run?: boolean; category?: string };
 
@@ -21,11 +19,7 @@ const COMMANDS: Item[] = [
   { label: '/clear', insert: '/clear ', run: true, category: 'A' },
 ];
 
-function boardHtml(): string {
-  const src = readFileSync(join(ROOT, 'src/board/html.ts'), 'utf8');
-  const body = /<body[^>]*>([\s\S]*?)<script/.exec(src)![1];
-  return `<!DOCTYPE html><html><body>${body.replace(/\$\{[^}]*\}/g, '')}</body></html>`;
-}
+const boardHtml = () => webviewBody('src/board/html.ts');
 
 let dom: JSDOM | undefined;
 afterEach(() => dom?.window.close());
@@ -65,7 +59,7 @@ async function board({
       }
     },
   });
-  win.eval(readFileSync(join(ROOT, 'media/board.js'), 'utf8'));
+  win.eval(webviewScript('board'));
   const prompt = win.document.getElementById('prompt') as HTMLTextAreaElement;
   const popup = win.document.getElementById('popup')!;
   const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -801,20 +795,27 @@ describe('board webview: session cards', () => {
     const doc = b.prompt.ownerDocument;
     await b.host(
       boardOf([
-        { id: 'needs', title: 'Needs you', sessions: [{ id: 'n', look: 'permission', lookLabel: 'Permission', title: 'Upgrade to SDK v3', ask: 'Allow npm uninstall aws-sdk?', worktree: 'sdk', ago: '12m', canEnd: true, hoverParts }] },
-        { id: 'review', title: 'Done', sessions: [{ id: 'd', look: 'done', lookLabel: 'Done', title: 'Raise login timeout', worktree: 'main', ago: '2m', canFork: true, canEnd: true, detail: 'I changed it', insight: 'Done', hoverParts }] },
+        { id: 'needs', title: 'Needs you', sessions: [{ id: 'n', look: 'permission', lookLabel: 'Permission', glyph: '🛡', glyphClass: 'yellow', title: 'Upgrade to SDK v3', ask: 'Allow npm uninstall aws-sdk?', worktree: 'sdk', ago: '12m', canEnd: true, hoverParts }] },
+        { id: 'review', title: 'Done', sessions: [{ id: 'd', look: 'done', lookLabel: 'Done', glyph: '✓', glyphClass: 'green', title: 'Raise login timeout', worktree: 'main', ago: '2m', canFork: true, canEnd: true, detail: 'I changed it', insight: 'Done', hoverParts }] },
       ]),
     );
     const needs = doc.querySelector('.card[data-session="n"]')!;
     expect(needs.querySelector('.ask-kind')!.textContent).toContain('Permission');
     expect(needs.querySelector('.ask-text')!.textContent).toBe('Allow npm uninstall aws-sdk?');
     expect(needs.querySelector('.when')!.textContent).toBe('waiting 12m');
+    // The look's glyph and colour come with the session (LOOKS in src/core/stateLooks.ts).
+    expect(needs.classList.contains('look-yellow')).toBe(true);
+    expect(needs.querySelector('.ask-kind')!.className).toBe('ask-kind yellow');
+    expect(needs.querySelector('.ask-kind .glyph')!.textContent).toBe('🛡');
     const done = doc.querySelector('.card[data-session="d"]')!;
     expect(done.querySelector('.title')!.textContent).toBe('Raise login timeout');
     expect(done.querySelector('.ask')).toBeNull();
     // The detail and the insight are only in the hover now.
     expect(done.querySelector('.detail, .insight')).toBeNull();
     expect(done.querySelector('.wt')!.textContent).toBe('main');
+    expect(done.classList.contains('look-green')).toBe(true);
+    expect(done.querySelector('.when .glyph')!.className).toBe('glyph green');
+    expect(done.querySelector('.when .glyph')!.textContent).toBe('✓');
     expect([...done.querySelectorAll('.acts button')].map((x) => x.textContent)).toEqual(['Fork', 'End']);
   });
 

@@ -24,7 +24,7 @@ function context(text: string, cards: SessionCard[] = [], pick: (cards: readonly
   const picked: { ids: string[]; title: string }[] = [];
   const started: string[] = [];
   const composer = {
-    tree: { cards },
+    viewState: { cards },
     classify: async (t: string) => classifySubmission(t, BUILTINS, known),
     commands: async () => known,
     sessions: {
