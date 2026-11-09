@@ -11,7 +11,7 @@ import {
   parseProgramStatusBody,
   parseProgramStatusFile,
   PROGRAM_STATUS_SCRIPT,
-  programStatusBusy,
+  programStatusBlocksArrow,
   programStatusFileName,
   programStatusWrapper,
   readCardProgramStatus,
@@ -161,11 +161,12 @@ describe('screenWithProgramStatus', () => {
     expect(sendBlocker(c, 'compact', screenWithProgramStatus(idleScreen, status({ state: 'idle' })))).toBeUndefined();
   });
 
-  it('programStatusBusy', () => {
-    expect(programStatusBusy(status({ state: 'working' }))).toBe(true);
-    expect(programStatusBusy(status({ state: 'blocked' }))).toBe(true);
-    expect(programStatusBusy(status({ state: 'done' }))).toBe(false);
-    expect(programStatusBusy(undefined)).toBe(false);
+  it('programStatusBlocksArrow: only an open dialog, not a running turn (Claude takes typing while it works)', () => {
+    expect(programStatusBlocksArrow(status({ state: 'blocked' }))).toBe(true);
+    expect(programStatusBlocksArrow(status({ state: 'working' }))).toBe(false);
+    expect(programStatusBlocksArrow(status({ state: 'done' }))).toBe(false);
+    expect(programStatusBlocksArrow(status({ state: 'idle' }))).toBe(false);
+    expect(programStatusBlocksArrow(undefined)).toBe(false);
   });
 });
 

@@ -194,6 +194,8 @@ export function testApi(
     /** Whether the Claude view is showing. */
     sessionsViewVisible: () => sessionsTree.visible,
     claudeTerminalActive,
+    /** The card of the Claude terminal in front, as ← finds it. */
+    focusedCard: () => sessionsTree.focusedCard(),
     /** The `devdesk` command's path, and how many of its requests this window has handled. */
     cliCommand: () => cli.command,
     cliHandled: () => cli.handled,

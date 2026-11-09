@@ -188,8 +188,12 @@ export function screenWithProgramStatus(screen: PromptScreen, status: ProgramSta
   return { ...screen, working: false };
 }
 
-/** True when the status alone shows Claude cannot take typed text now (no screen capture needed). */
-export const programStatusBusy = (status: ProgramStatus | undefined) => status?.state === 'working' || status?.state === 'blocked';
+/**
+ * True when the status shows a dialog (permission, question) is open, where ← picks an option instead of leaving for
+ * the Claude view. A running turn (`working`) does not count: Claude takes typing then too, and it reports `working`
+ * for as long as a background task runs, with its prompt empty and idle.
+ */
+export const programStatusBlocksArrow = (status: ProgramStatus | undefined) => status?.state === 'blocked';
 
 /** The command prefix that runs Claude under the relay `script`, writing statuses to `dir`. */
 export const programStatusWrapper = (python: string, script: string, dir: string) => `${shellQuote(python)} -I ${shellQuote(script)} ${shellQuote(dir)}`;
