@@ -30,7 +30,6 @@ import type { BoardUi, SubmitOutcome } from './board/types';
 import { BoardComposer, type ComposerInfo, NO_FOLDER, type StartHow } from './boardComposer';
 import {
   boardCardLine, boardCardTitle,
-  boardEnabled,
   boardLaneWidth,
   boardOpenWhenEmpty,
   boardOpenWithSidebar,
@@ -85,7 +84,7 @@ const isBoardTab = (t: vscode.Tab) => t.input instanceof vscode.TabInputWebview 
 /** Context key: the board's tab is open (→ in the Claude view goes back to it). */
 
 /**
- * The Claude Board (preview, `devdesk.board.enabled`): a composer that starts new Claude sessions, prompts saved for
+ * The Claude Board: a composer that starts new Claude sessions, prompts saved for
  * later, and every Claude session the Claude view lists as swim lanes by state, in one editor tab. Opens by command,
  * from the Claude view's title bar, the first time the sidebar shows (`devdesk.board.openWithSidebar`), and
  * (`devdesk.board.openWhenEmpty`) whenever the editor area is left empty.
@@ -209,11 +208,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           this.answerHistory();
         }
         if (!e.affectsConfiguration('devdesk.board')) return;
-        if (!boardEnabled()) this.panel?.dispose();
-        else {
-          this.schedulePost();
-          this.openIfEmpty();
-        }
+        this.schedulePost();
+        this.openIfEmpty();
       }),
       { dispose: () => clearTimeout(this.postTimer) },
       { dispose: () => this.search.cancel() },
@@ -233,16 +229,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   /** How many times the board was told to put the keyboard in its prompt box (`enter`), for tests. */
   promptEnters = 0;
 
-  /** Opens the board in the active editor group, or reveals it. Does nothing (but say so) while the preview is off. */
+  /** Opens the board in the active editor group, or reveals it. */
   open(preserveFocus = false): void {
-    if (!boardEnabled()) {
-      void vscode.window
-        .showInformationMessage('The Claude Board is a preview feature. Turn it on with the setting devdesk.board.enabled.', 'Open Setting')
-        .then((choice) => {
-          if (choice) void openSettings('devdesk.board.enabled');
-        });
-      return;
-    }
     if (this.panel) {
       this.panel.reveal(undefined, preserveFocus);
       return;
@@ -257,7 +245,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    */
   async focusPrompt(): Promise<void> {
     if (!this.panel) {
-      if (boardEnabled()) this.pendingEnter = true;
+      this.pendingEnter = true;
       this.open();
       return;
     }
@@ -268,9 +256,9 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.postEnter();
   }
 
-  /** Opens the board when the preview and `openWhenEmpty` are on and no editor group has a tab. */
+  /** Opens the board when `openWhenEmpty` is on and no editor group has a tab. */
   openIfEmpty(): void {
-    if (!boardEnabled() || !boardOpenWhenEmpty() || this.panel) return;
+    if (!boardOpenWhenEmpty() || this.panel) return;
     if (vscode.window.tabGroups.all.some((g) => g.tabs.length)) return;
     this.open(true);
   }
@@ -280,7 +268,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * too, and takes the focus, so the sidebar starts on it.
    */
   sidebarShown(): void {
-    if (this.sidebarSeen || !boardEnabled() || !boardOpenWithSidebar()) return;
+    if (this.sidebarSeen || !boardOpenWithSidebar()) return;
     this.sidebarSeen = true;
     if (!this.panel) this.open();
   }
@@ -290,9 +278,9 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.sidebarSeen = false;
   }
 
-  /** Restores the board after a window reload (only while the preview is on). */
+  /** Restores the board after a window reload. */
   async deserializeWebviewPanel(panel: vscode.WebviewPanel): Promise<void> {
-    if (!boardEnabled() || this.panel) {
+    if (this.panel) {
       panel.dispose();
       return;
     }

@@ -54,7 +54,6 @@ the dev window's user settings to keep it apart:
 | `devdesk.sessions.tmuxServer` | `devdesk-dev` | Dev sessions run on their own tmux server: your real sessions don't show up, and **✕** or parking can't end them. |
 | `devdesk.sessions.claudePath` | `<checkout>/e2e/fixtures/fake-claude` | Sessions run a fake Claude: no model calls, no cost, instant start. It runs no status hooks, so its sessions show **NO STATUS**. |
 | `devdesk.insights.enabled` | `false` | No insight calls. |
-| `devdesk.board.enabled` | `true` | Turns on the Claude Board, a preview. |
 | `devdesk.diagnostics.debugLog` | `true` | Debug lines in **Output → DevDesk**. |
 | `devdesk.sessions.parkAfterDays` | `0` | DevDesk never parks dev sessions under you. |
 

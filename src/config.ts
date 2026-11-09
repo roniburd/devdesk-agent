@@ -398,11 +398,6 @@ export function sessionsWorktreeStartPrompt(): string {
   return cfg().get<string>('worktrees.startPrompt') ?? '';
 }
 
-/** The Claude Board preview is on (setting `devdesk.board.enabled`, off by default). */
-export function boardEnabled(): boolean {
-  return cfg().get<boolean>('board.enabled', false);
-}
-
 /** Open the Claude Board when the editor area has no tabs (setting `devdesk.board.openWhenEmpty`). */
 export function boardOpenWhenEmpty(): boolean {
   return cfg().get<boolean>('board.openWhenEmpty', true);
