@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
 import { parseModels } from './core/composer';
+import { EXTENSION_ID } from './core/edition';
 import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
 import { isSortMode, type SortMode } from './core/urgency';
@@ -28,7 +29,7 @@ export function setGlobalSetting(key: string, value: unknown): Thenable<void> {
 
 /** Opens the Settings editor on this extension's settings matching `query` (a settings gear). */
 export function openSettings(query: string): Thenable<unknown> {
-  return vscode.commands.executeCommand('workbench.action.openSettings', `@ext:roniburd.devdesk-claude ${query}`);
+  return vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${EXTENSION_ID} ${query}`);
 }
 
 const expandHome = (p: string | undefined) => p?.trim().replace(/^~(?=\/|$)/, homedir());

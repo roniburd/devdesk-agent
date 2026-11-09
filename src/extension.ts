@@ -36,6 +36,8 @@ import { BacklogStore } from './backlogStore';
 import { backlogItemBelongs } from './core/board';
 import { BoardPanel } from './boardPanel';
 import { CliBridge, registerCliCommands } from './devdeskCli';
+import { sharedStorageDir } from './core/edition';
+import { registerEdition } from './edition';
 import { ReviewComments } from './reviewComments';
 import { InsightsWorker } from './insightsWorker';
 import { applyCrashDiagnostics, cleanDiagnosticsRegularly, log, registerTimedCommand, watchEventLoop } from './log';
@@ -54,7 +56,11 @@ import { WorkerHub } from './workers';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
 export async function activate(ctx: vscode.ExtensionContext) {
+  registerEdition(ctx);
   for (const [from, to] of MIGRATED_SETTINGS) await migrateSetting(from, to);
+  // v1's storage folders, which both versions share (see core/edition.ts).
+  const globalStorage = sharedStorageDir(ctx.globalStorageUri.fsPath);
+  const projectStorage = ctx.storageUri && sharedStorageDir(ctx.storageUri.fsPath);
   updateWorkspaceContext();
   const sessions = new SessionsModel({
     stateDir: sessionsStateDir,
@@ -82,18 +88,18 @@ export async function activate(ctx: vscode.ExtensionContext) {
     model: insightsModel,
     claude: insightsClaude,
   });
-  const worktreeTasks = new WorktreeTaskStore(join(ctx.globalStorageUri.fsPath, 'worktree-tasks.json'));
+  const worktreeTasks = new WorktreeTaskStore(join(globalStorage, 'worktree-tasks.json'));
   void worktreeTasks.load();
   const sessionsTree = new SessionsTree(sessions, worktreeTasks, ctx.globalState);
   sessions.setReadCheck((card) => sessionsTree.isRead(card));
   // Prompts for later belong to the project folder (`storageUri`); a window with no folder uses the host-wide file,
   // which every project used before: a project folder opening takes its prompts (and those that name no project) from it.
-  const hostBacklog = join(ctx.globalStorageUri.fsPath, 'backlog.json');
-  const backlog = new BacklogStore(ctx.storageUri ? join(ctx.storageUri.fsPath, 'backlog.json') : hostBacklog);
+  const hostBacklog = join(globalStorage, 'backlog.json');
+  const backlog = new BacklogStore(projectStorage ? join(projectStorage, 'backlog.json') : hostBacklog);
   void backlog
     .load()
     .then(async () => {
-      if (!ctx.storageUri) return;
+      if (!projectStorage) return;
       const root = workspaceRoot();
       const dirs = new Set((await sessions.loadFeatures().catch(() => [])).map((f) => f.dir));
       const ours = (dir: string) => dirs.has(dir) || (!!root && (dir === root || dir.startsWith(root + sep)));

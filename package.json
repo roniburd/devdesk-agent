@@ -1,9 +1,9 @@
 {
-  "name": "devdesk-claude",
-  "displayName": "DevDesk Claude",
+  "name": "devdesk-claude-beta",
+  "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.1",
+  "version": "2.1.0-prototype.2",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -21,7 +21,7 @@
     "build": "node scripts/build.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
-    "package": "npm run build && mkdir -p dist && vsce package --no-dependencies --skip-license --no-rewrite-relative-links -o dist/devdesk-claude.vsix"
+    "package": "npm run build && mkdir -p dist && vsce package --no-dependencies --skip-license --no-rewrite-relative-links -o dist/devdesk-claude-beta.vsix"
   },
   "devDependencies": {
     "@types/jsdom": "^21.1.7",
@@ -43,7 +43,7 @@
       "activitybar": [
         {
           "id": "devdesk",
-          "title": "Agent Sessions",
+          "title": "Agent Sessions (v2)",
           "icon": "media/claude.svg"
         }
       ]
@@ -52,7 +52,7 @@
       "devdesk": [
         {
           "id": "devdesk.sessions",
-          "name": "Claude",
+          "name": "Claude (v2)",
           "icon": "media/claude.svg",
           "when": "devdesk.inWorkspace"
         },
@@ -71,6 +71,11 @@
       }
     ],
     "commands": [
+      {
+        "command": "devdesk.claude.switchVersion",
+        "title": "Switch Version…",
+        "category": "DevDesk Claude"
+      },
       {
         "command": "devdesk.features.refresh",
         "title": "Refresh",
@@ -974,7 +979,7 @@
     ],
     "configuration": [
       {
-        "id": "devdesk-claude.sessions",
+        "id": "devdesk-claude-beta.sessions",
         "title": "Sessions",
         "order": 1,
         "properties": {
@@ -1146,7 +1151,7 @@
         }
       },
       {
-        "id": "devdesk-claude.launch",
+        "id": "devdesk-claude-beta.launch",
         "title": "Starting Claude",
         "order": 2,
         "properties": {
@@ -1269,7 +1274,7 @@
         }
       },
       {
-        "id": "devdesk-claude.terminals",
+        "id": "devdesk-claude-beta.terminals",
         "title": "Terminals",
         "order": 3,
         "properties": {
@@ -1329,7 +1334,7 @@
         }
       },
       {
-        "id": "devdesk-claude.worktrees",
+        "id": "devdesk-claude-beta.worktrees",
         "title": "Worktrees",
         "order": 4,
         "properties": {
@@ -1439,7 +1444,7 @@
         }
       },
       {
-        "id": "devdesk-claude.board",
+        "id": "devdesk-claude-beta.board",
         "title": "Claude Board",
         "order": 5,
         "properties": {
@@ -1572,7 +1577,7 @@
         }
       },
       {
-        "id": "devdesk-claude.insights",
+        "id": "devdesk-claude-beta.insights",
         "title": "Insights",
         "order": 6,
         "properties": {
@@ -1614,7 +1619,7 @@
         }
       },
       {
-        "id": "devdesk-claude.boardSearch",
+        "id": "devdesk-claude-beta.boardSearch",
         "title": "Board search",
         "order": 7,
         "properties": {
@@ -1686,7 +1691,7 @@
         }
       },
       {
-        "id": "devdesk-claude.usage",
+        "id": "devdesk-claude-beta.usage",
         "title": "Usage history",
         "order": 8,
         "properties": {
@@ -1729,7 +1734,7 @@
         }
       },
       {
-        "id": "devdesk-claude.cli",
+        "id": "devdesk-claude-beta.cli",
         "title": "devdesk Command",
         "order": 9,
         "properties": {
@@ -1764,7 +1769,7 @@
         }
       },
       {
-        "id": "devdesk-claude.tmux",
+        "id": "devdesk-claude-beta.tmux",
         "title": "tmux",
         "order": 10,
         "properties": {
@@ -1813,7 +1818,7 @@
         }
       },
       {
-        "id": "devdesk-claude.advanced",
+        "id": "devdesk-claude-beta.advanced",
         "title": "Advanced",
         "order": 11,
         "properties": {
@@ -1904,7 +1909,7 @@
         }
       },
       {
-        "id": "devdesk-claude.checks",
+        "id": "devdesk-claude-beta.checks",
         "title": "Pull request checks",
         "order": 12,
         "properties": {
