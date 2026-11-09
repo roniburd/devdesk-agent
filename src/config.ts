@@ -393,6 +393,17 @@ export function worktreesDeleteCommand(): string {
   return cfg().get<string>('worktrees.deleteCommand')?.trim() || (workspaceProvider?.defaultDeleteCommand ?? '');
 }
 
+/** Clean Up Worktrees' settings (`devdesk.worktrees.cleanup*`): idle days, base branches (empty: each package's mainline), whether it deletes a git worktree's branch, and how many candidates make it suggest a cleanup (0: never). */
+export function worktreesCleanup(): { idleDays: number; baseBranches: string[]; deleteBranch: boolean; suggestCount: number } {
+  const bases = cfg().get<unknown>('worktrees.cleanupBaseBranches');
+  return {
+    idleDays: numberSetting('worktrees.cleanupIdleDays', 3, 0),
+    baseBranches: Array.isArray(bases) ? bases.filter((b): b is string => typeof b === 'string').map((b) => b.trim()).filter(Boolean) : [],
+    deleteBranch: cfg().get<boolean>('worktrees.cleanupDeleteBranch', false) === true,
+    suggestCount: numberSetting('worktrees.cleanupSuggestCount', 5, 0, Infinity, true),
+  };
+}
+
 /** Template of Claude's first prompt in a new worktree session (setting `devdesk.worktrees.startPrompt`; empty: the default). */
 export function sessionsWorktreeStartPrompt(): string {
   return cfg().get<string>('worktrees.startPrompt') ?? '';

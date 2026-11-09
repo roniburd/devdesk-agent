@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "0.5.79",
+  "version": "0.5.80",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -123,6 +123,13 @@
         "title": "Delete Worktree and Its Sessions",
         "category": "Worktrees",
         "icon": "$(close)"
+      },
+      {
+        "command": "devdesk.worktrees.cleanUp",
+        "title": "Clean Up Worktrees…",
+        "category": "Worktrees",
+        "icon": "$(clear-all)",
+        "enablement": "devdesk.inWorkspace"
       },
       {
         "command": "devdesk.sessions.open",
@@ -416,6 +423,11 @@
           "command": "devdesk.features.openSettings",
           "when": "view == devdesk.features",
           "group": "navigation@4"
+        },
+        {
+          "command": "devdesk.worktrees.cleanUp",
+          "when": "view == devdesk.features",
+          "group": "1_worktrees@1"
         }
       ],
       "view/item/context": [
@@ -1179,6 +1191,35 @@
             "editPresentation": "multilineText",
             "markdownDescription": "Claude's first prompt in a new worktree session: `{task}` is what you typed, `{worktree}` the worktree name, `{dir}` its directory. Empty: `You are working in worktree {worktree} ({dir}) on: {task}`, followed by asking Claude to say which worktree it is in and start on the task.",
             "order": 13
+          },
+          "devdesk.worktrees.cleanupIdleDays": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "markdownDescription": "**Clean Up Worktrees…** lists only worktrees with no commit, checkout or rebase for this many days.",
+            "order": 15
+          },
+          "devdesk.worktrees.cleanupBaseBranches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Branches a worktree's commits must be in (any of them, compared by patch: rebased and cherry-picked commits count as in, squash-merged ones do not) for **Clean Up Worktrees…** to list it, for example `[\"main\", \"release\"]`. Empty: each package's mainline (`origin/mainline`, `origin/HEAD`, `main`, …, the first that exists).",
+            "order": 16
+          },
+          "devdesk.worktrees.cleanupDeleteBranch": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "**Clean Up Worktrees…** also deletes a git worktree's branch (all its commits are in a base branch). Off: the branch stays, like **Delete Worktree** leaves it.",
+            "order": 17
+          },
+          "devdesk.worktrees.cleanupSuggestCount": {
+            "type": "number",
+            "default": 5,
+            "minimum": 0,
+            "markdownDescription": "When a window opens and at least this many worktrees are ready to clean up, DevDesk offers **Clean Up Worktrees…** (it never deletes on its own). `0`: never offer.",
+            "order": 18
           }
         }
       },

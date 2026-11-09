@@ -430,6 +430,20 @@ The robot icon on a Worktrees row opens that worktree's own session, `cc-<worktr
 
 If the worktree has uncommitted changes, the delete is refused. DevDesk offers **Force Delete** instead. The sessions keep running until the folder is gone.
 
+### Clean up finished worktrees
+
+**Clean Up Worktrees…** (in the Worktrees title bar's `…` menu) lists the worktrees that look finished, each with why. A worktree is listed when:
+
+- it has no uncommitted changes (untracked files count),
+- every commit on it is in a base branch: its package's mainline, or any of `devdesk.worktrees.cleanupBaseBranches`. Commits are compared by their changes, so a rebased or cherry-picked commit counts as merged. A squash-merged branch doesn't,
+- none of its Claude sessions is live (parked and stopped ones are fine),
+- it isn't locked (`git worktree lock`; Claude Code locks the worktrees of running agents) or open in this window,
+- nothing happened in it for `devdesk.worktrees.cleanupIdleDays` (3 days): no commit, checkout or rebase.
+
+All are checked. Uncheck the ones to keep and press Enter. DevDesk asks once, then checks each worktree again and deletes it like **Delete Worktree** does. A worktree that changed since the list stays. `devdesk.worktrees.cleanupDeleteBranch` also deletes a git worktree's branch.
+
+When a window opens and at least `devdesk.worktrees.cleanupSuggestCount` (5) worktrees are ready, DevDesk offers the cleanup about 2 minutes later. It never deletes on its own. Set it to `0` to turn the offer off.
+
 ### Show sessions under worktrees
 
 The comment button in the Worktrees title bar lists each worktree's sessions above its packages, like the Claude view does. Setting: `devdesk.worktrees.showSessions`.
@@ -1132,6 +1146,10 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.worktrees.maxGitProcesses` | `8` (the most git processes the Worktrees view runs at once; an expanded worktree may use all of them, background loads up to half, or a quarter while the load average is above 1.5 per CPU) |
 | `devdesk.worktrees.gitTimeoutSeconds` | `30` (a slower git command of the Worktrees view is stopped and its package shows an error; 0 never stops it) |
 | `devdesk.worktrees.startPrompt` | `You are working in worktree {worktree} ({dir}) on: {task}` + "say which worktree you are in, then work on the task" |
+| `devdesk.worktrees.cleanupIdleDays` | `3` (**Clean Up Worktrees…** lists only worktrees with no commit, checkout or rebase for this many days) |
+| `devdesk.worktrees.cleanupBaseBranches` | `[]` (branches a worktree's commits must be in, any of them; empty: each package's mainline) |
+| `devdesk.worktrees.cleanupDeleteBranch` | `false` (also delete a cleaned-up git worktree's branch) |
+| `devdesk.worktrees.cleanupSuggestCount` | `5` (offer **Clean Up Worktrees…** when a window opens and this many are ready; 0: never) |
 
 ### Claude Board
 

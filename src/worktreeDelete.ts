@@ -14,10 +14,10 @@ import { workspaceProvider } from './core/workspaceProvider';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 
-const inFeature = (path: string | undefined, f: Feature) => !!path && featureDirs(f).some((d) => isWithin(path, d));
+export const inFeature = (path: string | undefined, f: Feature) => !!path && featureDirs(f).some((d) => isWithin(path, d));
 
 /** The Claude sessions of the worktree: running, stopped or parked, the ones DevDesk lists for it. */
-function sessionsOf(cards: readonly SessionCard[], feature: Feature): SessionCard[] {
+export function sessionsOf(cards: readonly SessionCard[], feature: Feature): SessionCard[] {
   return cards.filter((c) => c.featureDir === feature.dir || inFeature(c.cwd, feature));
 }
 
@@ -79,16 +79,21 @@ export async function deleteWorktreeRow(model: SessionsModel, node: FeatureNode 
     result = await run(true);
     if (result.output.trim()) log.info(`force delete worktree ${feature.name}: ${result.output.trim()}`);
   }
-  const gone = !existsSync(feature.dir);
-  if (!gone) {
+  if (existsSync(feature.dir)) {
     void vscode.window.showErrorMessage(`Could not delete worktree ${feature.name}: ${failureSummary(result.output) || 'the command failed'} (full output in the DevDesk log)`);
     return false;
   }
-  // Only once the folder is gone: a refusal (uncommitted changes, Force Delete cancelled) leaves its sessions running.
+  await forgetWorktreeSessions(model, feature, cards);
+  return true;
+}
+
+/**
+ * Once a worktree's folder is gone (only then: a refused delete leaves its sessions running): ends its tmux sessions and
+ * forgets its sessions' ended records, so the Claude view doesn't list them as parked or stopped.
+ */
+export async function forgetWorktreeSessions(model: SessionsModel, feature: Feature, cards: readonly SessionCard[]): Promise<void> {
   const tmux: [string, string | undefined][] = [[sessionName(feature), undefined], ...cards.flatMap((c): [string, string | undefined][] => (c.tmuxSession ? [[c.tmuxSession, c.tmuxServer]] : []))];
   await Promise.all(tmux.map(([name, server]) => endTmuxSession(name, server).catch(() => undefined)));
-
-  // Their tmux sessions are gone, so they would be listed as parked or stopped: forget them (their folder is gone too).
   const ended = endedDir(sessionsStateDir());
   const forget = () => Promise.all(cards.map((c) => (c.sessionId ? removeEndedRecord(ended, c.sessionId) : undefined)));
   await forget();
@@ -96,5 +101,4 @@ export async function deleteWorktreeRow(model: SessionsModel, node: FeatureNode 
   await model.refresh();
   // A session's hook may write its ended record a moment after its tmux session ends.
   setTimeout(() => void forget().then(() => model.refresh()), 3000);
-  return true;
 }

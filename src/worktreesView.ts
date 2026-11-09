@@ -15,6 +15,7 @@ import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { openFeatureSession } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
+import { cleanUpWorktrees, suggestCleanup } from './worktreeCleanup';
 import { deleteWorktreeRow } from './worktreeDelete';
 
 /** `workspaceState` key of the Worktrees view's diff base (`branch` or `uncommitted`). */
@@ -159,6 +160,10 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
     registerTimedCommand('devdesk.worktrees.delete', async (node: FeatureNode | undefined) => {
       if (await deleteWorktreeRow(sessions, node)) tree.refresh();
     }),
+    registerTimedCommand('devdesk.worktrees.cleanUp', async () => {
+      if (await cleanUpWorktrees(sessions)) tree.refresh();
+    }),
+    suggestCleanup(sessions),
     vscode.window.onDidCloseTerminal((t) => {
       if (isClaudeTerminal(t)) tree.refreshLabels();
     }),
