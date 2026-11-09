@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import type { CardTeam } from './workers';
 import { readTailText } from './transcriptTail';
 import { isFiniteNumber, parseObject, readJsonFiles } from './json';
 import { DEFAULT_SERVER, isNumberedSession, isShellCommand, serverOf, sessionName, type TmuxPane } from './tmux';
@@ -115,6 +116,13 @@ export interface SessionCard {
   formerTmuxServer?: string;
   /** A note Claude set on its card (`devdesk note`), kept per tmux pane. */
   note?: string;
+  /**
+   * The state is Claude's own report (OSC 7501), not the hook record's (see `mergedCard`): why (`ahead` of the hooks, or
+   * the hooks went `quiet`), and the hook record's time, which a newer hook event must beat.
+   */
+  statusFrom?: { reason: 'ahead' | 'quiet'; hookAt: number };
+  /** Its place among coordinator and worker sessions (`devdesk worker`), from the mailboxes. */
+  team?: CardTeam;
 }
 
 export const NO_HOOKS_DETAIL = 'Install Claude status hooks to see what Claude is doing';

@@ -13,11 +13,14 @@ import { type HookRecord, MOVED_DETAIL, type SessionCard, type SessionState } fr
  */
 export function withRecord(card: SessionCard, record: HookRecord): SessionCard {
   if (card.sessionId !== record.sessionId || !hasRecord(card.state)) return card;
-  if (card.updatedAt !== undefined && record.updatedAt <= card.updatedAt) return card;
+  // A card showing Claude's own report holds the hook record's time: any newer hook event takes the card back.
+  const since = card.statusFrom?.hookAt ?? card.updatedAt;
+  if (since !== undefined && record.updatedAt <= since) return card;
   // Its conversation went on in a background job, as its transcript says: the pane's Claude still writes records
   // under this id, which the refresh corrects again.
   if (card.detail === MOVED_DETAIL) return card;
   const next: SessionCard = { ...card, state: record.state, detail: record.detail, updatedAt: record.updatedAt };
+  delete next.statusFrom;
   if (record.waitKind) next.waitKind = record.waitKind;
   else delete next.waitKind;
   if (record.prompt) next.prompt = record.prompt;

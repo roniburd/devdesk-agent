@@ -12,6 +12,9 @@
   const state = Object.assign({ unit: 'day' }, vscode.getState() || {});
   /** @type {any} */
   let page;
+  /** Claude's plan limits (`planLimits.ts`): `view` (the 5-hour and weekly rows), `setup` (offer the status line), or neither. */
+  /** @type {any} */
+  let limits;
   /** How far the count in progress has got (undefined when none runs), and when that arrived (this clock). */
   /** @type {any} */
   let counting;
@@ -39,6 +42,42 @@
   /** The status line above the page while a count runs (more than a second). */
   const status = el('section', 'status');
   status.setAttribute('role', 'status');
+
+  /**
+   * Claude's plan limits, for the whole account (so whatever project is chosen): % of the 5-hour and weekly limits used,
+   * with a bar and when each resets; while DevDesk's status line that records them is not installed, the offer to
+   * install it; nothing without numbers otherwise.
+   */
+  function limitsBlock() {
+    if (limits && limits.view) {
+      const block = el('section', 'block limits');
+      block.append(el('h2', '', `Plan limits${limits.view.asOf ? ` (${limits.view.asOf})` : ''}`));
+      for (const r of limits.view.rows) {
+        const line = el('div', 'limit');
+        const bar = /** @type {HTMLMeterElement} */ (el('meter', 'limit-bar'));
+        bar.min = 0;
+        bar.max = 100;
+        bar.low = 70;
+        bar.high = 90;
+        bar.optimum = 0;
+        bar.value = r.percent;
+        bar.setAttribute('aria-label', `${r.label} limit used`);
+        line.append(el('span', 'limit-label', r.label), bar, el('span', 'num', r.percentText), el('span', 'muted', r.resetsText));
+        if (r.resetsAt) line.title = `Resets ${new Date(r.resetsAt).toLocaleString()}`;
+        block.append(line);
+      }
+      return block;
+    }
+    if (limits && limits.setup) {
+      const line = el('p', 'muted limits-setup', "Claude's 5-hour and weekly limits: ");
+      const b = el('button', 'link', 'Show…');
+      b.title = "Install DevDesk's Claude status line, which records them (Claude.ai Pro and Max)";
+      b.addEventListener('click', () => vscode.postMessage({ type: 'setupLimits' }));
+      line.append(b);
+      return line;
+    }
+    return undefined;
+  }
 
   /** `950`, `12k`, `4.5M`, for axis ticks. */
   function compact(n) {
@@ -343,6 +382,8 @@
 
     const parts = [];
     if (updateStatus()) parts.push(status);
+    const lp = limitsBlock();
+    if (lp) parts.push(lp);
     const summary = el('section', 'block');
     summary.append(el('h2', '', sel.label));
     const tiles = el('div', 'tiles');
@@ -511,6 +552,7 @@
     const m = ev.data;
     if (m?.type === 'page') {
       page = m.page;
+      limits = m.limits;
       counting = undefined;
       render();
     } else if (m?.type === 'partial') {

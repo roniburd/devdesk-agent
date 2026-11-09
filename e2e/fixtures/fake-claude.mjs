@@ -15,7 +15,8 @@
 //   as Claude does; a line break in a paste stays in the line). `--prefill <draft>` starts with the draft typed at the
 //   prompt, not submitted. Ctrl+C exits. Like Claude Code 2.1.295+, it probes for the Program Status
 //   Protocol (`ESC]7501;?`); once answered (DevDesk's relay, devdesk.sessions.programStatus), it reports `idle`, or
-//   `working` when the first prompt holds `e2e-status-working`, and `done` once `e2e: finish` is submitted.
+//   `working` when the first prompt holds `e2e-status-working`, `blocked` on a permission ("approve Bash: e2e-merge")
+//   once `e2e: ask permission` is submitted, and `done` once `e2e: finish` is.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -122,6 +123,7 @@ function interactive() {
           log({ event: 'line', text: typed, pasted });
           seen.push(`> ${typed.replace(/\n/g, ' ⏎ ')}`);
           if (typed === 'e2e: finish') report('state=done');
+          if (typed === 'e2e: ask permission') report(`state=blocked:kind=permission:msg=${Buffer.from('approve Bash: e2e-merge').toString('base64')}`);
         }
         typed = '';
         pasted = false;

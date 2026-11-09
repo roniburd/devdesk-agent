@@ -62,7 +62,7 @@ export class WorktreeTaskStore implements vscode.Disposable {
 }
 
 /** Runs `devdesk.worktrees.createCommand` for `worktree` in `root`; true when `<root>/worktrees/<worktree>` exists afterwards. */
-async function createWorkspaceWorktree(root: string, worktree: string, dir: string): Promise<boolean> {
+async function createWorkspaceWorktree(root: string, worktree: string, dir: string, failed?: (message: string) => void): Promise<boolean> {
   const command = sessionsWorktreeCreateCommand();
   log.info(`creating worktree ${worktree}: ${command}`);
   const result = await vscode.window.withProgress(
@@ -71,14 +71,33 @@ async function createWorkspaceWorktree(root: string, worktree: string, dir: stri
   );
   if (result.output.trim()) log.info(`worktree ${worktree}: ${result.output.trim()}`);
   if (!result.ok) {
-    void vscode.window.showErrorMessage(`Could not create worktree ${worktree}: ${failureSummary(result.output) || 'the command failed'} (full output in the DevDesk log)`);
+    const message = `Could not create worktree ${worktree}: ${failureSummary(result.output) || 'the command failed'}`;
+    failed?.(message);
+    void vscode.window.showErrorMessage(`${message} (full output in the DevDesk log)`);
     return false;
   }
   if (!existsSync(dir)) {
-    void vscode.window.showErrorMessage(`The worktree command finished, but ${dir} does not exist. Check devdesk.worktrees.createCommand.`);
+    const message = `The worktree command finished, but ${dir} does not exist. Check devdesk.worktrees.createCommand.`;
+    failed?.(message);
+    void vscode.window.showErrorMessage(message);
     return false;
   }
   return true;
+}
+
+/**
+ * Makes the Claude Code worktree `<repo>/.claude/worktrees/<worktree>` on a new branch `worktree-<worktree>` (as
+ * `claude --worktree` names it) from `base`, for a worktree that must start from a given commit. True when made.
+ */
+async function createGitWorktree(repo: string, worktree: string, dir: string, base: string, failed?: (message: string) => void): Promise<boolean> {
+  log.info(`creating worktree ${worktree} from ${base} in ${repo}`);
+  const result = await runCommand('git', ['worktree', 'add', '-b', `worktree-${worktree}`, dir, base], { cwd: repo, timeoutMs: CREATE_TIMEOUT_MS });
+  if (result.output.trim()) log.info(`worktree ${worktree}: ${result.output.trim()}`);
+  if (result.ok && existsSync(dir)) return true;
+  const message = `Could not create worktree ${worktree} from ${base}: ${failureSummary(result.output) || 'git worktree add failed'}`;
+  failed?.(message);
+  void vscode.window.showErrorMessage(message);
+  return false;
 }
 
 /** The package a Claude Code worktree is made in: the only one, or the one picked. */
@@ -135,6 +154,14 @@ export interface WorktreeLaunch {
    * Claude will ask to trust it, so the terminal opens whatever `open` says.
    */
   untrusted?: (launchDir: string) => Promise<boolean>;
+  /** The package a Claude Code worktree is made in, when the workspace has several (instead of asking). */
+  packageDir?: string;
+  /** The commit the worktree starts from (Claude Code worktrees only; `claude --worktree` picks its own otherwise). */
+  base?: string;
+  /** Told where the worktree is, once made. */
+  created?: (worktree: { name: string; dir: string }) => void;
+  /** Told why the worktree or session could not be started (a notification says it too). */
+  failed?: (message: string) => void;
 }
 
 /**
@@ -172,22 +199,38 @@ export async function newWorktreeSession(
   const kind = newWorktreeKind(root);
   // Both kinds of worktree, so a new name never matches an existing worktree of either kind.
   const features = await discoverFeatures(root, { claudeWorktrees: true });
-  const pkg = kind === 'claude' ? await pickPackage(features[0].packages) : undefined;
-  if (kind === 'claude' && !pkg) return false;
+  const packages = features[0].packages;
+  const given = launch.packageDir ? packages.find((p) => p.dir === launch.packageDir) : undefined;
+  const pkg = kind === 'claude' ? (given ?? (await pickPackage(packages))) : undefined;
+  if (kind === 'claude' && !pkg) {
+    launch.failed?.('no package to make a Claude Code worktree in');
+    return false;
+  }
+  if (launch.base && kind !== 'claude') {
+    const message = `a base commit (${launch.base}) works only for git worktrees, not for ${workspaceProvider?.label ?? 'workspace'} worktrees`;
+    launch.failed?.(message);
+    void vscode.window.showErrorMessage(`Could not start the worktree session: ${message}.`);
+    return false;
+  }
   const worktree = worktreeSlug(launch.name?.trim() || task, [...features.map((f) => f.name), ...Object.values(store.all()).map((t) => t.worktree)]);
 
   let dir: string;
   let launchDir: string;
   let extraArgs = '';
-  if (pkg) {
+  if (pkg && launch.base) {
+    dir = join(pkg.dir, '.claude', 'worktrees', worktree);
+    launchDir = dir;
+    if (!(await createGitWorktree(pkg.dir, worktree, dir, launch.base, launch.failed))) return false;
+  } else if (pkg) {
     dir = join(pkg.dir, '.claude', 'worktrees', worktree);
     launchDir = pkg.dir;
     extraArgs = `--worktree ${worktree}`;
   } else {
     dir = join(root, 'worktrees', worktree);
     launchDir = dir;
-    if (!(await createWorkspaceWorktree(root, worktree, dir))) return false;
+    if (!(await createWorkspaceWorktree(root, worktree, dir, launch.failed))) return false;
   }
+  launch.created?.({ name: worktree, dir });
   try {
     await store.save({ task, worktree, kind, dir, createdAt: Date.now() });
   } catch (err) {

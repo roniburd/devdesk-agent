@@ -7,6 +7,7 @@ import { endedDir, listableEnded, readEndedRecords, removeEndedRecord, writeEnde
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
 import { cardsWithProgramStatus, programStatusDirIn, readProgramStatuses } from './core/programStatus';
 import { cardsWithNotes, notesDirIn, readNotes, staleNotes } from './core/devdeskCli';
+import { cardsWithWorkers, readMailboxes, workersDirIn } from './core/workers';
 import { ChildrenReader } from './core/sessionChildren';
 import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
 import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
@@ -54,6 +55,8 @@ export interface SessionsModelOptions {
   /** The workspace root whose worktrees sessions are matched against. */
   root: () => string | undefined;
   pollMs: () => number;
+  /** How long a hooked working or waiting session's record may go unchanged before Claude's own report replaces it (0: never). */
+  hooksQuietMs: () => number;
   /** DevDesk's tmux server (`-L` name). */
   tmuxServer: () => string;
   /** List every Claude session on the machine, not only those on DevDesk's tmux server. */
@@ -447,16 +450,19 @@ export class SessionsModel implements vscode.Disposable {
       // Showing everything also covers your own (default) tmux server.
       if (showAll && server !== DEFAULT_SERVER) listing.push(listPanes(this.o.tmux(DEFAULT_SERVER), DEFAULT_SERVER));
       const registryDir = this.o.claudeSessionsDir();
-      const [paneLists, records, ended, procs, registry, statuses, notes] = await Promise.all([
+      const [paneLists, records, ended, procs, registry, statuses, notes, mailboxes] = await Promise.all([
         Promise.all(listing),
         readHookRecords(dir, this.transcriptEnds),
         readEndedRecords(endedDir(dir)),
         listProcesses(),
         registryDir ? readRegistry(registryDir) : Promise.resolve([]),
-        // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without hooks.
+        // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without
+        // hooks, and for hooked ones where the hooks lag or went quiet (statusMerge.ts).
         readProgramStatuses(programStatusDirIn(dir), processAlive),
         // Notes Claude set on its cards (`devdesk note`), by pane.
         readNotes(notesDirIn(dir)),
+        // Coordinator and worker sessions (`devdesk worker`): which card works for which.
+        readMailboxes(workersDirIn(dir)),
       ]);
       steps.mark('list');
       const tmuxPanes = paneLists.flat();
@@ -477,9 +483,15 @@ export class SessionsModel implements vscode.Disposable {
       steps.mark('forks');
       const split = splitRecords(records, panes, processAlive);
       const { listed, stale } = listableEnded(ended, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])));
-      const all = cardsWithNotes(
-        cardsWithProgramStatus(buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed), statuses),
-        notes,
+      const all = cardsWithWorkers(
+        cardsWithNotes(
+          cardsWithProgramStatus(buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed), statuses, {
+            now: Date.now(),
+            quietMs: this.o.hooksQuietMs(),
+          }),
+          notes,
+        ),
+        mailboxes,
       );
       // The dead record that shows a crash is deleted below: keep the mark while the session stays stopped.
       for (const c of all) if (c.state === 'stopped' && this.crashed.has(c.id)) c.crashed = true;

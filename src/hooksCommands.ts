@@ -1,3 +1,4 @@
+import { watch } from 'node:fs';
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import { type HookFileResult, type HooksStatus, hookEvents, installHooksInto, parseClaudeVersion, readHooksInstalled, readHooksStatus, removeHooksFrom } from './core/hooks';
@@ -33,6 +34,29 @@ export function claudeCodeVersion(fresh = false): Promise<string | undefined> {
 /** True when every DevDesk hook runs the current script with the configured state directory. */
 export async function hooksInstalled(): Promise<boolean> {
   return readHooksInstalled(claudeConfigDir(), sessionsStateDir(), await claudeCodeVersion());
+}
+
+/**
+ * Calls `onChange` (debounced) when Claude Code's `settings.json` may have changed: installed or removed from another
+ * window, by another tool, or rewritten by Claude Code. Watches the directory, as a write may replace the file.
+ */
+export function watchHooksSettings(onChange: () => void): vscode.Disposable {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const watcher = watch(claudeConfigDir(), (_event, name) => {
+      if (name && String(name) !== 'settings.json') return;
+      clearTimeout(timer);
+      timer = setTimeout(onChange, 250);
+    });
+    watcher.on('error', () => watcher.close());
+    return new vscode.Disposable(() => {
+      clearTimeout(timer);
+      watcher.close();
+    });
+  } catch {
+    // No Claude config directory yet: installing creates it, and that window refreshes itself.
+    return new vscode.Disposable(() => undefined);
+  }
 }
 
 /** Whether the DevDesk hooks are installed, and with the configured state directory. */

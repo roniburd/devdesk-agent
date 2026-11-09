@@ -14,6 +14,7 @@ import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { openFeatureSession } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
+import type { WorktreeChecks } from './worktreeChecks';
 import { deleteWorktreeRow } from './worktreeDelete';
 import { openDiff } from './worktreeDiffs';
 
@@ -29,6 +30,8 @@ export function updateWorkspaceContext(): void {
 export interface WorktreesView {
   tree: FeaturesTree;
   urgent: () => ReadonlyMap<string, string>;
+  /** Shows the worktrees' checks hints on their rows, fetched on the view's refresh tick for the worktrees it lists. */
+  setChecks(checks: WorktreeChecks): void;
 }
 
 /**
@@ -56,6 +59,7 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
   // One refresh at a time: the next starts refreshSeconds after the last one's git work is done, and only while the
   // view is visible and (unless pauseWhenUnfocused is off) the window is in front.
   let paused: boolean | undefined;
+  let checks: WorktreeChecks | undefined;
   const inFront = () => view.visible && (vscode.window.state.focused || !worktreesPauseWhenUnfocused());
   tree.setActive(inFront);
   const loop = tickLoop({
@@ -69,6 +73,8 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
     tick: async () => {
       const start = Date.now();
       log.debug('auto-refresh');
+      // In the background, each worktree at most every devdesk.checks.refreshMinutes: the git refresh does not wait for it.
+      checks?.refreshDue(tree.listedFeatures());
       await tree.refreshChanges();
       log.debug(`auto-refresh: done in ${Date.now() - start}ms`);
     },
@@ -156,5 +162,13 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
     registerTimedCommand('devdesk.features.openSettings', () => openSettings('devdesk.worktrees')),
     loop,
   );
-  return { tree, urgent: () => urgent };
+  return {
+    tree,
+    urgent: () => urgent,
+    setChecks: (c) => {
+      checks = c;
+      tree.setChecks(c);
+      ctx.subscriptions.push(c.onDidChange(() => tree.refreshLabels()));
+    },
+  };
 }

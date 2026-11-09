@@ -241,6 +241,8 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .card .doing { color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* The note Claude set on its card (`devdesk note`): one line, the hover has all of it. */
 .card .note { font-size: 0.9em; color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A worker's coordinator, or a coordinator's workers (`devdesk worker`): one line, the hover has all of it. */
+.card .team { font-size: 0.9em; color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* Needs you: what Claude asks, boxed under the title (scoped to cards: the header's ✨ button is #ask). */
 .card .ask {
   padding: 5px 8px;
@@ -278,6 +280,10 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .hc-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--widget-border); color: var(--vscode-descriptionForeground); font-size: 0.88em; }
 .acts { display: flex; flex-wrap: wrap; gap: 4px; }
 .acts .act { padding: 0 6px; font-size: 0.8em; line-height: 1.5; white-space: nowrap; }
+/* A prompt for later's Edit and Delete: quiet icon buttons at the end of its meta line. */
+.card .meta .tools { margin-left: auto; display: inline-flex; gap: 2px; flex: none; }
+.card .meta .tools .act { padding: 0 4px; min-width: 20px; font-size: 0.95em; line-height: 1.5; background: transparent; color: var(--vscode-descriptionForeground); }
+.card .meta .tools .act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 /* Session cards' Fork / End: quiet text buttons until you hover the card. */
 .card:not(.task) .acts .act { background: transparent; color: var(--vscode-descriptionForeground); opacity: 0.7; }
 .card:not(.task):hover .acts .act, .card:not(.task):focus-within .acts .act { opacity: 1; }

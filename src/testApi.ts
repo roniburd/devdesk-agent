@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import type { BoardPanel } from './boardPanel';
 import type { CliBridge } from './devdeskCli';
+import type { WorkerHub } from './workers';
 import type { ReviewComments } from './reviewComments';
+import type { WorktreeChecks } from './worktreeChecks';
 import { claudeTerminalSession, restoreTerminals } from './claudeSessions';
 import { type OpenTerminal, REATTACH_KEY, reattachKey } from './state/reattachTerminals';
 import { sessionsTmuxServer } from './config';
@@ -40,6 +42,8 @@ export function testApi(
     usageScope,
     cli,
     review,
+    checks,
+    workers,
   }: {
     sessionsTree: SessionsTree;
     worktrees: WorktreesView;
@@ -48,6 +52,8 @@ export function testApi(
     usageScope: UsageScopeState;
     cli: CliBridge;
     review: ReviewComments;
+    checks: WorktreeChecks;
+    workers: WorkerHub;
   },
 ) {
   const tree = worktrees.tree;
@@ -191,10 +197,25 @@ export function testApi(
     /** The `devdesk` command's path, and how many of its requests this window has handled. */
     cliCommand: () => cli.command,
     cliHandled: () => cli.handled,
+    /** Notices and replies the worker hub has typed into sessions so far. */
+    workersTyped: () => workers.typed,
     /** Adds a note for Claude on lines `start`-`end` (0-based) of `file` in the worktree at `featureDir`, as the diff's comment box does. */
     addReviewNote: (file: string, featureDir: string, start: number, end: number, text: string) =>
       review.addAt(vscode.Uri.file(file), featureDir, new vscode.Range(start, 0, end, 0), text),
     /** Notes for Claude not sent yet, by worktree directory. */
     reviewNoteCounts: () => Object.fromEntries(review.counts()),
+    /** Fetches the checks of the worktrees the Worktrees view lists, as its refresh tick does when they are due (but now). */
+    refreshChecks: async () => {
+      for (const f of tree.listedFeatures()) await checks.fetch(f);
+    },
+    /** Each worktree's checks hint, by directory (only those with one). */
+    checksHints: () => checks.hints(),
+    /** How many times checks were fetched. */
+    checksFetches: () => checks.fetches,
+    /** The prompt Ask Claude to Fix Checks would send for the worktree at `dir` (or why it would send none). */
+    checksFixRequest: async (dir: string) => {
+      const f = tree.listedFeatures().find((x) => x.dir === dir);
+      return f ? checks.fixRequest(f) : { message: `no worktree at ${dir}` };
+    },
   };
 }

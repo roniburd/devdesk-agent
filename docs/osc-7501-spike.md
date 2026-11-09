@@ -77,14 +77,17 @@ interrupted one. The protocol never says whether text is typed at the prompt.
 
 ## What DevDesk does with it
 
-See `src/core/programStatus.ts`. The setting `devdesk.sessions.programStatus` is off by default. When on, new sessions run
+See `src/core/programStatus.ts`. The setting `devdesk.sessions.programStatus` is on by default. Then new sessions run
 `python3 -I ~/.claude/devdesk/devdesk_status.py <state dir>/status <claude ...>`. The relay writes
-`<state dir>/status/<server>-<pane number>.json`, holding the last root report's body, its time and the relay's pid,
-and deletes the file when Claude exits. The relay answers the probe and nothing else. It leaves the bytes untouched.
+`<state dir>/status/<server>-<pane number>.json`, holding the last root report's body, when Claude first sent it (a
+repeat keeps the time), the relay's pid and how many child records (subagents) last reported blocked, and deletes the
+file when Claude exits. The relay answers the probe and nothing else. It leaves the bytes untouched.
 
 - The 3 s refresh reads that directory: one `readdir` and one small file per relayed session, with no subprocess. A
   card with no hooks (`unknown`) takes the reported state: working, waiting (permission, question or sign-in, with
-  Claude's message as its detail), done, idle, or blocked (error). Hooks keep precedence.
+  Claude's message as its detail), done, idle, or blocked (error). A card with hooks keeps their state, except where
+  `src/core/statusMerge.ts` lets the report go first: a wait (or a sign-in) the hooks haven't reported yet, and a
+  working or waiting record unchanged for `devdesk.sessions.hooksQuietMinutes` while Claude reports another state.
 - "Send to session" and ←: a `working` or `blocked` report says Claude is busy, or a dialog is open, without reading the
   screen. When there is no report, or it says idle or done, the screen scraping in `claudePrompt.ts` still decides
   whether anything is typed.

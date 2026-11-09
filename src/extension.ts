@@ -23,6 +23,7 @@ import {
   sessionsParkBelowFreePercent,
   sessionsParkPolicy,
   sessionsPollMs,
+  sessionsHooksQuietMs,
   sessionsShowAll,
   sessionsWorkspaceOnly,
   sessionsShowChildren,
@@ -48,6 +49,8 @@ import { UsagePanel } from './usagePanel';
 import { UsageScopeState } from './usageScopeState';
 import { UsageService } from './usageService';
 import { WorktreeTaskStore } from './worktreeSessions';
+import { WorktreeChecks } from './worktreeChecks';
+import { WorkerHub } from './workers';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
 export async function activate(ctx: vscode.ExtensionContext) {
@@ -57,6 +60,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     stateDir: sessionsStateDir,
     root: workspaceRoot,
     pollMs: sessionsPollMs,
+    hooksQuietMs: sessionsHooksQuietMs,
     tmuxServer: sessionsTmuxServer,
     showAll: sessionsShowAll,
     workspaceOnly: sessionsWorkspaceOnly,
@@ -112,7 +116,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // The `devdesk` command Claude runs to open files and diffs here, and notes left on diff lines for Claude.
   const cli = new CliBridge(sessions, () => worktrees.tree.mode);
   const review = new ReviewComments(ctx.workspaceState, sessions, sessionsTree);
-  ctx.subscriptions.push(cli, review, ...registerCliCommands(cli));
+  // The worktrees' pull request checks: a hint on their rows and cards, and Ask Claude to Fix Checks (sent as notes are).
+  const checks = new WorktreeChecks(review, () => sessions.loadFeatures());
+  worktrees.setChecks(checks);
+  board.setChecks(checks);
+  // Coordinator and worker sessions (`devdesk worker`): starts workers, keeps their mailboxes, tells coordinators.
+  const workers = new WorkerHub(sessions, sessionsTree, worktreeTasks, () => cli.command);
+  cli.workers = workers;
+  ctx.subscriptions.push(cli, review, checks, workers, ...registerCliCommands(cli));
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
@@ -159,7 +170,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review, checks, workers });
 }
 
 export function deactivate(): void {}

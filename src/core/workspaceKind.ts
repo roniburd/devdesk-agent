@@ -1,3 +1,5 @@
+import type { ChecksProvider } from './checks';
+
 /**
  * A kind of package workspace, beyond plain git repositories: a root holding git packages under `<root>/src/<package>`
  * and its own worktrees under `<root>/worktrees/<name>`, made and deleted by shell commands. Which kind DevDesk knows
@@ -15,4 +17,6 @@ export interface WorkspaceProvider {
   readonly defaultDeleteCommand: string;
   /** How the delete confirmation describes deleting one of its worktrees. */
   readonly deleteDescription: string;
+  /** Where the change requests and checks of its packages come from, besides GitHub (see `checks.ts`). */
+  readonly checks?: ChecksProvider;
 }

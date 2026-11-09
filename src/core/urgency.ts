@@ -98,3 +98,13 @@ export interface SortOptions extends UrgencyOptions {
 export function sortSessions(cards: readonly SessionCard[], o: SortOptions): SessionCard[] {
   return o.mode === 'urgency' ? urgencyOrder(cards, o, o.settle) : attentionOrder(cards, o.now, o.idleMs, o.unread, o.unreadFirst, o.settle);
 }
+
+/**
+ * The most urgent session in each worktree (by `featureDir`), for the Worktrees view: each worktree's first session in
+ * the order `devdesk.sessions.sort` names. Working sessions are not settled here: only each worktree's first counts.
+ */
+export function urgentByWorktree(cards: readonly SessionCard[], o: Omit<SortOptions, 'settle'>): Map<string, SessionCard> {
+  const result = new Map<string, SessionCard>();
+  for (const c of sortSessions(cards, o)) if (c.featureDir && !result.has(c.featureDir)) result.set(c.featureDir, c);
+  return result;
+}

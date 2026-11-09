@@ -13,16 +13,16 @@ import {
   readDecoration,
   stateLook,
   truncate,
-  urgentByWorktree,
   SettledOrder,
   type Settle,
 } from './core/sessionsView';
 import { oneLine } from './core/text';
-import { sortSessions } from './core/urgency';
+import { sortSessions, urgentByWorktree } from './core/urgency';
+import { statusFromText } from './core/statusMerge';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
 import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
 import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsRecentlyFinishedMs, sessionsSort, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
-import { hooksInstalled, hooksSettingsShown } from './hooksCommands';
+import { hooksInstalled, hooksSettingsShown, watchHooksSettings } from './hooksCommands';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { SessionsReadState } from './sessionsReadState';
@@ -84,6 +84,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** The colors last drawn, to redraw when another window changed them. */
   private drawnColors: ReadonlyMap<string, string> | undefined;
   private hooksMissing = false;
+  /** Counts hook reads, so a slow earlier read cannot overwrite a later one. */
+  private hooksReads = 0;
   private readonly settledOrder = new SettledOrder();
   /** A tmux session just started from DevDesk: selected as soon as the model lists it. */
   private pending: { session: string; server: string; until: number } | undefined;
@@ -113,7 +115,11 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       vscode.window.registerFileDecorationProvider(this),
       vscode.workspace.onDidChangeConfiguration((e) => {
         const reorders = ['groupByWorktree', 'resortWorkingMinutes', 'sort', 'recentlyFinishedMinutes', 'unreadFirst', 'idleMinutes', 'stuckMinutes'];
-        if (reorders.some((k) => e.affectsConfiguration(`devdesk.sessions.${k}`))) this.changed.fire(undefined);
+        if (reorders.some((k) => e.affectsConfiguration(`devdesk.sessions.${k}`))) {
+          this.changed.fire(undefined);
+          // The Worktrees view shows each worktree's first session in this order.
+          this.urgentChanged.fire();
+        }
         if (e.affectsConfiguration('devdesk.sessions.dimRead') || e.affectsConfiguration('devdesk.sessions.unreadBadge')) this.decorationsChanged.fire(undefined);
       }),
       model.onDidChange(() => this.update()),
@@ -123,6 +129,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       vscode.window.onDidChangeActiveTerminal((t) => this.followTerminal(this.focusedCard(t))),
       vscode.window.tabGroups.onDidChangeTabs(() => this.followTab()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.followTab()),
+      watchHooksSettings(() => this.refreshHooks()),
     ];
     this.status.text = '';
     this.syncAcquire();
@@ -145,10 +152,12 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     return d && new vscode.FileDecoration(d.badge, d.tooltip, d.color ? new vscode.ThemeColor(d.color) : undefined);
   }
 
-  /** Re-reads whether the hooks are installed (settings.json); not done on every poll. */
+  /** Re-reads whether the hooks are installed (settings.json): on activation, setting changes and when the file changes. */
   refreshHooks(): void {
+    const read = ++this.hooksReads;
     void hooksInstalled().then(
       (installed) => {
+        if (read !== this.hooksReads || this.hooksMissing === !installed) return;
         this.hooksMissing = !installed;
         this.changed.fire(undefined);
       },
@@ -207,7 +216,15 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
 
   /** The most urgent session of each worktree directory. */
   urgentByWorktree(): Map<string, SessionCard> {
-    return urgentByWorktree(this.model.current, Date.now(), sessionsIdleMs(), this.read.unread);
+    return urgentByWorktree(this.model.current, {
+      mode: sessionsSort(),
+      now: Date.now(),
+      idleMs: sessionsIdleMs(),
+      stuckMs: sessionsStuckMs(),
+      recentMs: sessionsRecentlyFinishedMs(),
+      unread: this.read.unread,
+      unreadFirst: sessionsUnreadFirst(),
+    });
   }
 
   /** The Claude view is showing (for tests). */
@@ -538,6 +555,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     if (v.summary) tooltip.appendText(`${v.summary}\n\n`);
     if (v.prompt) tooltip.appendText(`Last prompt: ${v.prompt}\n\n`);
     if (v.detail) tooltip.appendText(`${v.detail}\n\n`);
+    const from = statusFromText(card, now);
+    if (from) tooltip.appendText(`${from}\n\n`);
     if (v.times) tooltip.appendText(`${v.times}\n\n`);
     if (parked) tooltip.appendText(`Not running (${card.endReason ?? 'ended'}). Opening it resumes the conversation: claude --resume ${card.sessionId}\n\n`);
     tooltip.appendText(v.location);

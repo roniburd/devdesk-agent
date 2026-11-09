@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildBoard } from '../src/core/board';
 import { INTERRUPTED_DETAIL, type SessionCard } from '../src/core/sessions';
 import { attentionOrder, SettledOrder } from '../src/core/sessionsView';
-import { sortSessions, urgencyOrder, urgencyRank, type UrgencyOptions } from '../src/core/urgency';
+import { sortSessions, urgencyOrder, urgencyRank, urgentByWorktree, type UrgencyOptions } from '../src/core/urgency';
 
 const NOW = 1_800_000_000_000;
 const MIN = 60_000;
@@ -96,6 +96,35 @@ describe('sortSessions', () => {
     const o = { ...opts({ unread }), idleMs: 30 * MIN, unreadFirst: true };
     expect(ids(sortSessions(cards, { ...o, mode: 'attention' }))).toEqual(ids(attentionOrder(cards, NOW, 30 * MIN, unread, true)));
     expect(ids(sortSessions(cards, { ...o, mode: 'urgency' }))).toEqual(['d', 'w']);
+  });
+});
+
+describe('urgentByWorktree', () => {
+  const firsts = (m: Map<string, SessionCard>) => [...m].map(([dir, c]) => [dir, c.id]);
+  const o = { ...opts(), idleMs: 30 * MIN, unreadFirst: false };
+
+  it('picks each worktree’s first session, skipping sessions outside a worktree', () => {
+    const cards = [
+      card('w', { state: 'working', featureDir: '/w/a' }),
+      card('q', { state: 'waiting', featureDir: '/w/a' }),
+      card('d', { featureDir: '/w/b' }),
+      card('none', { state: 'waiting' }),
+    ];
+    for (const mode of ['urgency', 'attention'] as const)
+      expect(firsts(urgentByWorktree(cards, { ...o, mode }))).toEqual([
+        ['/w/a', 'q'],
+        ['/w/b', 'd'],
+      ]);
+  });
+
+  it('follows the sort mode', () => {
+    // Urgency answers the longest wait first; attention order puts the newest first.
+    const cards = [
+      card('q-new', { state: 'waiting', featureDir: '/w/a', updatedAt: NOW - MIN }),
+      card('q-old', { state: 'waiting', featureDir: '/w/a', updatedAt: NOW - 8 * MIN }),
+    ];
+    expect(firsts(urgentByWorktree(cards, { ...o, mode: 'urgency' }))).toEqual([['/w/a', 'q-old']]);
+    expect(firsts(urgentByWorktree(cards, { ...o, mode: 'attention' }))).toEqual([['/w/a', 'q-new']]);
   });
 });
 

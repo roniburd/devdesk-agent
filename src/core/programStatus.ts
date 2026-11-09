@@ -5,6 +5,7 @@ import { shellQuote } from './shell';
 import type { SessionCard } from './sessions';
 import type { PromptScreen } from './sessionSend';
 import { DEFAULT_SERVER, isPaneId } from './tmux';
+import { mergedCard, reportedCard, type MergeOptions } from './statusMerge';
 
 /**
  * Claude Code's Program Status Protocol (OSC 7501, since 2.1.295): Claude reports `idle`, `working`, `blocked` (with a
@@ -31,6 +32,8 @@ export interface ProgramStatus extends ProgramStatusReport {
   at: number;
   /** The relay's process: the report is stale once it is gone. */
   pid: number;
+  /** How many of Claude's child records (subagents) last reported blocked; missing from older relays. */
+  blockedChildren?: number;
 }
 
 const STATES: ReadonlySet<string> = new Set(['idle', 'working', 'done', 'blocked', 'error']);
@@ -100,7 +103,9 @@ export function parseProgramStatusFile(text: string): ProgramStatus | undefined 
   if (!isFiniteNumber(at) || !isFiniteNumber(pid) || !Number.isInteger(pid) || pid <= 0) return undefined;
   const report = parseProgramStatusBody(raw.body);
   if (!report || report.state === 'clear') return undefined;
-  return { ...report, state: report.state, at, pid };
+  const status: ProgramStatus = { ...report, state: report.state, at, pid };
+  if (isFiniteNumber(raw.blocked) && Number.isInteger(raw.blocked) && raw.blocked > 0) status.blockedChildren = raw.blocked;
+  return status;
 }
 
 /** Where the relay writes each pane's status: `status` in the sessions state directory. */
@@ -151,40 +156,23 @@ export async function readCardProgramStatus(
   return status && alive(status.pid) ? status : undefined;
 }
 
-const KIND_DETAIL: Record<BlockedKind, string> = {
-  permission: 'Waiting for your approval',
-  question: 'Waiting for your answer',
-  auth: 'Waiting for you to sign in',
-};
-
 /**
- * The card a status gives a session without hooks (state `unknown`): working; waiting (blocked on a permission, a
- * question or a sign-in, which needs you); done or idle at the prompt; blocked (an error). Claude's message is the
- * detail. Cards with hook state keep it: hooks say more (the prompt, the tool, the reply).
+ * The card a status gives a session without hooks (state `unknown`); a card with hook state keeps it, except where
+ * `mergedCard` (statusMerge.ts) lets Claude's report go first: hooks say more (the prompt, the tool, the reply).
+ * `o` (the time now and `devdesk.sessions.hooksQuietMinutes`) turns that merge on; without it hook state always wins.
  */
-export function cardWithProgramStatus(card: SessionCard, status: ProgramStatus | undefined): SessionCard {
-  if (!status || card.state !== 'unknown') return card;
-  const base = { ...card, updatedAt: status.at };
-  switch (status.state) {
-    case 'working':
-      return { ...base, state: 'working', detail: status.msg ?? 'Working' };
-    case 'blocked':
-      return { ...base, state: 'waiting', detail: status.msg ?? (status.kind ? KIND_DETAIL[status.kind] : 'Waiting for you') };
-    case 'error':
-      return { ...base, state: 'blocked', detail: status.msg ?? 'Error' };
-    case 'done':
-      return { ...base, state: 'done', detail: status.msg ?? 'Finished its turn' };
-    case 'idle':
-      return { ...base, state: 'idle', detail: status.msg ?? 'At the prompt' };
-  }
+export function cardWithProgramStatus(card: SessionCard, status: ProgramStatus | undefined, o?: MergeOptions): SessionCard {
+  if (!status) return card;
+  if (card.state === 'unknown') return reportedCard(card, status);
+  return o ? mergedCard(card, status, o) : card;
 }
 
 /** Every card with its pane's status (`statuses` by file name, from readProgramStatuses). */
-export function cardsWithProgramStatus(cards: SessionCard[], statuses: ReadonlyMap<string, ProgramStatus>): SessionCard[] {
+export function cardsWithProgramStatus(cards: SessionCard[], statuses: ReadonlyMap<string, ProgramStatus>, o?: MergeOptions): SessionCard[] {
   if (!statuses.size) return cards;
   return cards.map((c) => {
     const name = programStatusFileName(c.tmuxServer, c.tmuxPane);
-    return name ? cardWithProgramStatus(c, statuses.get(name)) : c;
+    return name ? cardWithProgramStatus(c, statuses.get(name), o) : c;
   });
 }
 
@@ -212,7 +200,8 @@ export const PROGRAM_STATUS_SCRIPT_NAME = 'devdesk_status.py';
  * Python 3.9, standard library only. Runs a command (Claude) in a pseudo-terminal of its own, copying bytes both ways
  * untouched; answers OSC 7501 probes in Claude's output at once (before the DA1 query Claude sends after the probe
  * reaches tmux and is answered), and writes the latest root report to <dir>/<tmux server>-<pane number>.json (or
- * $DEVDESK_STATUS_FILE), removed when the command ends. Outside tmux, or if anything fails before the command starts,
+ * $DEVDESK_STATUS_FILE), removed when the command ends. A report that repeats the last one keeps its time (`at` is
+ * when Claude entered the state); `blocked` counts the child records (subagents) whose latest report is blocked. Outside tmux, or if anything fails before the command starts,
  * it runs the command itself.
  */
 export const PROGRAM_STATUS_SCRIPT = String.raw`#!/usr/bin/env python3
@@ -284,12 +273,27 @@ def is_child_record(body):
     return any(pair.split(b'=', 1)[0].strip() == b'id' for pair in body.split(b':') if b'=' in pair)
 
 
-def write_status(path, body):
+def child_update(blocked, body):
+    """Notes a child record (a subagent) in the set of blocked ones; True when the set changed."""
+    pairs = dict((k.strip(), v) for k, v in (p.split(b'=', 1) for p in body.split(b':') if b'=' in p))
+    child = pairs.get(b'id', b'').strip()
+    if not child:
+        return False
+    was = child in blocked
+    if pairs.get(b'state', b'').strip() == b'blocked':
+        blocked.add(child)
+    else:
+        blocked.discard(child)
+    return was != (child in blocked)
+
+
+def write_status(path, root, blocked):
+    """root: the latest root report's body and when it first came (a repeat keeps its time)."""
     try:
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         tmp = '%s.%d.tmp' % (path, os.getpid())
         with open(tmp, 'w') as f:
-            json.dump({'body': body.decode('ascii', 'replace'), 'at': int(time.time() * 1000), 'pid': os.getpid()}, f)
+            json.dump({'body': root[0].decode('ascii', 'replace'), 'at': root[1], 'pid': os.getpid(), 'blocked': len(blocked)}, f)
         os.replace(tmp, path)
     except Exception:
         pass
@@ -351,6 +355,8 @@ def main():
     signal.signal(signal.SIGHUP, hangup)
     signal.signal(signal.SIGTERM, hangup)
     scanner = Scanner()
+    root = None
+    blocked = set()
     inputs = [0, fd]
     reaped = None
     code = 0
@@ -367,8 +373,12 @@ def main():
                 for body in scanner.feed(data):
                     if body.strip() == b'?':
                         write_all(fd, REPLY)
-                    elif not is_child_record(body):
-                        write_status(path, body)
+                    elif is_child_record(body):
+                        if child_update(blocked, body) and root is not None:
+                            write_status(path, root, blocked)
+                    elif root is None or body != root[0]:
+                        root = (body, int(time.time() * 1000))
+                        write_status(path, root, blocked)
                 write_all(1, data)
             if 0 in ready:
                 try:

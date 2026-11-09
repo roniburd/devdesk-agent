@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -293,6 +293,18 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "devdesk.sessions.lastTurnChanges",
+        "title": "Show Last Turn's Changes",
+        "category": "Worktrees",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "devdesk.sessions.turnChanges",
+        "title": "Show Changes by Turn…",
+        "category": "Worktrees",
+        "icon": "$(history)"
+      },
+      {
         "command": "devdesk.sessions.openSettings",
         "title": "Claude Sessions Settings",
         "category": "Worktrees",
@@ -402,6 +414,17 @@
       {
         "command": "devdesk.review.clear",
         "title": "Clear Notes for Claude",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.checks.askClaude",
+        "title": "Ask Claude to Fix Checks",
+        "category": "Worktrees",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "devdesk.checks.refresh",
+        "title": "Refresh Pull Request Checks",
         "category": "Worktrees"
       },
       {
@@ -530,6 +553,16 @@
           "group": "session@4"
         },
         {
+          "command": "devdesk.sessions.lastTurnChanges",
+          "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
+          "group": "changes@1"
+        },
+        {
+          "command": "devdesk.sessions.turnChanges",
+          "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
+          "group": "changes@2"
+        },
+        {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\bunread$/",
           "group": "read@1"
@@ -615,6 +648,16 @@
           "group": "session@4"
         },
         {
+          "command": "devdesk.sessions.lastTurnChanges",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/",
+          "group": "changes@1"
+        },
+        {
+          "command": "devdesk.sessions.turnChanges",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/",
+          "group": "changes@2"
+        },
+        {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\bunread$/",
           "group": "read@1"
@@ -633,9 +676,24 @@
           "command": "devdesk.review.clear",
           "when": "view == devdesk.features && viewItem =~ /^feature/",
           "group": "review@2"
+        },
+        {
+          "command": "devdesk.checks.askClaude",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bchecks\\b/",
+          "group": "review@3"
         }
       ],
       "webview/context": [
+        {
+          "command": "devdesk.sessions.lastTurnChanges",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "changes@1"
+        },
+        {
+          "command": "devdesk.sessions.turnChanges",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "changes@2"
+        },
         {
           "command": "devdesk.sessions.markRead",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && sessionUnread",
@@ -1015,47 +1073,54 @@
             "description": "A working Claude session with no progress (no hook event) for this many minutes shows as stuck (orange watch).",
             "order": 11
           },
+          "devdesk.sessions.hooksQuietMinutes": {
+            "type": "number",
+            "default": 2,
+            "minimum": 0,
+            "markdownDescription": "A session whose status hooks have said working or waiting, with no new hook event, for this many minutes shows the state Claude itself reports instead, when it differs (it needs `#devdesk.sessions.programStatus#`). This catches a hook event that got lost, such as a permission you denied with Esc. 0: the hooks' state always wins.",
+            "order": 12
+          },
           "devdesk.sessions.idleMinutes": {
             "scope": "machine",
             "type": "number",
             "default": 30,
             "minimum": 1,
             "description": "A finished Claude session not updated for this many minutes sorts after working and recently finished sessions (it still shows as done).",
-            "order": 12
+            "order": 13
           },
           "devdesk.sessions.resortWorkingMinutes": {
             "type": "number",
             "default": 5,
             "minimum": 0,
             "description": "Working Claude sessions keep their order in the Claude view and on the Claude Board for this many minutes, then sort again (newest first), so rows don't move each time a session does something. A session that starts working goes first among them. 0: always sorted.",
-            "order": 13
+            "order": 14
           },
           "devdesk.sessions.readAfterSeconds": {
             "type": "number",
             "default": 1.5,
             "minimum": 0,
             "description": "A Claude session shows in bold (unread) when anything happened in it since you last looked; its terminal must be in front for this many seconds to count as read.",
-            "order": 14
+            "order": 15
           },
           "devdesk.sessions.finishedSessions": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many parked (not running) Claude sessions the Claude view lists per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
-            "order": 15
+            "order": 16
           },
           "devdesk.sessions.showChildren": {
             "type": "boolean",
             "default": true,
             "description": "List what each Claude session spun off under its row: subagents (and their own subagents and shells), background shell commands, and workflows with their phases and agents. Read from the session's transcript.",
-            "order": 16
+            "order": 17
           },
           "devdesk.sessions.finishedChildren": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many finished subagents, shells and workflows the Claude view lists per level; older ones fold into one `N earlier finished` row. Running ones are always listed. Applies when `#devdesk.sessions.showChildren#` is on.",
-            "order": 17
+            "order": 18
           },
           "devdesk.sessions.pollSeconds": {
             "type": "number",
@@ -1063,7 +1128,23 @@
             "minimum": 1,
             "maximum": 3600,
             "description": "How often (seconds) the Claude Sessions panel re-checks tmux while it is open or notifications are on.",
-            "order": 18
+            "order": 19
+          },
+          "devdesk.sessions.turnChangesTurns": {
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "maximum": 200,
+            "markdownDescription": "How many of a session's latest turns **Show Changes by Turn…** lists (read from the end of its transcript).",
+            "order": 20
+          },
+          "devdesk.sessions.turnChangesMaxMB": {
+            "type": "number",
+            "default": 64,
+            "minimum": 1,
+            "maximum": 1024,
+            "markdownDescription": "How much (MB) of the end of a session's transcript, and of each of its subagents', **Show Last Turn's Changes** and **Show Changes by Turn…** read at most. Turns that started before it are listed as partly read.",
+            "order": 21
           }
         }
       },
@@ -1622,7 +1703,7 @@
           "devdesk.usage.planLimits": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Show how much of Claude's 5-hour and weekly plan limits you've used at the top of the board's 📊 popup (Claude.ai Pro and Max subscriptions). The numbers come from DevDesk's Claude status line (**Show Claude Plan Limits** command), which runs your own status line after it. While it isn't installed, the popup offers it; turn this off to hide that.",
+            "markdownDescription": "Show how much of Claude's 5-hour and weekly plan limits you've used at the top of the board's 📊 popup and of the Claude Usage page (Claude.ai Pro and Max subscriptions). The numbers come from DevDesk's Claude status line (**Show Claude Plan Limits** command), which runs your own status line after it. While it isn't installed, they offer it; turn this off to hide that.",
             "order": 4
           }
         }
@@ -1638,6 +1719,27 @@
             "scope": "machine",
             "markdownDescription": "Let Claude sessions ask this window to open a file or a diff, or set a note on their card, with the `devdesk` command (`~/.claude/devdesk/devdesk`, written when this is on; `devdesk --help`). Requests go through files in a folder only you can open, `~/.claude/devdesk/ipc`; no port is opened. To tell Claude the command exists, run **Claude: Teach Claude the devdesk Command**.",
             "order": 1
+          },
+          "devdesk.workers.maxConcurrent": {
+            "type": "number",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 32,
+            "markdownDescription": "The most worker sessions one coordinator may run at once with `devdesk worker start` (workers that reported, failed to start or ended don't count).",
+            "order": 2
+          },
+          "devdesk.workers.nudge": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "When a coordinator session has unread worker messages and waits at an empty prompt, type a one-line notice into it (\"You have N worker messages. Run `devdesk worker check`.\"), once per batch of messages. A busy session is never interrupted. Off: the coordinator reads them only when it runs `devdesk worker check`.",
+            "order": 3
+          },
+          "devdesk.workers.escalationMinutes": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "markdownDescription": "Minutes a worker session may sit stopped (its turn over, or Claude gone) without `devdesk worker done` or `devdesk worker ask` before its coordinator gets a \"stopped without reporting\" message.",
+            "order": 4
           }
         }
       },
@@ -1778,6 +1880,69 @@
             "minimum": 0,
             "description": "Log a warning, with the DevDesk operations in flight, when the extension host's heap grows this much in 10 s. 0 disables.",
             "order": 12
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.checks",
+        "title": "Pull request checks",
+        "order": 12,
+        "properties": {
+          "devdesk.checks.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show each worktree's failing pull request checks and open review comments on its Worktrees view row and its sessions' board cards (`2 checks failing · 1 comment`), and offer Ask Claude to Fix Checks. GitHub pull requests are read with the `gh` CLI, when it is installed and signed in.",
+            "order": 1
+          },
+          "devdesk.checks.refreshMinutes": {
+            "type": "number",
+            "default": 5,
+            "minimum": 0,
+            "description": "While the Worktrees view is visible, read a listed worktree's checks again at most this many minutes after the last time (on the view's refresh, `devdesk.worktrees.refreshSeconds`). 0: only when you ask Claude to fix them or run Refresh Pull Request Checks.",
+            "order": 2
+          },
+          "devdesk.checks.maxBackoffMinutes": {
+            "type": "number",
+            "default": 60,
+            "minimum": 1,
+            "description": "After reading a worktree's checks fails (no `gh`, not signed in, no network), the next try waits twice as long each time, up to this many minutes.",
+            "order": 3
+          },
+          "devdesk.checks.timeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "description": "A `gh` call that takes longer is stopped.",
+            "order": 4
+          },
+          "devdesk.checks.reviewComments": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also read the pull request's review comments that aren't resolved yet, count them in the hint and put them (file, line, text) in the prompt to Claude.",
+            "order": 5
+          },
+          "devdesk.checks.logLines": {
+            "type": "number",
+            "default": 40,
+            "minimum": 0,
+            "maximum": 500,
+            "description": "Lines of a failing check's failed log (`gh run view --log-failed`) the prompt to Claude quotes: from the first line that looks like a failure to the last error. 0: no logs, only each check's link.",
+            "order": 6
+          },
+          "devdesk.checks.maxLogs": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "The failed logs of at most this many failing checks are read for one prompt; the others get their link only.",
+            "order": 7
+          },
+          "devdesk.checks.ghPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "The GitHub CLI to run. Empty: `gh` on PATH.",
+            "order": 8
           }
         }
       }

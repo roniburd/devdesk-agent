@@ -83,7 +83,7 @@ Notes:
 Which events get a hook:
 
 - Always: SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure, Notification, Stop, StopFailure and SessionEnd.
-- PostCompact, only when `claude --version` says 2.1.76 or newer, and PostToolBatch, only from 2.1.118. An older Claude Code rejects a settings file that names an event it doesn't know, and that would turn off your own hooks too.
+- Elicitation and ElicitationResult (an MCP server's input form), only when `claude --version` says 2.1.63 or newer, PostCompact from 2.1.76, and PostToolBatch from 2.1.118. An older Claude Code rejects a settings file that names an event it doesn't know, and that would turn off your own hooks too.
 - If you later upgrade Claude Code, the Claude view offers to install the hooks again (in a new or reloaded window), to add the newer events.
 - Not PreCompact: it also fires for a compaction that is then cancelled.
 
@@ -104,12 +104,30 @@ DevDesk also removes the variables Claude Code sets for the programs it runs (`C
 Each wait is tied to the tool call that asks (Claude Code's `tool_use_id`), not to the words of a message:
 
 - A question (AskUserQuestion) or a plan to review (ExitPlanMode) is a question or a plan, even when Claude Code shows a permission dialog for it too.
-- Any other permission dialog (PermissionRequest) is a permission, for example `Needs permission: Running Bash: npm test`. MCP input forms are shown as input.
+- Any other permission dialog (PermissionRequest) is a permission, for example `Needs permission: Running Bash: npm test`.
+- An MCP server's input form (Elicitation) is shown as input, for example `jira: Pick a project`. It ends when you answer, decline or cancel it (ElicitationResult), not when another tool runs, and the card goes back to what it showed before, for example done when the form came outside a turn. A Claude Code older than 2.1.63 only sends a notification for the form: that is shown as input too, and its next tool step ends it.
 - A wait ends when its own tool call finishes or fails, or when a PostToolBatch lists it (that covers a permission Claude denied itself). Another tool finishing at the same time does not end it.
 - A new prompt, the end of the turn, or the end of the session ends every wait.
 - A subagent's wait shows on its session's card. Once it is answered, or that subagent moves on, the card goes back to what it showed before, for example done. Other subagents' tools don't end it, and a background subagent's tools don't make a finished session working again.
 - A reply that ends with a question mark is still done, shown as done with a question. It is not a wait.
 - Sessions still running an older hook script keep working: DevDesk reads their waits from the card text, as before.
+
+### When Claude's own status goes first
+
+Sessions DevDesk starts with `devdesk.sessions.programStatus` on also report their state themselves (see [The command DevDesk runs](#the-command-devdesk-runs)). The hooks usually say more, such as the tool, the question or the reply, so their state wins. Claude's own report goes first in these cases only:
+
+| The hooks say | Claude reports, after the last hook event | The card shows | When |
+|---|---|---|---|
+| Working | Waiting for an approval, an answer or a sign-in | Waiting, with Claude's message | At once, until a hook event catches up. |
+| Done, ready or blocked | Waiting for you to sign in (no hook reports this) | Needs input, with Claude's message | At once. |
+| Working or waiting | Anything else, such as ready after you denied a permission with Esc | What Claude reports | Once no hook event has come for 2 minutes (`devdesk.sessions.hooksQuietMinutes`). |
+
+- A hook event newer than Claude's report always wins, and the next hook event takes the card back.
+- A wait the hooks recorded never ends at once. It ends only by a hook event, or once the hooks are quiet. While a subagent reports that it is waiting, the wait stays.
+- A finished turn isn't reopened by Claude's report of work or of an approval: hooks are quiet after a turn by design.
+- The card's hover says when its state comes from Claude, for example *Status from Claude, hooks quiet (no hook event for 3 min)*.
+- *Stuck* still means working with no hook event for `devdesk.sessions.stuckMinutes`. The quiet rule comes first, so a lost hook event that left a card working while Claude is done or waiting is corrected after 2 minutes, before the card would look stuck. A card that still looks stuck is one Claude also reports as working, such as a long or hung tool call, or a session without the relay.
+- DevDesk reads Claude's reports on each refresh (every 3 seconds, `devdesk.sessions.pollSeconds`). A hook event that lands first, as a permission request usually does, wins, so the card doesn't switch between the two.
 
 ## 3. The Claude view
 
@@ -202,7 +220,7 @@ Each icon has its own shape, so color is never the only cue.
 | red error | Blocked | The turn ended on an error. |
 | orange clock | Blocked | A rate or usage limit stopped Claude. |
 | blue spinner | Working | Claude is working. |
-| orange watch | Stuck? | Working, but no hook event for `devdesk.sessions.stuckMinutes` (10 minutes). |
+| orange watch | Stuck? | Working, but no hook event for `devdesk.sessions.stuckMinutes` (10 minutes), and Claude doesn't report another state (see [When Claude's own status goes first](#when-claudes-own-status-goes-first)). |
 | blue spinning sync | Waiting on background work | The turn ended, but a subagent, background shell or workflow still runs. Claude continues when it finishes. This state never shows as stuck. |
 | green check | Done | The turn finished, however long ago. After `devdesk.sessions.idleMinutes` it only sorts lower. |
 | green speech bubbles | Done, asked you | The turn finished with a question for you. See below. |
@@ -233,6 +251,33 @@ Click an item to open it, scrolled to the end:
 - a workflow opens its summary.
 
 Each level lists the running items and the last 10 finished ones (`devdesk.sessions.finishedChildren`). Older ones fold into one `N earlier finished` row. To hide all of this, turn off `devdesk.sessions.showChildren`.
+
+### See what a turn changed
+
+To see what Claude's last reply changed, right-click a session row (or a card on the Claude Board) and pick one of:
+
+- **Show Last Turn's Changes** opens what Claude changed in its last turn.
+- **Show Changes by Turn…** lists the session's recent turns, newest first. Each shows its prompt, how many files it changed and when. Pick one to open its changes.
+
+Both are in the command palette too (**Worktrees: …**), for the session selected in the Claude view.
+
+One file opens in a diff editor. Several files open in one multi-file diff editor. Both sides are read-only copies of the file before and after the turn, so a later edit doesn't change them.
+
+A turn starts at each prompt you send, a slash command, or a background task finishing. Tool results, `!` commands and a subagent's own prompt don't start one.
+
+The changes come from the session's transcript, not from git:
+
+- They're the Edit, MultiEdit, Write and NotebookEdit calls that succeeded. Calls that failed are left out.
+- The turn's subagents' edits count too, read from their transcripts.
+- Changes made another way, for example by a shell command or by you, don't show.
+
+How DevDesk gets each file's text before and after the turn:
+
+1. **From the transcript.** Claude Code usually records the whole file before each edit. DevDesk applies the turn's edits to it, in order. A file the turn created starts empty.
+2. **From the file as it is now.** When the transcript has no whole copy, DevDesk takes the file on disk and undoes the edits made since the turn, newest first. This assumes nothing else changed the file since. A notification says which files were rebuilt this way.
+3. **Only the edited parts.** When neither works, the diff shows just the edited lines with a little context, or the old and new text of each edit. This happens when the file changed since, or an edit's new text appears more than once. A Write over a file whose earlier text is unknown shows an empty "before". A notebook edit shows only the new cell.
+
+DevDesk reads the transcript backward from its end, so a long session costs only its last turns. It reads the last 30 turns (`devdesk.sessions.turnChangesTurns`), and at most 64 MB from the end of the transcript and of each subagent's (`devdesk.sessions.turnChangesMaxMB`). A turn that started before that, or has a line over 16 MB, is marked **partly read** and may miss changes.
 
 ### Other places that show urgency
 
@@ -327,7 +372,7 @@ A new session runs this, in order:
 
 To replace the whole command, set `devdesk.sessions.command`. DevDesk inserts the mode and Fork arguments right after the program name (the first word of the command).
 
-With `devdesk.sessions.programStatus` on, DevDesk puts `python3 -I ~/.claude/devdesk/devdesk_status.py <state dir>/status` before the binary. The relay passes every byte through unchanged. It answers Claude's status probe (OSC 7501), which tmux can't, and writes Claude's latest state to a file DevDesk reads. A session without status hooks then shows working, waiting (for an approval, an answer or a sign-in) or idle instead of no status. Hooks still win when they are installed. When `python3` doesn't run, sessions start without the relay.
+With `devdesk.sessions.programStatus` on, DevDesk puts `python3 -I ~/.claude/devdesk/devdesk_status.py <state dir>/status` before the binary. The relay passes every byte through unchanged. It answers Claude's status probe (OSC 7501), which tmux can't, and writes Claude's latest state to a file DevDesk reads. A session without status hooks then shows working, waiting (for an approval, an answer or a sign-in) or idle instead of no status. When hooks are installed they mostly win; see [When Claude's own status goes first](#when-claudes-own-status-goes-first) for when Claude's report goes first. When `python3` doesn't run, sessions start without the relay.
 
 ## 5. Read and unread
 
@@ -486,6 +531,38 @@ Lines are relative to the worktree; a range says `Lines: 12-15`; quotes and line
 
 Sent notes are cleared. **Delete Note** (trash icon on a note), **Delete Notes Here** (on a thread) and **Clear Notes for Claude** (on a worktree row) remove notes without sending them.
 
+### Ask Claude to fix failing checks
+
+When a worktree's branch has an open GitHub pull request, its row in the Worktrees view says what needs fixing after its changes, for example `3 changed · 2 checks failing · 1 comment`, and the board's cards of its sessions get a **Fix checks** button. Right-click the row and pick **Ask Claude to Fix Checks** (or click **Fix checks** on a card; the command palette's *Worktrees: Ask Claude to Fix Checks* asks which worktree).
+
+DevDesk reads the checks again, with the failed log of each failing check (at most `devdesk.checks.maxLogs` of them), and sends Claude one prompt the way notes on a diff go (above): typed into the worktree's session that waits at an empty prompt, else a new session there. The prompt lists, for each pull request:
+
+```text
+GitHub pull request #12: "Fix the login"
+URL: https://github.com/you/app/pull/12
+
+Failing check: unit tests
+Workflow: CI
+Status: FAILURE
+Details: https://github.com/you/app/actions/runs/11/job/22
+Log excerpt:
+    not ok 2 - login
+    Error: expected 200, got 401
+    ##[error]Process completed with exit code 1.
+
+File: src/login.ts
+Line: 12
+Comment by reviewer: "Check the token before you call the API."
+```
+
+The log excerpt runs from a few lines before the first line that looks like a failure to the last error, at most `devdesk.checks.logLines` lines (its first and last halves when it is longer). Review comments are the threads not resolved yet; a thread on code that changed since says `(outdated)`. Turn them off with `devdesk.checks.reviewComments`.
+
+How it reads them:
+
+- With the [GitHub CLI](https://cli.github.com) (`gh`, setting `devdesk.checks.ghPath`), signed in (`gh auth login`), for each package of the worktree whose git remote is on GitHub. It only reads: `gh pr view --json`, a GraphQL query for the review threads, and `gh run view --log-failed`. Without `gh`, or signed out, there are no hints, and the command says why.
+- While the Worktrees view is visible, on its refresh (`devdesk.worktrees.refreshSeconds`), for the worktrees it lists, each at most every `devdesk.checks.refreshMinutes` (5). After a failure the next try waits twice as long each time, up to `devdesk.checks.maxBackoffMinutes`. **Ask Claude to Fix Checks** and *Worktrees: Refresh Pull Request Checks* read them at once.
+- Merged and closed pull requests have nothing to fix. A check still running isn't counted.
+
 ### Show sessions under worktrees
 
 The comment button in the Worktrees title bar lists each worktree's sessions above its packages, like the Claude view does. Setting: `devdesk.worktrees.showSessions`.
@@ -544,6 +621,8 @@ A card is kept short. It shows:
 In *Working*, a card also says what Claude is doing now, in one line (the insights live status, else the latest status).
 
 A card also shows the note Claude set on it with `devdesk note` (📌), in any lane (see [The devdesk command](#16-the-devdesk-command)).
+
+A worker session's card says whose worker it is and how it stands (👥 `worker "lint" · working · of Split the refactor`), and its coordinator's card counts its workers (👥 `3 workers: 1 done, 2 working`); see [Coordinator and worker sessions](#coordinator-and-worker-sessions).
 
 In *Needs you*, a card also says what Claude asks or wants you to approve, in one line, under the kind of ask (question, permission, plan). Its time says how long it has been waiting.
 
@@ -868,7 +947,7 @@ Before a session starts in a folder Claude hasn't trusted yet, the box says Clau
 
 ## 11. Prompts for later
 
-![The Prompts for later lane, with Start, Plan, Spec, Edit and Delete on each prompt](images/manual-prompts-for-later.png)
+![The Prompts for later lane: each prompt has Start, Plan, Spec and Draft, with Edit (✎) and Delete (✕) next to its worktree](images/manual-prompts-for-later.png)
 
 A prompt for later is a prompt you saved to run later. It doesn't run until you click one of its buttons.
 
@@ -899,8 +978,8 @@ A prompt leaves the lane once it ran: its session started, or its command was se
 
 ### Edit or delete it
 
-- **Edit** puts it back in the prompt box. Send it (it then leaves the lane), save it again, or click **Cancel**.
-- **Delete** asks first.
+- **✎** (Edit), next to the prompt's worktree, puts it back in the prompt box. Send it (it then leaves the lane), save it again, or click **Cancel**.
+- **✕** (Delete) asks first.
 
 Prompts for later belong to the project folder (the folder open in the window, on that machine): each project has its own lane, and every window on that folder shares it. (Tasks saved by older versions show as their title followed by their notes.)
 
@@ -992,6 +1071,8 @@ Click **More…** in the popup, or run **DevDesk: Show Claude Token Usage**. The
 - by **day** (last 30),
 - by **week** (last 26),
 - by **month** (last 24).
+
+At the top, the page shows your plan limits, as the popup does (the same rows, the same **Show…** offer, and nothing without numbers or with `devdesk.usage.planLimits` off). Plan limits are for your whole Claude account, whatever project you choose.
 
 Each column shows new and cached tokens. A line shows the cached share. Click a column to see that period's totals, models and top sessions. Open *Every day as a table* to see the numbers.
 
@@ -1130,6 +1211,28 @@ Only that window gets the request, and it takes it once. Requests and answers ar
 
 Turn it off with `devdesk.cli.enabled`: the window then takes no requests, and the command says so.
 
+### Coordinator and worker sessions
+
+One Claude session (the coordinator) can split its task and start other Claude sessions (workers) on the parts, each in a worktree of its own, then get their reports back. The skill (see [Tell Claude about it](#tell-claude-about-it)) teaches Claude when and how; you can also ask for it ("split this into workers").
+
+```bash
+devdesk worker start --name <name> --task <text|@file> [--worktree new|current] [--base <ref>]
+devdesk worker check                 # the workers' unread reports and questions (marks them read)
+devdesk worker list                  # each worker's task id, name and status
+devdesk worker reply --task <id> <answer>
+devdesk worker done --task <id> --outcome succeeded|failed --summary <text>   # from a worker
+devdesk worker ask --task <id> <question>                                     # from a worker
+```
+
+1. **Start.** `devdesk worker start` returns the worker's task id at once. In the background, DevDesk makes a worktree the way **New Worktree Session** does (a Claude Code worktree in a git repository, else `devdesk.worktrees.createCommand`), named after `--name`, and starts Claude there in a tmux session without opening its terminal. `--worktree current` starts it in the coordinator's folder instead (for read-only work, like a review). `--base <ref>` makes a git worktree from that commit (git repositories only). If the worktree or session can't be started, the coordinator gets a "failed to start" message. A worker can't start workers of its own, and one coordinator runs at most `devdesk.workers.maxConcurrent` (4) at once.
+2. **The worker's first prompt** is its task, then what it is (a worker, with its task id and coordinator) and the exact `devdesk worker ask` and `devdesk worker done` commands to run.
+3. **Reports and questions** go to the coordinator's mailbox: a file per coordinator, `workers/<tmux server>~<tmux session>.jsonl` in the sessions state directory (`devdesk.sessions.stateDir`), only ever appended to. Nothing is lost if VS Code is closed meanwhile: `devdesk worker check` prints whatever is unread when it runs.
+4. **The nudge.** When the coordinator has unread messages and waits at an empty prompt (its turn over, nothing typed, no question or dialog open, its pane not scrolled back), DevDesk types one line into it: `You have 2 worker messages. Run devdesk worker check.` It does so once per batch: a new message makes a new notice. A busy coordinator is never interrupted; it is told when its turn ends. Turn this off with `devdesk.workers.nudge`.
+5. **Answers.** `devdesk worker reply` types the answer into the worker as soon as it waits at its prompt.
+6. **Silent workers.** A worker whose turn ended (or whose Claude exited) without `worker done` or `worker ask` for `devdesk.workers.escalationMinutes` (3) gets a "stopped without reporting" message sent to its coordinator, once each time it stops.
+
+`devdesk worker list` and the board say where each worker stands: `starting`, `working`, `waiting` (on a permission or a question), `idle` (its turn ended, no report yet), `ended` (Claude no longer runs), or what it reported: `succeeded` or `failed`. The window that lists the coordinator's session does the nudging; two windows never type the same notice twice.
+
 ## 17. Troubleshooting
 
 ### Sessions show NO STATUS, or never change state
@@ -1204,12 +1307,15 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.notifyWhenWaiting` | `true` |
 | `devdesk.sessions.statusBar` | `true` (the `N needs you` status bar item) |
 | `devdesk.sessions.stuckMinutes` | `10` (a working session with no hook event for this long shows as stuck) |
+| `devdesk.sessions.hooksQuietMinutes` | `2` (a session whose hooks have said working or waiting this long, with no new hook event, shows the state Claude itself reports when it differs; needs `devdesk.sessions.programStatus`; `0`: never) |
 | `devdesk.sessions.idleMinutes` | *machine*, `30` (a finished session not updated for this long sorts after working and recently finished ones) |
 | `devdesk.sessions.resortWorkingMinutes` | `5` (working sessions keep their order this long before sorting again, newest first; `0`: always sorted) |
 | `devdesk.sessions.readAfterSeconds` | `1.5` (a session's terminal must be in front this long for what happened in it to count as read) |
 | `devdesk.sessions.finishedSessions` | `10` (parked sessions listed per worktree and on the board; older ones fold into one row) |
 | `devdesk.sessions.showChildren` | `true` (subagents, background shells and workflows under each session) |
 | `devdesk.sessions.finishedChildren` | `10` (finished ones listed per level; older ones fold into one row) |
+| `devdesk.sessions.turnChangesTurns` | `30` (recent turns **Show Changes by Turn…** lists, see [See what a turn changed](#see-what-a-turn-changed)) |
+| `devdesk.sessions.turnChangesMaxMB` | `64` (MB read at most from the end of a session's transcript, and of each subagent's, to show a turn's changes) |
 | `devdesk.sessions.pollSeconds` | `3` (how often, in seconds, DevDesk reads session states) |
 | `devdesk.sessions.parkAfterDays` | *machine*, `2` (a DevDesk session inactive this long is parked: its tmux session and Claude end, its row stays to resume it; `0`: never park, also turns off the three below) |
 | `devdesk.sessions.parkReadAfterMinutes` | *machine*, `60` (park sooner a finished session you've read that neither ended on an error nor asks a question; `0`: only `parkAfterDays`) |
@@ -1250,6 +1356,19 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.worktrees.maxGitProcesses` | `8` (the most git processes the Worktrees view runs at once; an expanded worktree may use all of them, background loads up to half, or a quarter while the load average is above 1.5 per CPU) |
 | `devdesk.worktrees.gitTimeoutSeconds` | `30` (a slower git command of the Worktrees view is stopped and its package shows an error; 0 never stops it) |
 | `devdesk.worktrees.startPrompt` | `You are working in worktree {worktree} ({dir}) on: {task}` + "say which worktree you are in, then work on the task" |
+
+### Pull request checks
+
+| Setting | Default |
+|---|---|
+| `devdesk.checks.enabled` | `true` (worktree rows and board cards show failing checks and open review comments of their pull requests; **Ask Claude to Fix Checks**) |
+| `devdesk.checks.refreshMinutes` | `5` (a listed worktree's checks are read again at most this often while the Worktrees view is visible; 0: only when you ask) |
+| `devdesk.checks.maxBackoffMinutes` | `60` (after failures in a row, the wait doubles up to this) |
+| `devdesk.checks.timeoutSeconds` | `30` (a slower `gh` call is stopped) |
+| `devdesk.checks.reviewComments` | `true` (count the review threads not resolved yet, and put them in the prompt) |
+| `devdesk.checks.logLines` | `40` (lines of a failing check's failed log in the prompt; 0: its link only) |
+| `devdesk.checks.maxLogs` | `3` (failed logs read for one prompt; the other failing checks get their link only) |
+| `devdesk.checks.ghPath` | *machine*, `gh` on PATH |
 
 ### Claude Board
 
@@ -1301,13 +1420,16 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.usage.defaultScope` | `project` (what the 📊 popup and the Claude Usage page show first: `project`, this window's project, or `all`, all projects) |
 | `devdesk.usage.historyDays` | *machine*, `365` (days of token usage history kept, at least 1) |
 | `devdesk.usage.historyMaxMB` | *machine*, `10` (the most disk the token usage history takes; the oldest days go first) |
-| `devdesk.usage.planLimits` | `true` (show Claude's 5-hour and weekly plan limits in the 📊 popup, or offer DevDesk's status line that records them; see [Plan limits](#plan-limits)) |
+| `devdesk.usage.planLimits` | `true` (show Claude's 5-hour and weekly plan limits in the 📊 popup and on the Claude Usage page, or offer DevDesk's status line that records them; see [Plan limits](#plan-limits)) |
 
 ### The devdesk command
 
 | Setting | Default |
 |---|---|
 | `devdesk.cli.enabled` | *machine*, `true` (the window takes requests from the `devdesk` command Claude runs to open files and diffs or set a card note, and keeps the command in `~/.claude/devdesk/` up to date) |
+| `devdesk.workers.maxConcurrent` | `4` (the most worker sessions one coordinator runs at once; see [Coordinator and worker sessions](#coordinator-and-worker-sessions)) |
+| `devdesk.workers.nudge` | `true` (type "You have N worker messages" into a coordinator that waits at an empty prompt with unread worker messages, once per batch) |
+| `devdesk.workers.escalationMinutes` | `3` (how long a worker may sit stopped without reporting before its coordinator is told) |
 
 ### tmux
 

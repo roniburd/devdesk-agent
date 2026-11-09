@@ -158,41 +158,54 @@ export class ReviewComments implements vscode.Disposable {
       void vscode.window.showInformationMessage(`No notes for Claude in ${feature.name}.`);
       return undefined;
     }
-    const prompt = reviewPrompt(notes);
-    const running = runningSessions(await this.sessions.fresh()).filter((c) => c.featureDir === dir);
+    const what = notes.length === 1 ? '1 note' : `${notes.length} notes`;
+    return this.sendPrompt(feature, reviewPrompt(notes), what, (to) => this.sent(feature, threads, what, to));
+  }
+
+  /**
+   * Sends `prompt` (`what` names it in messages: `2 notes`) to a session of `feature` waiting at an empty prompt (picked
+   * when several are), typed in; with none waiting, starts a new session with it as its first prompt (after asking,
+   * when a session there is busy). `onSent` is told where it went. Returns that, or undefined (not sent, or not yet).
+   * Review notes and the checks to fix (`checks.ts`) both go this way.
+   */
+  async sendPrompt(feature: Feature, prompt: string, what: string, onSent?: (to: string) => void): Promise<string | undefined> {
+    const running = runningSessions(await this.sessions.fresh()).filter((c) => c.featureDir === feature.dir);
     const idle: SessionCard[] = [];
     for (const card of running) {
       const screen = await this.boardSessions.promptScreen(card).catch(() => undefined);
       if (screen && !screen.exited && !sendBlocker(card, '', screen)) idle.push(card);
     }
-    const what = notes.length === 1 ? '1 note' : `${notes.length} notes`;
-    let sentTo: string;
     if (idle.length) {
       const picked = idle.length === 1 ? idle[0] : await this.boardSessions.pick({ title: `Send ${what} to`, cards: idle });
       if (!picked || typeof picked === 'string') return undefined;
       await this.boardSessions.typeInto(picked, prompt, { multiline: true });
-      sentTo = sessionTitle(picked);
+      const sentTo = sessionTitle(picked);
       void vscode.window.showInformationMessage(`Sent ${what} to "${sentTo}".`, 'Open session').then((a) => a && this.boardSessions.open(picked));
-    } else if (running.length) {
-      // Its sessions are busy: the notes stay, and a new session takes them only when asked (the command returns now).
+      log.info(`sent ${what} on ${feature.name} to ${sentTo}`);
+      onSent?.(sentTo);
+      return sentTo;
+    }
+    if (running.length) {
+      // Its sessions are busy: nothing is sent, and a new session takes it only when asked (the command returns now).
       void vscode.window
         .showInformationMessage(`No Claude session in ${feature.name} is at an empty prompt: send the ${what} when one is, or start a new session with them.`, 'Start session')
-        .then((a) => a && this.startWith(feature, prompt, threads, what));
+        .then((a) => a && this.startWith(feature, prompt, what, onSent));
       return undefined;
-    } else return this.startWith(feature, prompt, threads, what);
-    this.sent(feature, threads, what, sentTo);
-    return sentTo;
+    }
+    return this.startWith(feature, prompt, what, onSent);
   }
 
-  /** Starts a session in the worktree with the notes as its first prompt. */
-  private async startWith(feature: Feature, prompt: string, threads: vscode.CommentThread[], what: string): Promise<string> {
+  /** Starts a session in the worktree with `prompt` as its first prompt. */
+  private async startWith(feature: Feature, prompt: string, what: string, onSent?: (to: string) => void): Promise<string> {
     const session = await startNumbered(this.sessions, this.tree, sessionName(feature), feature.dir, sessionsClaudeCommand(promptArg(prompt)));
-    this.sent(feature, threads, what, session);
+    log.info(`sent ${what} on ${feature.name} to a new session ${session}`);
+    onSent?.(session);
     return session;
   }
 
+  /** The notes went: they are cleared. */
   private sent(feature: Feature, threads: vscode.CommentThread[], what: string, to: string): void {
-    log.info(`sent ${what} on ${feature.name} to ${to}`);
+    log.debug(`clearing the ${what} sent on ${feature.name} to ${to}`);
     for (const t of threads) if (this.threads.has(t)) this.deleteThread(t);
   }
 

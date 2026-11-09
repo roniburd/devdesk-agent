@@ -48,18 +48,20 @@ describe('settings merge', () => {
     expect(HOOK_EVENTS).toContain('PostToolUse');
   });
 
-  it('installs PostToolBatch only for a Claude Code that knows it', () => {
+  it('installs PostToolBatch, PostCompact and the Elicitation events only for a Claude Code that knows them', () => {
     expect(parseClaudeVersion('2.1.319.1689 (Claude Code, channel stable)')).toBe('2.1.319');
     expect(parseClaudeVersion('2.0.5 (Claude Code)')).toBe('2.0.5');
     expect(parseClaudeVersion('command not found')).toBeUndefined();
     expect(HOOK_EVENTS).toEqual(expect.arrayContaining(['PermissionRequest', 'PostToolUseFailure']));
     expect(hookEvents()).toEqual([...HOOK_EVENTS]);
-    expect(hookEvents('2.1.75')).toEqual([...HOOK_EVENTS]);
-    expect(hookEvents('2.1.76')).toEqual([...HOOK_EVENTS, 'PostCompact']);
-    expect(hookEvents('2.1.117')).toEqual([...HOOK_EVENTS, 'PostCompact']);
-    expect(hookEvents('2.1.118')).toEqual([...HOOK_EVENTS, 'PostCompact', 'PostToolBatch']);
+    expect(hookEvents('2.1.62')).toEqual([...HOOK_EVENTS]);
+    expect(hookEvents('2.1.75')).toEqual([...HOOK_EVENTS, 'Elicitation', 'ElicitationResult']);
+    expect(hookEvents('2.1.76')).toEqual([...HOOK_EVENTS, 'Elicitation', 'ElicitationResult', 'PostCompact']);
+    expect(hookEvents('2.1.117')).toEqual([...HOOK_EVENTS, 'Elicitation', 'ElicitationResult', 'PostCompact']);
+    expect(hookEvents('2.1.118')).toEqual([...HOOK_EVENTS, 'Elicitation', 'ElicitationResult', 'PostCompact', 'PostToolBatch']);
     expect(hookEvents('3.0.0')).toContain('PostToolBatch');
     expect(hookEvents('2.10.0')).toContain('PostToolBatch');
+    expect(hookEvents('2.1.63')).toEqual([...HOOK_EVENTS, 'Elicitation', 'ElicitationResult']);
     const newer = addHooks(existing, CMD, hookEvents('2.1.200'));
     expect(hasHooks(newer, CMD, hookEvents('2.1.200'))).toBe(true);
     expect(hasHooks(addHooks(existing, CMD), CMD, hookEvents('2.1.200'))).toBe(false);
@@ -470,7 +472,9 @@ describe('hook script', () => {
     const fakeTmux = join(dir, 'fake-tmux');
     await writeFile(fakeTmux, `#!/bin/sh\necho asked >> '${asked}'\necho from-tmux\n`, { mode: 0o755 });
     const sendIn = (tags: Record<string, string>) => {
-      const env: NodeJS.ProcessEnv = { ...process.env, DEVDESK_STATE_DIR: state, TMUX: '/tmp/tmux-1/devdesk,1,0', TMUX_PANE: '%3', DEVDESK_TMUX: fakeTmux, ...tags };
+      // Not this shell's own tags (when the tests run inside a DevDesk session).
+      const { DEVDESK_TMUX_SESSION: _session, DEVDESK_TMUX_SERVER: _server, ...base } = process.env;
+      const env: NodeJS.ProcessEnv = { ...base, DEVDESK_STATE_DIR: state, TMUX: '/tmp/tmux-1/devdesk,1,0', TMUX_PANE: '%3', DEVDESK_TMUX: fakeTmux, ...tags };
       const input = JSON.stringify({ session_id: 'abc', hook_event_name: 'Stop', cwd: '/w/x' });
       return spawnSync('python3', ['-I', script], { input, env, encoding: 'utf8' });
     };
@@ -724,6 +728,55 @@ describe('hook script waits', () => {
     expect(await record()).toMatchObject({ state: 'waiting', detail: 'Asking: Which region?', wait: { kind: 'question', toolUseId: 'toolu_q' }, waitsBelow: null });
     send('PostToolUse', { tool_name: 'AskUserQuestion', tool_use_id: 'toolu_q' });
     expect(await record()).toMatchObject({ state: 'working', wait: null });
+  });
+
+  it('shows an MCP input form as input, and goes back to what it displaced once it is answered', async () => {
+    const form = { mcp_server_name: 'jira', elicitation_id: 'e1', message: 'Pick a project\nmore' };
+    send('UserPromptSubmit', { prompt: 'file it' });
+    send('PreToolUse', { tool_name: 'mcp__jira__create', tool_use_id: 'toolu_m' });
+    const working = await record();
+    send('Elicitation', form);
+    expect(await record()).toMatchObject({
+      state: 'waiting',
+      detail: 'jira: Pick a project',
+      wait: { kind: 'elicitation', elicitation: '["jira", "e1"]' },
+      stateBeforeWait: { state: 'working', detail: working.detail },
+    });
+    const waiting = await record();
+    // The notification for the same form, a parallel tool starting, and another form's result leave it waiting.
+    send('Notification', { message: 'MCP server wants input', notification_type: 'elicitation_dialog' });
+    expect(await record()).toEqual(waiting);
+    send('PreToolUse', { tool_name: 'Read', tool_use_id: 'toolu_r' });
+    expect(await record()).toEqual(waiting);
+    send('ElicitationResult', { mcp_server_name: 'jira', elicitation_id: 'other', action: 'accept' });
+    expect(await record()).toEqual(waiting);
+    send('ElicitationResult', { ...form, action: 'accept' });
+    expect(await record()).toMatchObject({ state: 'working', detail: working.detail, wait: null, stateBeforeWait: null, event: 'ElicitationResult' });
+    // A result with no form open changes nothing.
+    const after = await record();
+    send('ElicitationResult', { ...form, action: 'cancel' });
+    expect(await record()).toEqual(after);
+  });
+
+  it('brings back a finished turn after a form outside a turn, and takes over the notification of an older Claude Code', async () => {
+    send('UserPromptSubmit', { prompt: 'go' });
+    send('Stop');
+    const done = await record();
+    // The notification came first: the Elicitation is the same form, now known by its id.
+    send('Notification', { message: 'MCP server wants input', notification_type: 'elicitation_dialog' });
+    expect(await record()).toMatchObject({ state: 'waiting', wait: { kind: 'elicitation' } });
+    send('Elicitation', { mcp_server_name: 'auth' });
+    expect(await record()).toMatchObject({ state: 'waiting', detail: 'auth needs your input', wait: { kind: 'elicitation', elicitation: 'elicitation:auth' }, waitsBelow: null });
+    send('ElicitationResult', { mcp_server_name: 'auth', action: 'decline' });
+    expect(await record()).toMatchObject({ state: 'done', detail: done.detail, turnEndedAt: done.turnEndedAt, wait: null });
+    // Two forms at once: answering one shows the other.
+    send('Elicitation', { mcp_server_name: 'a', elicitation_id: '1', message: 'First' });
+    send('Elicitation', { mcp_server_name: 'b', elicitation_id: '1', message: 'Second' });
+    expect(await record()).toMatchObject({ detail: 'b: Second', waitsBelow: [{ kind: 'elicitation', detail: 'a: First' }] });
+    send('ElicitationResult', { mcp_server_name: 'b', elicitation_id: '1' });
+    expect(await record()).toMatchObject({ state: 'waiting', detail: 'a: First', waitsBelow: null });
+    send('ElicitationResult', { mcp_server_name: 'a', elicitation_id: '1' });
+    expect(await record()).toMatchObject({ state: 'done', detail: done.detail });
   });
 
   it('ends every wait when the turn does, and never turns a reply that asks into a wait', async () => {

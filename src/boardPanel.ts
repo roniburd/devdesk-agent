@@ -98,6 +98,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   private panel: vscode.WebviewPanel | undefined;
   private panelSubscriptions: vscode.Disposable[] = [];
   private postTimer: NodeJS.Timeout | undefined;
+  private checks: { hint(dir: string): string } | undefined;
   /** Holds the model while the board is visible. */
   private readonly hold: { set(want: boolean): void };
   /** The session the last posted board marked as in front (`BoardSession.focused`). */
@@ -383,7 +384,14 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       sort: sessionsSort(),
       recentMs: sessionsRecentlyFinishedMs(),
       cardTitle: boardCardTitle(),
+      checks: (dir) => this.checks?.hint(dir) ?? '',
     });
+  }
+
+  /** Where the cards' checks hints come from (`WorktreeChecks`): a card whose worktree has failing checks offers Fix checks. */
+  setChecks(checks: { hint(dir: string): string; onDidChange: vscode.Event<void> }): void {
+    this.checks = checks;
+    this.subscriptions.push(checks.onDidChange(() => this.schedulePost()));
   }
 
   /** The composer's choices (for tests). */
@@ -536,6 +544,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           return void (await setGlobalSetting('board.cardLine', !boardCardLine()));
         case 'sidebar':
           return void (await this.tree.focus(m.id ? this.model.find(m.id) : undefined));
+        case 'fixChecks': {
+          const dir = this.model.find(m.id)?.featureDir;
+          if (dir) await vscode.commands.executeCommand('devdesk.checks.askClaude', dir);
+          return;
+        }
         case 'open':
         case 'fork':
         case 'end': {

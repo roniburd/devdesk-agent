@@ -21,7 +21,6 @@ import {
   transitionsToWaiting,
   truncate,
   unreadCards,
-  urgentByWorktree,
   withHandMarks,
 } from '../src/core/sessionsView';
 
@@ -392,20 +391,6 @@ describe('attention', () => {
       card({ id: 'working', state: 'working', updatedAt: NOW - 3000 }),
     ];
     expect(attentionOrder(cards, NOW, IDLE, new Set()).map((c) => c.id)).toEqual(['working', 'bg', 'done']);
-  });
-
-  it('picks the most urgent session of each worktree', () => {
-    const cards = [
-      card({ id: 'w', state: 'working', featureDir: '/w/a' }),
-      card({ id: 'q', state: 'waiting', featureDir: '/w/a' }),
-      card({ id: 'd', state: 'done', featureDir: '/w/b' }),
-      card({ id: 'none', state: 'waiting' }),
-    ];
-    const urgent = urgentByWorktree(cards, NOW, IDLE, new Set());
-    expect([...urgent].map(([dir, c]) => [dir, c.id])).toEqual([
-      ['/w/a', 'q'],
-      ['/w/b', 'd'],
-    ]);
   });
 });
 

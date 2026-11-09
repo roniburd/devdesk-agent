@@ -159,6 +159,15 @@
     return b;
   }
 
+  /** An icon `action` with `name` for screen readers and a tooltip saying what it does. */
+  function iconAction(icon, name, what, type, id, disabled) {
+    const b = action(icon, type, id, false, disabled);
+    b.classList.add('icon');
+    b.title = `${name}: ${what}`;
+    b.setAttribute('aria-label', name);
+    return b;
+  }
+
   /** Resumes past session `id`: running, it is a board session, so a ✨ answer's lane lets it go. */
   function resumeHistory(id) {
     send('resumeHistory', { id });
@@ -281,6 +290,8 @@
     if (showLine && s.doing) card.append(el('div', 'doing', s.doing));
     // The note Claude set on its card (`devdesk note`).
     if (s.note) card.append(el('div', 'note', `\u{1F4CC} ${s.note}`));
+    // Coordinator and worker sessions (`devdesk worker`): whose worker it is, or how its workers stand.
+    if (s.team) card.append(el('div', 'team', `\u{1F465} ${s.team}`));
     // Needs you: what Claude asks, in one line, under what kind of ask it is.
     if (ask) {
       const box = el('div', 'ask');
@@ -307,6 +318,12 @@
     card.append(meta);
     const acts = el('div', 'acts');
     if (s.canFork) acts.append(action('Fork', 'fork', s.id));
+    // Its worktree's pull request has failing checks or open comments: Ask Claude to fix them.
+    if (s.checks) {
+      const fix = action('Fix checks', 'fixChecks', s.id);
+      fix.title = `Ask Claude to fix: ${s.checks}`;
+      acts.append(fix);
+    }
     if (s.canEnd) acts.append(action(s.parked ? 'Remove' : 'End', 'end', s.id));
     if (acts.childElementCount) card.append(acts);
     // Opening (double-click, Enter) is handled on the lanes (below), so a card updated in place keeps working.
@@ -491,9 +508,16 @@
     const meta = el('div', 'meta');
     for (const c of t.chips) meta.append(el('span', 'wt', c));
     meta.append(el('span', 'ago', t.starting ? 'starting…' : `added ${t.ago === 'just now' ? 'just now' : `${t.ago} ago`}`));
+    const off = t.starting;
+    // Edit and Delete: icons at the end of the meta line, so the run buttons below fit on one line of a lane.
+    const tools = el('span', 'tools');
+    tools.append(
+      iconAction('✎', 'Edit', 'Put it back in the prompt box to edit it', 'edit', t.id, off),
+      iconAction('✕', 'Delete', 'Delete it (asks first)', 'delete', t.id, off),
+    );
+    meta.append(tools);
     card.append(meta);
     const acts = el('div', 'acts');
-    const off = t.starting;
     const start = action('▶ Start', 'start', t.id, true, off);
     start.title = 'Start it as saved';
     const plan = action('Plan', 'plan', t.id, false, off);
@@ -502,7 +526,7 @@
     spec.title = 'Start it with a design spec first (devdesk.board.specPrompt)';
     const draft = action('Draft', 'draft', t.id, false, off);
     draft.title = 'Start a session with it typed at Claude\'s prompt, not sent: edit it there, then press Enter';
-    acts.append(start, plan, spec, draft, action('Edit', 'edit', t.id, false, off), action('Delete', 'delete', t.id, false, off));
+    acts.append(start, plan, spec, draft);
     card.append(acts);
     return card;
   }

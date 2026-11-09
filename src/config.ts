@@ -10,6 +10,7 @@ import { isSortMode, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { claudeConfigFilePath } from './core/trust';
+import type { TurnReadLimits } from './core/turnChangesRead';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
@@ -236,6 +237,14 @@ export function sessionsProgramStatus(): boolean {
   return cfg().get<boolean>('sessions.programStatus', true);
 }
 
+/**
+ * A hooked session whose record says working or waiting and has not changed for this long takes the state Claude
+ * itself reports instead, when it differs (setting `devdesk.sessions.hooksQuietMinutes`; 0: never).
+ */
+export function sessionsHooksQuietMs(): number {
+  return numberSetting('sessions.hooksQuietMinutes', 2, 0) * 60_000;
+}
+
 /** Where the Program Status relay writes each pane's status: `status` in the sessions state directory. */
 export function programStatusDir(): string {
   return programStatusDirIn(sessionsStateDir());
@@ -362,6 +371,16 @@ export function sessionsShowChildren(): boolean {
 /** Finished children listed per level, older ones folded into one row (setting `devdesk.sessions.finishedChildren`, at least 0). */
 export function sessionsFinishedChildren(): number {
   return numberSetting('sessions.finishedChildren', 10, 0, Infinity, true);
+}
+
+/**
+ * How far back Show Changes by Turn reads a session's transcript: the last `turns` turns (setting
+ * `devdesk.sessions.turnChangesTurns`, 1 to 200), and at most `maxBytes` from its end and from each subagent's
+ * (`devdesk.sessions.turnChangesMaxMB`, 1 to 1024). A line over 16 MB (or `maxBytes`) is skipped.
+ */
+export function sessionsTurnChangesLimits(): TurnReadLimits {
+  const maxBytes = numberSetting('sessions.turnChangesMaxMB', 64, 1, 1024) * 1024 * 1024;
+  return { turns: numberSetting('sessions.turnChangesTurns', 30, 1, 200, true), maxBytes, maxLine: Math.min(maxBytes, 16 * 1024 * 1024) };
 }
 
 /**
@@ -647,4 +666,45 @@ export function cliEnabled(): boolean {
 /** Whether the 📊 popup shows Claude's plan limits, or offers DevDesk's status line to record them (setting `devdesk.usage.planLimits`). */
 export function usagePlanLimits(): boolean {
   return cfg().get<boolean>('usage.planLimits', true);
+}
+
+/** The checks and review comments of worktrees' pull requests (settings `devdesk.checks.*`). */
+export interface ChecksConfig {
+  enabled: boolean;
+  /** How long a worktree's checks are kept before they are fetched again; 0: only when asked. */
+  refreshMs: number;
+  /** The longest wait after failures in a row (the wait doubles each time). */
+  maxBackoffMs: number;
+  timeoutMs: number;
+  gh: string;
+  reviewComments: boolean;
+  logLines: number;
+  maxLogs: number;
+}
+
+export function checksConfig(): ChecksConfig {
+  return {
+    enabled: cfg().get<boolean>('checks.enabled', true),
+    refreshMs: numberSetting('checks.refreshMinutes', 5, 0) * 60_000,
+    maxBackoffMs: numberSetting('checks.maxBackoffMinutes', 60, 1) * 60_000,
+    timeoutMs: numberSetting('checks.timeoutSeconds', 30, 1) * 1000,
+    gh: expandHome(cfg().get<string>('checks.ghPath')) || 'gh',
+    reviewComments: cfg().get<boolean>('checks.reviewComments', true),
+    logLines: numberSetting('checks.logLines', 40, 0, 500, true),
+    maxLogs: numberSetting('checks.maxLogs', 3, 0, 20, true),
+  };
+}
+
+/**
+ * Coordinator and worker sessions (`devdesk worker`): the most workers one coordinator may run at once
+ * (`devdesk.workers.maxConcurrent`), whether an idle coordinator is told about unread worker messages
+ * (`devdesk.workers.nudge`), and how long a worker may sit stopped without reporting before its coordinator is told
+ * (`devdesk.workers.escalationMinutes`; 0 tells it at once).
+ */
+export function workersConfig(): { maxConcurrent: number; nudge: boolean; escalationMs: number } {
+  return {
+    maxConcurrent: numberSetting('workers.maxConcurrent', 4, 1, 32, true),
+    nudge: cfg().get<boolean>('workers.nudge', true),
+    escalationMs: numberSetting('workers.escalationMinutes', 3, 0, 24 * 60) * 60_000,
+  };
 }

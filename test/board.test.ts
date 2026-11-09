@@ -448,3 +448,14 @@ describe('buildBoard: colors given by hand', () => {
     expect(sessions.find((s) => s.id === 'b')).not.toHaveProperty('color');
   });
 });
+
+describe('buildBoard: pull request checks', () => {
+  it("gives a card its worktree's checks hint, so it offers Fix checks, and none without one", () => {
+    const hints = new Map([['/ws/worktrees/a', '2 checks failing']]);
+    const board = buildBoard([card('a'), card('b')], [], { ...opts, checks: (dir) => hints.get(dir) ?? '' });
+    const sessions = board.lanes.flatMap((l) => l.sessions);
+    expect(sessions.find((s) => s.id === 'a')?.checks).toBe('2 checks failing');
+    expect(sessions.find((s) => s.id === 'b')).not.toHaveProperty('checks');
+    expect(buildBoard([card('a')], [], opts).lanes.flatMap((l) => l.sessions)[0]).not.toHaveProperty('checks');
+  });
+});

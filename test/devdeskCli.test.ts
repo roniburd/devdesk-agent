@@ -42,6 +42,35 @@ describe('parseCliRequest', () => {
   });
 });
 
+describe('parseCliRequest for devdesk worker', () => {
+  const base = { id: 'abcdef012345', token: 't0k', action: 'worker', cwd: '/w', server: 'devdesk', pane: '%4' };
+  const parse = (o: Record<string, unknown>) => parseCliRequest(JSON.stringify({ ...base, ...o }), 't0k');
+  it('reads each verb', () => {
+    expect(parse({ verb: 'start', name: 'lint', text: 'fix it', where: 'new', base: 'origin/main' })).toMatchObject({ verb: 'start', name: 'lint', text: 'fix it', where: 'new', base: 'origin/main' });
+    expect(parse({ verb: 'start', name: 'lint', text: 'fix it', where: 'current' })).toMatchObject({ where: 'current' });
+    expect(parse({ verb: 'done', taskId: 'w-0a1b2c', outcome: 'failed', text: 'no' })).toMatchObject({ verb: 'done', taskId: 'w-0a1b2c', outcome: 'failed' });
+    expect(parse({ verb: 'ask', text: 'which?', pane: undefined })).toMatchObject({ verb: 'ask', text: 'which?' });
+    expect(parse({ verb: 'check' })).toMatchObject({ verb: 'check' });
+    expect(parse({ verb: 'reply', taskId: 'w-0a1b2c', text: 'main' })).toMatchObject({ verb: 'reply', taskId: 'w-0a1b2c' });
+  });
+  it('refuses what is missing or malformed', () => {
+    expect(parse({ verb: 'rm' })).toEqual({ error: 'unknown worker command rm' });
+    expect(parse({ verb: 'start', text: 'x' })).toMatchObject({ error: expect.stringMatching(/--name/) });
+    expect(parse({ verb: 'start', name: 'n' })).toMatchObject({ error: expect.stringMatching(/--task/) });
+    expect(parse({ verb: 'start', name: 'n', text: 'x', base: '--upload-pack=x' })).toMatchObject({ error: expect.stringMatching(/not a git ref/) });
+    expect(parse({ verb: 'start', name: 'n', text: 'x', where: 'current', base: 'main' })).toEqual({ error: '--base needs --worktree new' });
+    expect(parse({ verb: 'start', name: 'n', text: 'x', pane: undefined })).toMatchObject({ error: expect.stringMatching(/only in a DevDesk Claude session/) });
+    expect(parse({ verb: 'done', text: 'x', outcome: 'maybe' })).toMatchObject({ error: expect.stringMatching(/--outcome/) });
+    expect(parse({ verb: 'done', outcome: 'succeeded' })).toMatchObject({ error: expect.stringMatching(/--summary/) });
+    expect(parse({ verb: 'reply', text: 'x' })).toMatchObject({ error: expect.stringMatching(/--task/) });
+    expect(parse({ verb: 'ask', taskId: '../x', text: 'q' })).toEqual({ error: 'not a task id: ../x' });
+    expect(parse({ verb: 'ask', text: 'x'.repeat(40_000) })).toMatchObject({ error: expect.stringMatching(/longer than/) });
+  });
+  it('teaches the skill the orchestration commands', () => {
+    expect(skillText('devdesk')).toMatch(/## Coordinator and workers[^]*devdesk worker start --name[^]*end your turn/);
+  });
+});
+
 describe('notes', () => {
   it('are one line, without control characters, cut short', () => {
     expect(noteText('  waiting\nfor CI\u0007 ')).toBe('waiting for CI');
@@ -176,6 +205,24 @@ describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
     expect((await run(paths, work, ['open', 'src/nope.ts'])).err).toMatch(/no file src\/nope.ts/);
     expect((await run(paths, work, ['bogus'])).code).toBe(2);
     expect((await run(paths, work, ['--help'])).out).toMatch(/^usage: devdesk/);
+  });
+
+  it('sends devdesk worker requests through the window of its pane', async () => {
+    const { paths, work } = setUp((home) => [{ roots: ['/nowhere'] }, { roots: [home], panes: ['devdesk:%7'] }]);
+    const tmux = { TMUX: '/tmp/tmux-1/devdesk,123,0', TMUX_PANE: '%7' };
+    writeFileSync(join(work, 'spec.md'), 'the long spec\n');
+    const start = await run(paths, work, ['worker', 'start', '--name', 'lint', '--task', '@spec.md', '--worktree=current'], tmux);
+    expect(start.request).toMatchObject({ window: 'w1', body: { action: 'worker', verb: 'start', name: 'lint', text: 'the long spec\n', where: 'current', pane: '%7' } });
+    const done = await run(paths, work, ['worker', 'done', '--task', 'w-0a1b2c', '--outcome', 'succeeded', '--summary', 'all good'], tmux);
+    expect(done.request?.body).toMatchObject({ verb: 'done', taskId: 'w-0a1b2c', outcome: 'succeeded', text: 'all good' });
+    expect((await run(paths, work, ['worker', 'ask', '--task', 'w-0a1b2c', 'which', 'branch?'], tmux)).request?.body).toMatchObject({ verb: 'ask', text: 'which branch?' });
+    expect((await run(paths, work, ['worker', 'reply', '--task', 'w-0a1b2c', 'main'], tmux)).request?.body).toMatchObject({ verb: 'reply', text: 'main' });
+    expect((await run(paths, work, ['worker', 'check'], tmux)).request?.body).toMatchObject({ verb: 'check' });
+    expect((await run(paths, work, ['worker', 'start', '--task', 'x'], tmux)).code).toBe(2);
+    expect((await run(paths, work, ['worker', 'done', '--outcome', 'maybe', '--summary', 'x'], tmux)).code).toBe(2);
+    expect((await run(paths, work, ['worker', 'start', '--name', 'n', '--task', '@missing.md'], tmux)).err).toMatch(/cannot read missing\.md/);
+    expect((await run(paths, work, ['worker', 'bogus'], tmux)).code).toBe(2);
+    expect((await run(paths, work, ['worker', '--help'])).out).toMatch(/^usage: devdesk worker/);
   });
 
   it('exits 1 with what the window says when it refuses', async () => {

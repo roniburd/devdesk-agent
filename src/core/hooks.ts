@@ -26,6 +26,10 @@ export const HOOK_EVENTS = [
 
 /** Hook events DevDesk installs only when `claude --version` says Claude Code knows them, with the first version that does. */
 export const VERSIONED_HOOK_EVENTS: readonly { event: string; since: string }[] = [
+  // An MCP server's input form (elicitation) and its answer: the form is a wait, its result ends it. An older Claude Code
+  // still shows the form as a Notification (elicitation_dialog), which stays the fallback.
+  { event: 'Elicitation', since: '2.1.63' },
+  { event: 'ElicitationResult', since: '2.1.63' },
   // A /compact the user runs ends without a Stop (trigger "manual"); an automatic one stays inside the turn. PreCompact is
   // left out: it also fires for a compaction that is then aborted.
   { event: 'PostCompact', since: '2.1.76' },
@@ -240,7 +244,7 @@ def wait_frame(value):
         return None
     frame = {'kind': value['kind'], 'detail': str(value.get('detail') or '')[:300],
              'since': value['since'] if isinstance(value.get('since'), int) else 0}
-    for key in ('toolUseId', 'toolName', 'agentId'):
+    for key in ('toolUseId', 'toolName', 'agentId', 'elicitation'):
         if short_id(value.get(key)):
             frame[key] = short_id(value.get(key))
     return frame
@@ -269,6 +273,18 @@ def snapshot(prev):
         return None
     return {'state': prev['state'], 'detail': str(prev.get('detail') or ''), 'asksQuestion': prev.get('asksQuestion') is True,
             'turnEndedAt': prev.get('turnEndedAt') if isinstance(prev.get('turnEndedAt'), int) else None}
+
+
+def elicitation_key(data):
+    """Which MCP input form an Elicitation or ElicitationResult is about: its id is unique only within its server."""
+    server = str(data.get('mcp_server_name') or '')
+    eid = short_id(data.get('elicitation_id'))
+    return (json.dumps([server, eid]) if eid else 'elicitation:' + server)[:256]
+
+
+def unkeyed(wait):
+    """A wait known by no tool call or form (an older script or Claude Code, a notification): the next tool event ends it."""
+    return not wait.get('toolUseId') and not wait.get('elicitation')
 
 
 def settled_ids(data, event, tool_use):
@@ -358,15 +374,16 @@ def main():
     elif event in ('PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PostToolBatch'):
         if event == 'PreToolUse' and tool in WAIT_TOOLS:
             new_wait = {'kind': WAIT_TOOLS[tool], 'detail': wait_detail(tool, tool_input, cwd)}
-        if waits and not waits[-1].get('toolUseId'):
+        if waits and unkeyed(waits[-1]):
             # A wait without a tool call id (an older script or Claude Code, a notification): any tool event ends it.
             ended, waits = waits, []
         else:
             # A wait ends when its own tool call does, or (PreToolUse) when the agent that asked moves on. A parallel
             # tool finishing, or another agent's activity, leaves it waiting.
             settled = settled_ids(data, event, tool_use)
+            # An MCP form ends only with its result (a parallel tool can start while it is open).
             def over(w):
-                return w.get('toolUseId') in settled or (event == 'PreToolUse' and w.get('agentId') == agent)
+                return w.get('toolUseId') in settled or (event == 'PreToolUse' and w.get('agentId') == agent and not w.get('elicitation'))
             ended, waits = [w for w in waits if over(w)], [w for w in waits if not over(w)]
         if new_wait:
             state, detail = 'waiting', new_wait['detail']
@@ -390,6 +407,27 @@ def main():
             return
         new_wait = {'kind': WAIT_TOOLS.get(tool, 'permission'), 'detail': wait_detail(tool, tool_input, cwd)}
         state, detail = 'waiting', new_wait['detail']
+    elif event == 'Elicitation':
+        # An MCP server's input form, inside a tool call or outside any turn: the session waits for your input.
+        server = str(data.get('mcp_server_name') or '') or 'An MCP server'
+        message = first_line(data.get('message'))
+        new_wait = {'kind': 'elicitation', 'detail': (server + ': ' + message if message else server + ' needs your input')[:300],
+                    'elicitation': elicitation_key(data)}
+        state, detail = 'waiting', new_wait['detail']
+    elif event == 'ElicitationResult':
+        # The form was answered, declined or cancelled: back to what the session showed before it (or the next wait).
+        key = elicitation_key(data)
+        def over(w):
+            return w['kind'] == 'elicitation' and (w.get('elicitation') == key or unkeyed(w))
+        if not any(over(w) for w in waits):
+            return
+        waits = [w for w in waits if not over(w)]
+        if waits:
+            state, detail = 'waiting', waits[-1]['detail']
+        elif base:
+            state, detail, asks, turn_ended = base['state'], base['detail'], base.get('asksQuestion') is True, base.get('turnEndedAt')
+        else:
+            state, detail = 'working', 'Thinking'
     elif event == 'Notification':
         message = str(data.get('message') or '')
         kind = data.get('notification_type')
@@ -439,14 +477,16 @@ def main():
         for key, value in (('toolUseId', tool_use), ('toolName', str(data.get('tool_name') or '') or None), ('agentId', agent)):
             if value:
                 new_wait[key] = value[:256]
-        if waits and not waits[-1].get('toolUseId'):
+        if waits and unkeyed(waits[-1]):
             # A wait without an id is the same dialog, now known by its tool call; a question keeps its text.
             replaced = waits.pop()
             if replaced['kind'] == new_wait['kind'] and replaced['kind'] in ('question', 'plan') and replaced.get('detail'):
                 new_wait['detail'] = detail = replaced['detail']
         if not waits:
             # A subagent's wait keeps what the session showed, to go back to; the lead's ends in its next tool step.
-            base = snapshot(prev) if agent else None
+            # An MCP form keeps it too (from its Elicitation or its notification): it can come outside any turn.
+            # (A dialog now known by its id keeps the state its notification displaced.)
+            base = (snapshot(prev) or base) if agent or new_wait['kind'] == 'elicitation' else None
         waits = (waits + [new_wait])[-MAX_WAITS:]
     if state != 'waiting' or not waits:
         waits, base = [], None
@@ -472,7 +512,8 @@ def main():
         'notificationType': str(data.get('notification_type') or '') or None if event == 'Notification' else None,
         'state': state,
         'detail': detail,
-        # What a waiting session waits on: kind (question, plan, permission, elicitation), toolUseId, toolName, agentId.
+        # What a waiting session waits on: kind (question, plan, permission, elicitation), toolUseId, toolName, agentId,
+        # elicitation (which MCP form).
         'wait': waits[-1] if waits else None,
         'waitsBelow': waits[:-1] or None,
         'stateBeforeWait': base,

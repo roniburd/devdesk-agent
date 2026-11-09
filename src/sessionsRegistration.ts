@@ -22,6 +22,7 @@ import {
   removeParked,
 } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
+import { showLastTurnChanges, showTurnChanges, TURN_SCHEME, TurnContentProvider } from './turnChanges';
 import { newSessionInWorktree, newWorktreeSession, type WorktreeTaskStore } from './worktreeSessions';
 
 /** What the Claude view's commands act on. */
@@ -69,6 +70,15 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
       const card = cardOf(sessions, sessionsTree, arg);
       return card ? run(card) : undefined;
     };
+  /** As `onCard`, saying what to do when no session is selected (from the command palette). */
+  const onSelectedCard =
+    (run: (card: SessionCard) => unknown) =>
+    (arg: unknown): unknown => {
+      const card = cardOf(sessions, sessionsTree, arg);
+      if (card) return run(card);
+      void vscode.window.showInformationMessage('Select a session in the Claude view first.');
+      return undefined;
+    };
   /** A command on every selected session (a right-click on a multi-selection), else as `onCard`. */
   const onCards =
     (run: (card: SessionCard) => unknown) =>
@@ -76,8 +86,11 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
       for (const card of cardsOf(sessions, sessionsTree, arg, selected)) run(card);
     };
 
+  const turnContent = new TurnContentProvider();
+
   ctx.subscriptions.push(
     insights,
+    vscode.workspace.registerTextDocumentContentProvider(TURN_SCHEME, turnContent),
     sessions.onDidChange((cards) => insights.update(cards)),
     sessions.onDidStartWaiting((cards) => {
       if (!notifying) return;
@@ -119,6 +132,9 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     ),
     registerTimedCommand('devdesk.sessions.openCard', onCard((c) => openSessionCard(sessionsTree, c))),
     registerTimedCommand('devdesk.sessions.fork', onCard((c) => forkSession(sessions, sessionsTree, c))),
+    // Also in the command palette, on the session selected in the Claude view.
+    registerTimedCommand('devdesk.sessions.lastTurnChanges', onSelectedCard((c) => showLastTurnChanges(turnContent, c))),
+    registerTimedCommand('devdesk.sessions.turnChanges', onSelectedCard((c) => showTurnChanges(turnContent, c))),
     registerTimedCommand('devdesk.sessions.kill', onCard((c) => killSession(sessions, c))),
     registerTimedCommand('devdesk.sessions.remove', onCard((c) => removeParked(sessions, c))),
     registerTimedCommand('devdesk.sessions.markRead', onCards((c) => sessionsTree.setRead(c.id, true))),

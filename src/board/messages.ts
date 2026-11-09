@@ -116,8 +116,8 @@ export type BoardMessage =
 
 /** Messages with no fields. */
 const BARE = ['ready', 'settings', 'toggleCardLine', 'noticeDismissed', 'forgetTypedModels', 'usage', 'usageMore', 'cancelSearch', 'setupLimits'] as const;
-/** A session card's (`open`, `fork`, `end`) or prompt for later's buttons, on the card `id`. */
-const CARD_ACTIONS = ['open', 'fork', 'end', 'start', 'plan', 'spec', 'draft', 'edit', 'delete'] as const;
+/** A session card's (`open`, `fork`, `end`, `fixChecks`) or prompt for later's buttons, on the card `id`. */
+const CARD_ACTIONS = ['open', 'fork', 'end', 'fixChecks', 'start', 'plan', 'spec', 'draft', 'edit', 'delete'] as const;
 
 /** A Claude session id, as history messages name past sessions. */
 const HISTORY_ID = /^[\w-]{1,100}$/;

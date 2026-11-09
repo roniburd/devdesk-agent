@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { isFiniteNumber, parseObject } from './json';
 import { programStatusFileName } from './programStatus';
 import type { SessionCard } from './sessions';
+import { isTaskId, type Outcome, type WorkerWhere } from './workers';
 import { isPaneId, isServerName } from './tmux';
 
 /**
@@ -56,7 +57,10 @@ export function windowPanes(cards: readonly Pick<SessionCard, 'tmuxPane' | 'tmux
   return [...new Set(panes)].sort();
 }
 
-export type CliAction = 'open' | 'diff' | 'note';
+export type CliAction = 'open' | 'diff' | 'note' | 'worker';
+/** What `devdesk worker` does: start a worker; from a worker, report or ask; from its coordinator, read, list, answer. */
+export type WorkerVerb = 'start' | 'done' | 'ask' | 'check' | 'list' | 'reply';
+const WORKER_VERBS: ReadonlySet<string> = new Set(['start', 'done', 'ask', 'check', 'list', 'reply']);
 
 /** A request from the `devdesk` command, as the window reads it. */
 export interface CliRequest {
@@ -74,13 +78,25 @@ export interface CliRequest {
   column?: number;
   /** Move the keyboard focus to what opens (by default it stays where it is, as in Claude's terminal). */
   focus: boolean;
-  /** note: the text; empty clears the note. */
+  /** note: the text; empty clears the note. worker: the task (start), summary (done), question (ask) or answer (reply). */
   text?: string;
+  /** worker: what it does, and its options. */
+  verb?: WorkerVerb;
+  name?: string;
+  taskId?: string;
+  outcome?: Outcome;
+  where?: WorkerWhere;
+  base?: string;
 }
+
+/** The longest task, summary, question or answer `devdesk worker` takes. */
+export const MAX_WORKER_TEXT = 32 * 1024;
+/** A git ref as `--base` takes it: no option, no spaces. */
+const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_./@^~{}-]{1,200}$/.test(s) && !s.startsWith('-');
 
 /** A note's longest text: a card shows one line of it. */
 export const MAX_NOTE_LENGTH = 300;
-const ACTIONS: ReadonlySet<string> = new Set(['open', 'diff', 'note']);
+const ACTIONS: ReadonlySet<string> = new Set(['open', 'diff', 'note', 'worker']);
 export const isRequestId = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(s);
 const positive = (n: unknown): n is number => isFiniteNumber(n) && Number.isInteger(n) && n >= 1 && n <= 10_000_000;
 
@@ -107,7 +123,49 @@ export function parseCliRequest(text: string, token: string): CliRequest | { err
   if (typeof raw.text === 'string') req.text = raw.text;
   if (req.action === 'open' && !req.path) return { error: 'open needs a file' };
   if (req.action === 'note' && !req.pane) return { error: 'devdesk note works only in a tmux session' };
+  if (req.action === 'worker') return workerRequest(req, raw);
   return req;
+}
+
+/** The `devdesk worker` part of a request, or why it is refused. */
+function workerRequest(req: CliRequest, raw: Record<string, unknown>): CliRequest | { error: string } {
+  if (typeof raw.verb !== 'string' || !WORKER_VERBS.has(raw.verb)) return { error: `unknown worker command ${String(raw.verb)}` };
+  const verb = raw.verb as WorkerVerb;
+  req.verb = verb;
+  if (req.text !== undefined && req.text.length > MAX_WORKER_TEXT) return { error: `the text is longer than ${MAX_WORKER_TEXT} characters` };
+  if (raw.taskId !== undefined && raw.taskId !== null) {
+    if (!isTaskId(raw.taskId)) return { error: `not a task id: ${String(raw.taskId)}` };
+    req.taskId = raw.taskId;
+  }
+  const text = req.text?.trim() ?? '';
+  if ((verb === 'start' || verb === 'check' || verb === 'list') && !req.pane) return { error: `devdesk worker ${verb} works only in a DevDesk Claude session (in tmux)` };
+  switch (verb) {
+    case 'start': {
+      const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+      if (!name || name.length > 60) return { error: 'devdesk worker start needs --name (at most 60 characters)' };
+      if (!text) return { error: 'devdesk worker start needs --task' };
+      req.name = name;
+      req.where = raw.where === 'current' ? 'current' : 'new';
+      if (raw.base !== undefined && raw.base !== null) {
+        if (!isRef(raw.base)) return { error: `not a git ref: ${String(raw.base)}` };
+        if (req.where === 'current') return { error: '--base needs --worktree new' };
+        req.base = raw.base;
+      }
+      return req;
+    }
+    case 'done':
+      if (raw.outcome !== 'succeeded' && raw.outcome !== 'failed') return { error: 'devdesk worker done needs --outcome succeeded or --outcome failed' };
+      if (!text) return { error: 'devdesk worker done needs --summary' };
+      req.outcome = raw.outcome;
+      return req;
+    case 'ask':
+      return text ? req : { error: 'devdesk worker ask <question>' };
+    case 'reply':
+      if (!req.taskId) return { error: 'devdesk worker reply needs --task <id>' };
+      return text ? req : { error: 'devdesk worker reply --task <id> <answer>' };
+    default:
+      return req;
+  }
 }
 
 /** The note as a card shows it: one line, at most MAX_NOTE_LENGTH characters, no control characters. */
@@ -185,7 +243,7 @@ export function skillText(command: string): string {
   const q = command.includes(' ') ? `"${command}"` : command;
   return `---
 name: ${SKILL_NAME}
-description: Show the user something in their VS Code editor from a DevDesk session - open a file at a line, open a diff of a file or of all changed files, or set a short note on this session's card on the Claude Board. Use when the user asks to see, open or review a file or your changes, or when a status note would help them follow the work.
+description: Show the user something in their VS Code editor from a DevDesk session - open a file at a line, open a diff of a file or of all changed files, or set a short note on this session's card on the Claude Board - and start worker sessions on parts of a task and get their reports. Use when the user asks to see, open or review a file or your changes, when a status note would help them follow the work, when the user asks for workers or to split a task across sessions or worktrees, or when your first prompt says you are a DevDesk worker.
 allowed-tools: Bash(${q}:*)
 ---
 ${SKILL_MARK}
@@ -205,6 +263,32 @@ ${q} note --clear                                 # remove the note
 - Files open without taking the keyboard focus from the user's terminal. Pass \`--focus\` only when the user asked to look at it now.
 - Open files and diffs when the user asks to see them, or once at the end of a task to point at what to review; not after every edit.
 - A note says where the work stands in a few words ("waiting for CI", "3 of 5 tests fixed"). Clear it when it no longer holds.
+
+## Coordinator and workers
+
+\`${q} worker\` starts other Claude sessions (workers) on parts of your task and gets their results back.
+If your first prompt says you are a worker and names a task id, follow it: ask with \`worker ask\`, report once with
+\`worker done\`, and end your turn after each.
+
+\`\`\`bash
+${q} worker start --name <short-name> --task "<self-contained spec>" [--worktree new|current] [--base <ref>]
+${q} worker check                          # unread reports and questions (marks them read)
+${q} worker list                           # each worker's status: working, waiting, idle, ended, succeeded, failed
+${q} worker reply --task <id> "<answer>"   # answer a worker's question
+\`\`\`
+
+- Split only when the parts are independent and each is worth a session of its own (a separate package, a separate
+  fix, a review); for small or tightly coupled steps, do the work yourself or use your own subagents.
+- Write each \`--task\` so a fresh session can do it alone: the goal, the files or package, constraints, what it may
+  change, and what proves it is done. Use \`@file\` for a long spec.
+- \`--worktree new\` (the default) gives each worker its own worktree, so workers that edit files do not collide.
+  Use \`--worktree current\` only for read-only work (reviews, investigations) in your worktree.
+- Start every independent worker, tell the user what you started, then **end your turn**. Never poll, sleep or loop on
+  \`worker list\`: when workers report, DevDesk types "You have N worker messages" at your prompt.
+- When told so, run \`worker check\` and act on each message: answer questions with \`worker reply\` when the
+  answer follows from the task (otherwise ask the user), and steer or replace a worker that stopped without reporting.
+- When every worker has reported, tell the user per worker: outcome, evidence, what is left (worktree names, so they
+  can review the changes).
 `;
 }
 
@@ -238,8 +322,29 @@ Asks the VS Code window that shows this session (DevDesk Claude) to:
   devdesk note <text>           set a one-line note on this session's card on the Claude Board
   devdesk note --clear          remove it
 
+  devdesk worker --help         coordinator and worker sessions: start workers, report, ask, read
+
 What opens leaves the keyboard focus where it is, unless --focus.
 """
+WORKER_USAGE = """usage: devdesk worker <command> [options]
+
+From a coordinator session:
+  devdesk worker start --name <name> --task <text|@file> [--worktree new|current] [--base <ref>]
+                                start a Claude worker session on the task (in a new worktree by default,
+                                made from <ref> when given); prints its task id at once
+  devdesk worker check          print the workers' unread messages (and mark them read)
+  devdesk worker list           each worker's task id, name and status
+  devdesk worker reply --task <id> <answer>
+                                answer a worker's question (typed into it once it waits at its prompt)
+
+From a worker session (its first prompt names its task id):
+  devdesk worker done --task <id> --outcome succeeded|failed --summary <text>
+                                report the result to the coordinator, once, then end the turn
+  devdesk worker ask --task <id> <question>
+                                ask the coordinator, then end the turn: the answer is typed in
+"""
+WORKER_OPTIONS = {'--name': 'name', '--task': 'task', '--worktree': 'where', '--base': 'base', '--outcome': 'outcome', '--summary': 'summary', '--question': 'question'}
+MAX_TEXT = 32 * 1024
 
 
 def fail(message, code=1):
@@ -267,8 +372,10 @@ def parse(argv):
         sys.stdout.write(USAGE)
         sys.exit(0)
     action, rest = argv[0], argv[1:]
-    if action not in ('open', 'diff', 'note'):
+    if action not in ('open', 'diff', 'note', 'worker'):
         fail('unknown command %r (devdesk --help)' % action, 2)
+    if action == 'worker':
+        return parse_worker(rest)
     req = {'action': action, 'focus': False}
     if action == 'note':
         text = ' '.join(rest).strip()
@@ -310,6 +417,78 @@ def parse(argv):
     if action == 'open' and not os.path.isfile(path):
         fail('no file %s' % path)
     req['path'] = os.path.abspath(path)
+    return req
+
+
+def read_text(value):
+    if not value.startswith('@'):
+        return value
+    try:
+        with open(value[1:], encoding='utf-8') as f:
+            return f.read()
+    except OSError as e:
+        fail('cannot read %s: %s' % (value[1:], e.strerror))
+
+
+def parse_worker(rest):
+    if not rest or rest[0] in ('-h', '--help', 'help'):
+        sys.stdout.write(WORKER_USAGE)
+        sys.exit(0)
+    verb, args = rest[0], rest[1:]
+    if verb not in ('start', 'done', 'ask', 'check', 'list', 'reply'):
+        fail('unknown worker command %r (devdesk worker --help)' % verb, 2)
+    opts = {}
+    words = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        key, eq, value = arg.partition('=')
+        if arg == '--':
+            words.extend(args[i + 1:])
+            break
+        if key in WORKER_OPTIONS:
+            if not eq:
+                if i + 1 >= len(args):
+                    fail('%s needs a value (devdesk worker --help)' % key, 2)
+                value = args[i + 1]
+                i += 1
+            opts[WORKER_OPTIONS[key]] = value
+        elif arg.startswith('--'):
+            fail('unknown option %s (devdesk worker --help)' % arg, 2)
+        else:
+            words.append(arg)
+        i += 1
+    rest_text = ' '.join(words).strip()
+    req = {'action': 'worker', 'verb': verb, 'focus': False}
+    if verb == 'start':
+        req['text'] = read_text(opts.get('task') or rest_text)
+        if opts.get('name'):
+            req['name'] = opts['name']
+        req['where'] = opts.get('where', 'new')
+        if req['where'] not in ('new', 'current'):
+            fail('--worktree is new or current', 2)
+        if opts.get('base'):
+            req['base'] = opts['base']
+        if not req['text'].strip() or not opts.get('name'):
+            fail('devdesk worker start --name <name> --task <text|@file>', 2)
+    else:
+        if opts.get('task'):
+            req['taskId'] = opts['task']
+        if verb == 'done':
+            req['outcome'] = opts.get('outcome', '')
+            req['text'] = read_text(opts.get('summary') or rest_text)
+            if req['outcome'] not in ('succeeded', 'failed') or not req['text'].strip():
+                fail('devdesk worker done --task <id> --outcome succeeded|failed --summary <text>', 2)
+        elif verb == 'ask':
+            req['text'] = read_text(opts.get('question') or rest_text)
+            if not req['text'].strip():
+                fail('devdesk worker ask --task <id> <question>', 2)
+        elif verb == 'reply':
+            req['text'] = read_text(rest_text)
+            if not req['text'].strip() or not opts.get('task'):
+                fail('devdesk worker reply --task <id> <answer>', 2)
+    if len(req.get('text', '')) > MAX_TEXT:
+        fail('the text is longer than %d characters' % MAX_TEXT, 2)
     return req
 
 
@@ -378,7 +557,7 @@ def pick(found, req, pane_key):
     target = req.get('path') or req['cwd']
     paths = {target, os.path.realpath(target)}
     scored = [(score(w, paths, pane_key), w.get('focusedAt') or 0, w) for w in found]
-    if req['action'] != 'note':
+    if req['action'] not in ('note', 'worker'):
         scored = [x for x in scored if x[0] > 0]
     scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return scored[0][2] if scored else None

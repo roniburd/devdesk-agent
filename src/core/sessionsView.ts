@@ -538,18 +538,6 @@ export const LOOK_TEXT: Record<StateLook, string> = {
   parked: '⏸ parked',
 };
 
-/** The most urgent session in each worktree (by `featureDir`), for the Worktrees view. */
-export function urgentByWorktree(
-  cards: readonly SessionCard[],
-  now: number,
-  idleMs: number,
-  unread: ReadonlySet<string>,
-): Map<string, SessionCard> {
-  const result = new Map<string, SessionCard>();
-  for (const c of attentionOrder(cards, now, idleMs, unread)) if (c.featureDir && !result.has(c.featureDir)) result.set(c.featureDir, c);
-  return result;
-}
-
 /**
  * Splits a worktree's sessions (in attention order, so parked ones last, newest first) into those listed and the
  * parked ones past `limit`, which fold into one row.

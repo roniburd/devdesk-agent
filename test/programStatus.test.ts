@@ -76,6 +76,9 @@ describe('parseProgramStatusFile', () => {
       at: 5,
       pid: 42,
     });
+    // How many subagents report blocked (a newer relay); none, or a broken count, leaves it out.
+    expect(parseProgramStatusFile(JSON.stringify({ body: 'state=working', at: 5, pid: 42, blocked: 2 }))?.blockedChildren).toBe(2);
+    for (const blocked of [0, -1, 1.5, '2']) expect(parseProgramStatusFile(JSON.stringify({ body: 'state=working', at: 5, pid: 42, blocked }))).not.toHaveProperty('blockedChildren');
   });
 
   it('rejects broken files and the cleared state', () => {
@@ -204,7 +207,8 @@ const pythonRuns = spawnSync('python3', ['-I', '-c', 'import sys; sys.exit(0 if 
 
 /**
  * A stand-in for Claude, run by the relay in its pseudo-terminal: sends the probe split across two writes, waits for the
- * reply and echoes it in hex, sends reports (one split, one a child record, one an over-long body), then exits on input.
+ * reply and echoes it in hex, sends reports (one split, then the same again, child records, an over-long body), then
+ * exits on input.
  */
 const FAKE_CLAUDE = String.raw`
 import os, select, sys, termios, time, tty
@@ -216,7 +220,12 @@ r, _, _ = select.select([0], [], [], 5)
 reply = os.read(0, 4096) if r else b''
 out(b'REPLY=' + reply.hex().encode() + b'\r\n')
 out(b'\x1b]7501;state=work'); time.sleep(0.2); out(b'ing:app=claude-code\x1b\\')
-out(b'\x1b]7501;state=idle:id=agent-1\x07')
+out(b'FIRST\r\n')
+time.sleep(0.5)
+out(b'\x1b]7501;state=working:app=claude-code\x07')
+out(b'\x1b]7501;state=blocked:id=agent-1\x07')
+out(b'\x1b]7501;state=blocked:id=agent-2\x07')
+out(b'\x1b]7501;state=idle:id=agent-2\x07')
 out(b'\x1b]7501;state=idle:app=' + b'a' * 5000 + b'\x07')
 out(b'WROTE\r\n')
 select.select([0], [], [], 10)
@@ -258,13 +267,17 @@ describe.skipIf(!pythonRuns)('the relay script (python3)', () => {
         });
         check();
       });
+    await seen('FIRST');
+    const firstSeen = Date.now();
     await seen('WROTE');
     const reply = Buffer.from('\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth\x1b\\').toString('hex');
     expect(output).toContain(`REPLY=${reply}`);
     // Bytes pass through untouched, the probe included.
     expect(output).toContain('hello \x1b]7501;?\x07\x1b[c');
     const written = parseProgramStatusFile(await readFile(file, 'utf8'));
-    expect(written).toMatchObject({ state: 'working', app: 'claude-code', pid: child.pid });
+    expect(written).toMatchObject({ state: 'working', app: 'claude-code', pid: child.pid, blockedChildren: 1 });
+    // The repeated report kept the time Claude started working.
+    expect(written!.at).toBeLessThanOrEqual(firstSeen);
     const exited = new Promise<number | null>((resolve) => child.on('exit', resolve));
     child.stdin.write('q');
     await seen('BYE');

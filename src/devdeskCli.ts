@@ -72,6 +72,8 @@ export class CliBridge implements vscode.Disposable {
   private readonly subscriptions: vscode.Disposable[] = [];
   /** Requests handled so far (the e2e tests wait on it). */
   handled = 0;
+  /** Takes `devdesk worker` requests (set once it exists). */
+  workers: { handle(req: CliRequest): Promise<CliAnswer> } | undefined;
 
   constructor(
     private readonly sessions: SessionsModel,
@@ -220,6 +222,8 @@ export class CliBridge implements vscode.Disposable {
         return this.diff(req);
       case 'note':
         return this.note(req);
+      case 'worker':
+        return this.workers ? this.workers.handle(req) : { ok: false, message: 'this VS Code window does not run workers' };
     }
   }
 
