@@ -18,8 +18,9 @@ import {
   SettledOrder,
   type Settle,
 } from './core/sessionsView';
+import { oneLine } from './core/text';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
-import { cardTerminal, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
+import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
 import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
 import { hooksInstalled, hooksSettingsShown } from './hooksCommands';
 import { log } from './log';
@@ -59,7 +60,7 @@ const PENDING_SELECT_MS = 30_000;
 /** URI scheme of the session rows' `resourceUri`, which only carries their read-state decoration. */
 const SESSION_SCHEME = 'devdesk-session';
 /** `globalState` key (per host, `hostKey`) of the colors given to sessions by hand: `[session id, color id][]`. */
-export const COLORS_KEY = 'devdesk.sessions.colors';
+const COLORS_KEY = 'devdesk.sessions.colors';
 
 /**
  * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in attention
@@ -84,17 +85,19 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   private drawnColors: ReadonlyMap<string, string> | undefined;
   private hooksMissing = false;
   private readonly settledOrder = new SettledOrder();
-  private acquired = false;
   /** A tmux session just started from DevDesk: selected as soon as the model lists it. */
   private pending: { session: string; server: string; until: number } | undefined;
   /** The session whose row was last selected because its Claude terminal came to the front. */
   private followed: string | undefined;
+  /** Holds the model while the view is visible or the status bar item is on. */
+  private readonly hold: { set(want: boolean): void };
 
   constructor(
     readonly model: SessionsModel,
     private readonly tasks: WorktreeTaskStore,
     state: vscode.Memento,
   ) {
+    this.hold = this.model.holder();
     this.read = new SessionsReadState(model, state, () => this.syncRead());
     this.colors = new MementoEntries(state, hostKey(COLORS_KEY), isSessionColorId, SESSION_COLORS_LIMIT);
     this.view = vscode.window.createTreeView('devdesk.sessions', { treeDataProvider: this, showCollapseAll: true, canSelectMany: true });
@@ -128,9 +131,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** The model polls while the view is visible or the status bar item is on. */
   syncAcquire(): void {
     const want = this.view.visible || sessionsStatusBar();
-    if (want && !this.acquired) this.model.acquire();
-    if (!want && this.acquired) this.model.release();
-    this.acquired = want;
+    this.hold.set(want);
     this.update();
   }
 
@@ -275,7 +276,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** The card whose Claude terminal is in front (or is `terminal`), if any. */
   focusedCard(terminal = vscode.window.activeTerminal): SessionCard | undefined {
     const of = claudeTerminalSession(terminal);
-    return of && this.model.current.find((c) => c.tmuxSession === of.session && (c.tmuxServer ?? sessionsTmuxServer()) === of.server);
+    return of && findByTmux(this.model.current, of.session, of.server);
   }
 
   /** Recomputes the unread sessions; when they changed, redraws their rows (and, if `fire`, the views). */
@@ -423,7 +424,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       this.pending = undefined;
       return;
     }
-    const card = this.model.current.find((c) => c.tmuxSession === p.session && (c.tmuxServer ?? sessionsTmuxServer()) === p.server);
+    const card = findByTmux(this.model.current, p.session, p.server);
     if (card) {
       this.pending = undefined;
       this.select(card);
@@ -548,7 +549,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     const n = group.cards.length;
     const item = new vscode.TreeItem(group.name, n ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.None);
     item.id = group.key;
-    const task = group.task?.replace(/\s+/g, ' ').trim();
+    const task = group.task ? oneLine(group.task) : '';
     item.description = [task ? truncate(task, 60) : '', n ? `${n} session${n === 1 ? '' : 's'}` : 'no sessions'].filter(Boolean).join(' · ');
     const tooltip = new vscode.MarkdownString(undefined, true);
     tooltip.appendMarkdown(`**${group.name}**\n\n`);
@@ -593,8 +594,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   }
 
   dispose(): void {
-    if (this.acquired) this.model.release();
-    this.acquired = false;
+    this.hold.set(false);
     this.subscriptions.forEach((s) => s.dispose());
   }
 }

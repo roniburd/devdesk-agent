@@ -10,10 +10,10 @@ import {
   type SearchSession,
 } from './core/boardSearch';
 import { unwrapCallOutput } from './core/insights';
-import { shellCommand } from './core/shellRun';
+import { headlessClaudeCommand } from './core/shellRun';
 import { log } from './log';
 import { runInShell } from './shellCall';
-import { readTail } from './transcriptTail';
+import { readTail } from './core/transcriptTail';
 
 /** How much of a transcript's end a search reads for the latest prompts. */
 const TAIL_BYTES = 64 * 1024;
@@ -84,12 +84,7 @@ export class BoardSearch {
       return hit.answer;
     }
     const request = JSON.stringify(buildRequest(query, now, digests, !!custom));
-    const command =
-      custom ||
-      shellCommand(this.o.claude(), [
-        '-p', '--bare', '--model', model, '--output-format', 'json', '--system-prompt', SEARCH_PROMPT,
-        '--tools', '', '--strict-mcp-config', '--no-session-persistence',
-      ]);
+    const command = custom || headlessClaudeCommand(this.o.claude(), model, SEARCH_PROMPT);
     const start = Date.now();
     const { stdout, error } = await (this.o.run ?? runInShell)(command, request, { timeoutMs: this.o.timeoutMs(), signal: ac.signal });
     if (ac.signal.aborted) return undefined;

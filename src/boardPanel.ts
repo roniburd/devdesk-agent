@@ -45,6 +45,7 @@ import {
   boardSearchTimeoutMs,
   insightsClaude,
   openSettings,
+  setGlobalSetting,
   boardSessionsBeside,
   sessionsDefaultMode,
   sessionsDimRead,
@@ -66,7 +67,7 @@ import { forkSession, killSession, openSessionCard } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
 import type { WorktreeTaskStore } from './worktreeSessions';
 
-export const BOARD_VIEW_TYPE = 'devdesk.board';
+const BOARD_VIEW_TYPE = 'devdesk.board';
 /** Model, tree and backlog changes often come together: post the board once for them. */
 const POST_DELAY_MS = 50;
 /** How often the history index looks for new transcripts while the board is visible. */
@@ -93,8 +94,9 @@ const isBoardTab = (t: vscode.Tab) => t.input instanceof vscode.TabInputWebview 
 export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSerializer {
   private panel: vscode.WebviewPanel | undefined;
   private panelSubscriptions: vscode.Disposable[] = [];
-  private acquired = false;
   private postTimer: NodeJS.Timeout | undefined;
+  /** Holds the model while the board is visible. */
+  private readonly hold: { set(want: boolean): void };
   /** The session the last posted board marked as in front (`BoardSession.focused`). */
   private postedFocused: string | undefined;
   /** When the last board was posted, to log how long the webview took to show it. */
@@ -164,6 +166,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     private readonly usageService: UsageService,
     private readonly usageScope: UsageScopeState,
   ) {
+    this.hold = this.model.holder();
     this.composer = new BoardComposer(model, tree, tasks, globalState);
     this.kept = new BoardProjectState(workspaceState);
     // A session the box starts with its terminal open, or one a command opens (D), opens beside the board.
@@ -236,7 +239,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       void vscode.window
         .showInformationMessage('The Claude Board is a preview feature. Turn it on with the setting devdesk.board.enabled.', 'Open Setting')
         .then((choice) => {
-          if (choice) void vscode.commands.executeCommand('workbench.action.openSettings', 'devdesk.board.enabled');
+          if (choice) void openSettings('devdesk.board.enabled');
         });
       return;
     }
@@ -340,9 +343,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   /** The sessions model polls while the board is visible. */
   private syncAcquire(): void {
     const want = !!this.panel?.visible;
-    if (want && !this.acquired) this.model.acquire();
-    if (!want && this.acquired) this.model.release();
-    this.acquired = want;
+    this.hold.set(want);
     if (want) this.schedulePost();
   }
 
@@ -524,7 +525,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           return void (await openSettings('devdesk.board'));
         case 'toggleCardLine':
           // The board shows the change once the setting's change posts it again.
-          return void (await vscode.workspace.getConfiguration('devdesk').update('board.cardLine', !boardCardLine(), vscode.ConfigurationTarget.Global));
+          return void (await setGlobalSetting('board.cardLine', !boardCardLine()));
         case 'sidebar':
           return void (await this.tree.focus(m.id ? this.model.find(m.id) : undefined));
         case 'open':
@@ -898,7 +899,6 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   dispose(): void {
     this.panel?.dispose();
     for (const d of this.subscriptions) d.dispose();
-    if (this.acquired) this.model.release();
-    this.acquired = false;
+    this.hold.set(false);
   }
 }

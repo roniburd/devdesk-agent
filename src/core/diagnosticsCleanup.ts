@@ -1,5 +1,4 @@
-import { readdir, stat, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { removeOldFiles, type Removed } from './oldFiles';
 
 /*
  * Deletes the evidence the extension host leaves when it runs out of memory, once it is old: V8 heap snapshots
@@ -16,11 +15,6 @@ export function isDiagnosticsFile(name: string): boolean {
   return HEAP_SNAPSHOT.test(name) || REPORT.test(name);
 }
 
-export interface Removed {
-  path: string;
-  bytes: number;
-}
-
 /**
  * Deletes the diagnostics files in `dirs` last written more than `keepDays` days before `now` (0 keeps them all).
  * Unreadable directories and files another window deleted first are skipped.
@@ -29,20 +23,6 @@ export async function removeOldDiagnostics(dirs: readonly string[], keepDays: nu
   if (!(keepDays > 0)) return [];
   const before = now - keepDays * 24 * 60 * 60 * 1000;
   const removed: Removed[] = [];
-  for (const dir of new Set(dirs)) {
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const e of entries) {
-      if (!e.isFile() || !isDiagnosticsFile(e.name)) continue;
-      const path = join(dir, e.name);
-      try {
-        const s = await stat(path);
-        if (s.mtimeMs >= before) continue;
-        await unlink(path);
-        removed.push({ path, bytes: s.size });
-      } catch {
-        // Gone already (another window cleaned it), or not ours to delete.
-      }
-    }
-  }
+  for (const dir of new Set(dirs)) removed.push(...(await removeOldFiles(dir, isDiagnosticsFile, before).catch(() => [])));
   return removed;
 }

@@ -6,9 +6,9 @@ export interface Queued<R> {
 
 /**
  * A shared pool of `limit` slots where foreground tasks start before any queued background task (prefetching), and a
- * queued background task can be promoted once someone waits for it.
+ * queued background task can be promoted once someone waits for it. Calling it runs `task` in the pool; `idle()`
+ * settles once no task is running or queued.
  */
-/** Runs `task` in the pool; `idle()` settles once no task is running or queued. */
 export type PriorityLimiter = (<R>(task: () => Promise<R>, background?: boolean) => Queued<R>) & { idle(): Promise<void> };
 
 /**
@@ -58,4 +58,18 @@ export function createPriorityLimiter(limit: number | (() => number), background
   return Object.assign(run, {
     idle: () => (isIdle() ? Promise.resolve() : new Promise<void>((resolve) => idleWaiters.push(resolve))),
   });
+}
+
+/** `work` on each of `items`, at most `limit` at a time; the results in the items' order. */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await work(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return out;
 }

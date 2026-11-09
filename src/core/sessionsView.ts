@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import { runningCount, type SessionChild } from './sessionChildren';
 import { INTERRUPTED_DETAIL, type SessionCard, type SessionState } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
+import { oneLine, truncate } from './text';
 
 export interface CardView {
   id: string;
@@ -63,11 +64,7 @@ export function timeAgo(at: number | undefined, now: number): string {
   return text && text !== 'just now' ? `${text} ago` : text;
 }
 
-export function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
-}
-
-const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
+export { truncate };
 
 /** `cwd` relative to the feature directory (`src/Pkg`), or its last two segments outside any feature. */
 function where(card: SessionCard): string {
@@ -453,7 +450,7 @@ export function stateLook(card: SessionCard, now: number, stuckMs: number): Stat
  * How a parked session's last turn ended (done, asked you, interrupted, blocked, usage limit), so its row keeps that
  * icon and colour once it stops running; undefined for other sessions, a crashed one, or a turn that never ended.
  */
-export function finishedLook(card: SessionCard, now: number, stuckMs: number): StateLook | undefined {
+function finishedLook(card: SessionCard, now: number, stuckMs: number): StateLook | undefined {
   if (card.state !== 'parked' || card.crashed || (card.lastState !== 'done' && card.lastState !== 'blocked')) return undefined;
   return stateLook({ ...card, state: card.lastState, children: undefined }, now, stuckMs);
 }
@@ -496,7 +493,7 @@ export function readDecoration(unread: boolean, opts: { dimRead: boolean; badge:
 }
 
 /** Tooltip and screen reader text per look. */
-export const LOOK_LABELS: Record<StateLook, string> = {
+const LOOK_LABELS: Record<StateLook, string> = {
   question: 'QUESTION FOR YOU',
   permission: 'NEEDS PERMISSION',
   plan: 'PLAN TO REVIEW',

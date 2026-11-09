@@ -2,6 +2,7 @@ import type { SessionDigest } from './boardSearch';
 import { foldChars, foldText, parseQuery, type QueryTerm } from './boardSearch';
 import { entryInScope, entryTitle, type HistoryEntry, launchCwd } from './historyIndex';
 import { formatAgo } from './sessionsView';
+import { clip as cut } from './text';
 
 export const HISTORY_RESULTS_MAX = 20;
 export const HISTORY_CANDIDATES_MAX = 40;
@@ -246,11 +247,6 @@ export function searchTranscripts(docs: readonly HistoryDoc[], query: string, o:
   return { past, board: top(onBoard, score, onBoard.length, words, o.now).map((c) => c.hit) };
 }
 
-/** Past sessions (not in `exclude`) with every word of the query, newest first. */
-export function searchHistory(docs: readonly HistoryDoc[], query: string, o: { now: number; limit: number; exclude: ReadonlySet<string> }): HistoryHit[] {
-  return searchTranscripts(docs, query, { now: o.now, limit: o.limit, onBoard: o.exclude }).past;
-}
-
 /** What the ✨ model is given from the transcripts: past sessions to pick from, and where the board's sessions match. */
 export interface SearchCandidates {
   /** The best matches of the query's words (any of them), then the newest others; each with its doc. */
@@ -276,16 +272,6 @@ export function searchCandidates(docs: readonly HistoryDoc[], query: string, o: 
   }
   return { past: [...matched, ...newest], board };
 }
-
-/** The ✨ model's past sessions: the best matches of the query's words (any of them), then the newest others; each with its doc. */
-export function historyCandidates(docs: readonly HistoryDoc[], query: string, o: { now: number; limit: number; exclude: ReadonlySet<string> }): { hit: HistoryHit; doc: HistoryDoc }[] {
-  return searchCandidates(docs, query, { now: o.now, limit: o.limit, onBoard: o.exclude }).past;
-}
-
-const cut = (s: string | undefined, max: number) => {
-  const t = s?.replace(/\s+/g, ' ').trim();
-  return !t ? undefined : t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-};
 
 /** What the ✨ model reads about a past session: about 600 characters, as a board digest. */
 export function historyDigest(h: HistoryHit, d: HistoryDoc): SessionDigest {

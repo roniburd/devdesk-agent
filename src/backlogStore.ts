@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { writeFileAtomic } from './core/atomicWrite';
 import { type BacklogItem, parseBacklog, serializeBacklog } from './core/board';
 import type { LaunchChoice } from './core/composer';
 import { withFileLock } from './core/fileLock';
+import { readTextIfExists } from './core/json';
 import { JsonFileStore } from './state/jsonFileStore';
 
 /**
@@ -55,13 +56,8 @@ export class BacklogStore implements vscode.Disposable {
   async adopt(oldFile: string, belongs: (item: BacklogItem) => boolean): Promise<number> {
     if (oldFile === this.store.file) return 0;
     return withFileLock(oldFile, async () => {
-      let text: string;
-      try {
-        text = await readFile(oldFile, 'utf8');
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-        throw err;
-      }
+      const text = await readTextIfExists(oldFile);
+      if (text === undefined) return 0;
       const items = parseBacklog(text);
       const mine = items.filter(belongs);
       if (!mine.length) return 0;

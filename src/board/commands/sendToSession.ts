@@ -13,7 +13,7 @@ const RELOADS: ReadonlySet<string> = new Set(['reload-skills', 'reload-plugins']
 const shownLine = (text: string) => truncate(typedLine(text), 80);
 
 /** A notice button that opens the session's terminal, or says the session has ended (its terminal would close at once). */
-export const openSessionAction = (ctx: SubmitContext, card: SessionCard): NoticeAction => ({
+const openSessionAction = (ctx: SubmitContext, card: SessionCard): NoticeAction => ({
   label: 'Open session',
   run: async () => {
     const { sessions } = ctx.composer;

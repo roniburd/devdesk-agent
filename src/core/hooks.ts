@@ -2,6 +2,7 @@ import { chmod, constants, copyFile, lstat, readdir, readFile, realpath, stat, u
 import { basename, dirname, join } from 'node:path';
 import { writeFileAtomic } from './atomicWrite';
 import { withFileLock } from './fileLock';
+import { readTextIfExists } from './json';
 import { shellQuote } from './shell';
 
 const HOOK_SCRIPT_NAME = 'devdesk_hook.py';
@@ -373,13 +374,8 @@ const settingsFile = (claudeDir: string) => join(claudeDir, 'settings.json');
 export const KEEP_BACKUPS = 5;
 
 async function readSettings(path: string): Promise<{ text?: string; settings: Settings }> {
-  let text: string;
-  try {
-    text = await readFile(path, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { settings: {} };
-    throw err;
-  }
+  const text = await readTextIfExists(path);
+  if (text === undefined) return { settings: {} };
   try {
     const parsed: unknown = JSON.parse(text);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');

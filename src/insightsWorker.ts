@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type * as vscode from 'vscode';
 import {
@@ -19,12 +19,15 @@ import {
   turnEnd,
 } from './core/insights';
 import { writeFileAtomic } from './core/atomicWrite';
+import { removeOldFiles } from './core/oldFiles';
 import { FileLockBusy, withFileLock } from './core/fileLock';
+import { createPriorityLimiter } from './core/limit';
 import type { SessionCard } from './core/sessions';
-import { shellCommand } from './core/shellRun';
+import { oneLine } from './core/text';
+import { headlessClaudeCommand } from './core/shellRun';
 import { log } from './log';
 import { runInShell } from './shellCall';
-import { readHead, readTail } from './transcriptTail';
+import { readHead, readTail } from './core/transcriptTail';
 import { appendLedgerLine } from './usageCount';
 
 /** Where insights live: `<state dir>/insights`, out of the way of the hook records the sessions watcher reads. */
@@ -67,7 +70,7 @@ export interface InsightsOptions {
 /** What the call is about, first in its input. */
 function insightHeader(kind: InsightKind, detail: string): string {
   if (kind === 'done') return 'The turn has FINISHED; Claude now waits for the next prompt.';
-  if (kind === 'ask') return `Claude is WAITING for the user to answer or approve something before it can go on. The terminal shows: ${detail.replace(/\s+/g, ' ').trim().slice(0, 300)}`;
+  if (kind === 'ask') return `Claude is WAITING for the user to answer or approve something before it can go on. The terminal shows: ${oneLine(detail).slice(0, 300)}`;
   return 'Claude is still WORKING on this turn.';
 }
 
@@ -82,9 +85,9 @@ async function transcriptSize(path: string): Promise<number> {
  * window do each call.
  */
 export class InsightsWorker implements vscode.Disposable {
-  private readonly queue: { card: SessionCard; kind: InsightKind }[] = [];
+  /** Calls start in the order they are due, at most `maxConcurrent` at a time. */
+  private readonly limit = createPriorityLimiter(() => this.o.maxConcurrent());
   private readonly busy = new Set<string>();
-  private active = 0;
   private disposed = false;
   private pruned = false;
 
@@ -115,23 +118,10 @@ export class InsightsWorker implements vscode.Disposable {
         this.busy.delete(id);
         return;
       }
-      this.queue.push({ card, kind });
-      this.pump();
+      void this.limit(() => (this.disposed ? Promise.resolve() : this.call(card, kind))).promise.finally(() => this.busy.delete(id));
     } catch (err) {
       this.busy.delete(id);
       log.warn(`insights: cannot look at session ${id}: ${(err as Error).message}`);
-    }
-  }
-
-  private pump(): void {
-    while (!this.disposed && this.active < this.o.maxConcurrent() && this.queue.length) {
-      const job = this.queue.shift()!;
-      this.active++;
-      void this.call(job.card, job.kind).finally(() => {
-        this.active--;
-        this.busy.delete(job.card.sessionId!);
-        this.pump();
-      });
     }
   }
 
@@ -187,40 +177,18 @@ export class InsightsWorker implements vscode.Disposable {
   }
 
   private async ask(input: string): Promise<CallResult> {
-    const args = [
-      '-p',
-      '--bare',
-      '--model',
-      this.o.model(),
-      '--output-format',
-      'json',
-      '--system-prompt',
-      INSIGHT_SYSTEM_PROMPT,
-      '--tools',
-      '',
-      '--strict-mcp-config',
-      '--no-session-persistence',
-    ];
     const run = this.o.run ?? ((command: string, stdin: string) => runInShell(command, stdin, { timeoutMs: CALL_TIMEOUT_MS }));
-    const { stdout, error } = await run(shellCommand(this.o.claude(), args), input);
+    const { stdout, error } = await run(headlessClaudeCommand(this.o.claude(), this.o.model(), INSIGHT_SYSTEM_PROMPT), input);
     if (error) return { ...parseCallOutput(stdout), error };
     return parseCallOutput(stdout);
   }
 
   /** Removes insight files (and abandoned locks) not written for a week. */
   private async prune(): Promise<void> {
-    const dir = insightsDir(this.o.stateDir());
-    const names = await readdir(dir).catch(() => [] as string[]);
-    const now = Date.now();
-    for (const name of names) {
-      const path = join(dir, name);
-      const age = now - ((await stat(path).catch(() => undefined))?.mtimeMs ?? now);
-      if (age > PRUNE_AFTER_MS) await unlink(path).catch(() => undefined);
-    }
+    await removeOldFiles(insightsDir(this.o.stateDir()), () => true, Date.now() - PRUNE_AFTER_MS).catch(() => undefined);
   }
 
   dispose(): void {
     this.disposed = true;
-    this.queue.length = 0;
   }
 }

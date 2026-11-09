@@ -3,6 +3,7 @@ import { DEFAULT_CHOICE, type LaunchChoice, type ModelChoice } from './composer'
 import { runningCount } from './sessionChildren';
 import type { SessionCard, SessionState } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
+import { oneLine, truncate } from './text';
 import { HIDDEN_PARKED_MAX, IDLE_DIVIDER, searchFields, searchLane, type SearchFields } from './boardSearch';
 import { attentionOrder, cardView, displayState, distinctions, formatAgo, shownLook, stateLook, type Settle, type StateLook } from './sessionsView';
 
@@ -375,8 +376,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
 /** What a card in the Needs you lane says Claude asks: Haiku's line for this wait, else the hook's detail. */
 function askLine(card: SessionCard): string {
   if (card.askSummary) return card.askSummary;
-  const detail = card.detail.replace(/\s+/g, ' ').trim().replace(/^Asking:\s*/, '');
-  return detail.length <= 160 ? detail : `${detail.slice(0, 159)}…`;
+  return truncate(oneLine(card.detail).replace(/^Asking:\s*/, ''), 160);
 }
 
 const PROMPT_MAX = 600;
@@ -390,7 +390,7 @@ function hoverOf(
   model: string | undefined,
   latest?: string,
 ): HoverPart[] {
-  const prompt = card.prompt ? card.prompt.replace(/\s+/g, ' ').trim() : '';
+  const prompt = card.prompt ? oneLine(card.prompt) : '';
   const running = card.children ? runningCount(card.children) : 0;
   const waiting = laneForLook(look) === 'needs';
   const parts: (HoverPart | false)[] = [
@@ -399,7 +399,7 @@ function hoverOf(
     !!v.liveStatus && { label: 'Doing now', text: v.liveStatus },
     !!v.insight && { label: 'Where it stands', text: v.insight },
     !!v.summary && { label: "Claude's recap", text: v.summary },
-    !!prompt && prompt !== title && { label: 'Last prompt', text: prompt.length <= PROMPT_MAX ? prompt : `${prompt.slice(0, PROMPT_MAX - 1)}…` },
+    !!prompt && prompt !== title && { label: 'Last prompt', text: truncate(prompt, PROMPT_MAX) },
     !!v.detail && { label: waiting ? 'Waiting on' : 'Latest', text: v.detail },
     running > 0 && { label: 'Running', text: `${running} (subagents, shells, workflows)` },
     !!model && { label: 'Started with', text: model },

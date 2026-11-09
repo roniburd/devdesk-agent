@@ -28,7 +28,7 @@ import {
 import { addDirArgs } from './core/launchFlags';
 import { joinArgs, type LaunchMode, pickMode } from './core/modes';
 import { promptDecoration } from './core/effort';
-import { commandRow, type CommandRow, menuCommands, UNSTACKABLE } from './core/commandMenu';
+import { commandRow, type CommandRow, MAX_STACKED, menuCommands, UNSTACKABLE } from './core/commandMenu';
 import { filterCommands, type SlashCommand, withBuiltins } from './core/slashCommands';
 import { claudeNeedsTrust } from './claudeTrust';
 import { sessionName } from './core/tmux';
@@ -82,6 +82,8 @@ export interface ComposerInfo {
   commandsVersion: number;
   /** Built-ins (names and aliases, lower case) after which `/` opens no stacked-skills menu: `UNSTACKABLE`. */
   unstackable: readonly string[];
+  /** How many skills a message can stack: `MAX_STACKED`. */
+  maxStacked: number;
 }
 
 /** A row in the composer's `/` or `@` popup: what it shows, and what picking it puts in the prompt (`@` rows use some fields). */
@@ -152,13 +154,14 @@ export class BoardComposer implements vscode.Disposable {
 
   /** Runs before `start` launches a session whose terminal opens (the panel makes room for it beside the board). */
   beforeOpen: () => Promise<unknown> = async () => undefined;
+  private plainFolder: { root: string | undefined; features: readonly unknown[]; reason: string } | undefined;
 
   info(): ComposerInfo {
     const modes = sessionsModes();
     const models = this.modelRows();
     return {
       notReady: workspaceRoot() ? '' : NO_FOLDER,
-      noWorktrees: noWorktreesReason(workspaceRoot()),
+      noWorktrees: this.noWorktrees(workspaceRoot()),
       opensSession: boardOpensSession(),
       placement: boardPromptPlacement(),
       modes: modes.map((m) => ({ name: m.name, description: m.description ?? m.args, tone: modeTone(m) })),
@@ -171,6 +174,7 @@ export class BoardComposer implements vscode.Disposable {
       addDirs: [...this.launchDirs],
       commandsVersion: this.listings.version,
       unstackable: UNSTACKABLE,
+      maxStacked: MAX_STACKED,
     };
   }
 
@@ -417,6 +421,18 @@ export class BoardComposer implements vscode.Disposable {
     if (ui) ui.notice({ text, tone: 'warning' });
     else void vscode.window.showWarningMessage(text);
     return true;
+  }
+
+  /**
+   * `noWorktreesReason(root)`, kept until the root changes or worktrees are discovered again (it walks the file system,
+   * and `info` runs on every board post).
+   */
+  private noWorktrees(root: string | undefined): string {
+    const features = this.model.featureList;
+    const known = this.plainFolder;
+    if (known && known.root === root && known.features === features) return known.reason;
+    this.plainFolder = { root, features, reason: noWorktreesReason(root) };
+    return this.plainFolder.reason;
   }
 
   private worktrees() {

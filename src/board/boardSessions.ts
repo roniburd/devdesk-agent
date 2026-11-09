@@ -6,6 +6,7 @@ import type { SessionCard } from '../core/sessions';
 import { currentCard, NEW_SESSION, type PromptScreen, runningSessions, sessionEnded, sessionPicks } from '../core/sessionSend';
 import { FIELD_SEP, isShellCommand, paneTarget, sendKeysArgs } from '../core/tmux';
 import { sessionsTmux, sessionsTmuxServer } from '../config';
+import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
 import { openSessionCard } from '../sessionsCommands';
 import type { SessionsTree } from '../sessionsTree';
@@ -127,5 +128,5 @@ async function claudeRunsIn(pid: number, command: string): Promise<boolean> {
 /** The session's tmux runner and pane target; undefined outside tmux. */
 function paneOf(card: SessionCard) {
   const target = paneTarget(card);
-  return target ? { target, tmux: sessionsTmux(card.tmuxServer ?? sessionsTmuxServer()) } : undefined;
+  return target ? { target, tmux: sessionsTmux(cardServer(card)) } : undefined;
 }

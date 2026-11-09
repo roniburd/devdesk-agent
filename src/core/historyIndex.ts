@@ -2,6 +2,7 @@
 // titles), the index file that keeps it between runs, and which transcripts belong to the workspace.
 import { isFiniteNumber, LineScan, parseObject } from './json';
 import { promptText } from './insights';
+import { isWithin, trimSlashes } from './paths';
 import { truncate } from './sessionsView';
 
 export const ENTRY_TEXT_MAX = 64 * 1024;
@@ -58,7 +59,7 @@ function keepLatest(list: string[], item: string, max: number): void {
  * piece of a 500 KB prompt would keep all 500 KB alive for as long as the index does (thousands of review agents'
  * prompts filled a 4 GB heap that way).
  */
-export function ownText(raw: string, max = TURN_TEXT_MAX): string {
+function ownText(raw: string, max = TURN_TEXT_MAX): string {
   const text = raw.trim().slice(0, max);
   return text.length < 13 ? text : Buffer.from(text, 'utf8').toString('utf8');
 }
@@ -152,9 +153,6 @@ export function entryTitle(e: HistoryEntry): string {
 /** Claude's name for a folder under `projects/`: every character but letters and digits becomes `-`. */
 export const encodeProjectDir = (dir: string): string => dir.replace(/[^A-Za-z0-9]/g, '-');
 
-/** `path` without trailing slashes (`/` stays `/`). */
-export const trimSlashes = (path: string): string => path.replace(/(.)\/+$/, '$1');
-
 /** `root` without a trailing slash, and its resolved path when it is a symlink: Claude records the resolved one. */
 const rootsOf = (root: string, realRoot?: string): string[] => [...new Set([root, realRoot].filter((r): r is string => !!r).map(trimSlashes))];
 
@@ -171,7 +169,7 @@ export function entryInScope(e: HistoryEntry, root: string | undefined, scope: '
   if (scope === 'all') return true;
   if (!root) return false;
   const bases = rootsOf(root, realRoot);
-  return [e.startCwd, e.cwd].some((cwd) => !!cwd && bases.some((base) => cwd === base || cwd.startsWith(`${base}/`)));
+  return [e.startCwd, e.cwd].some((cwd) => !!cwd && bases.some((base) => isWithin(cwd, base)));
 }
 
 export interface IndexedTranscript {

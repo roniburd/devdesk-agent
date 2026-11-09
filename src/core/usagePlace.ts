@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { workspaceProvider } from './workspaceProvider';
+import { trimSlashes } from './paths';
 import { gitRootFor, workspaceRootFor } from './worktrees';
 
 /**
@@ -34,8 +35,6 @@ export const devdeskPlace = (): Place => ({ project: DEVDESK, kind: 'folder', wo
 
 /** `<parent>/.claude/worktrees/<name>[/…]`: a Claude Code worktree, in a git repository or in a workspace's package. */
 const CLAUDE_WORKTREE = /^(.*?)\/\.claude\/worktrees\/([^/]+)(?:\/.*)?$/;
-
-const trimSlashes = (p: string) => p.replace(/\/+$/, '') || '/';
 
 function real(path: string): string {
   try {

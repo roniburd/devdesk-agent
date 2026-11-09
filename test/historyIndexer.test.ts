@@ -450,25 +450,18 @@ describe('HistoryIndexer', () => {
     expect(statSync(file).mtimeMs).not.toBe(mtime);
   });
 
-  it('keeps its lock fresh during a run and removes only a lock that still holds its token', async () => {
+  // withFileLock keeps the lock fresh during the run (test/fileLock.test.ts).
+  it('removes only a lock that still holds its token', async () => {
     const s = setup();
     for (let i = 0; i < 20; i++) writeFileSync(join(s.dir('/w/app'), `f${i}.jsonl`), user(`f${i}`, 'x'));
     const lock = `${historyFilePath(s.state, '/w/app', 'workspace', 90)}.lock`;
     const ix = s.make();
-    const old = new Date(Date.now() - 10 * 60_000);
     let emits = 0;
-    let touched = false;
     ix.onDidChange(() => {
-      emits++;
-      if (emits === 2) utimesSync(lock, old, old); // building started; the lock goes stale
-      if (emits === 3) {
-        // 10 files later the run has refreshed it
-        touched = Date.now() - statSync(lock).mtimeMs < 60_000;
-        writeFileSync(lock, 'another window');
-      }
+      // 10 files into the run, another window takes the lock over
+      if (++emits === 3) writeFileSync(lock, 'another window');
     });
     await ix.refresh();
-    expect(touched).toBe(true);
     expect(readFileSync(lock, 'utf8')).toBe('another window');
   });
 

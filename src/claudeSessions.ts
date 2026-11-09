@@ -7,7 +7,7 @@ import { endedDir, type EndedRecord, readEndedRecords } from './core/ended';
 import { parkedIn } from './core/park';
 import { processAlive, readHookRecords } from './core/sessions';
 import { readRegistry } from './core/sessionInfo';
-import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, killSessionArgs, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
 import { type OpenTerminal, ReattachTerminals, reattachKey, type RestoreOutcome } from './state/reattachTerminals';
@@ -78,10 +78,20 @@ function terminalsOf(session: string, server: string): vscode.Terminal[] {
   });
 }
 
+/** The tmux server a card's session runs on: DevDesk's when the card does not say. */
+export function cardServer(card: { tmuxServer?: string }): string {
+  return card.tmuxServer ?? sessionsTmuxServer();
+}
+
+/** The card of tmux session `session` on `server`, if any. */
+export function findByTmux<C extends { tmuxSession?: string; tmuxServer?: string }>(cards: readonly C[], session: string, server: string): C | undefined {
+  return cards.find((c) => c.tmuxSession === session && cardServer(c) === server);
+}
+
 /** A card's open Claude terminal whose tmux client still runs; undefined outside tmux. */
 export function cardTerminal(card: { tmuxSession?: string; tmuxServer?: string }): vscode.Terminal | undefined {
   if (!card.tmuxSession) return undefined;
-  return terminalsOf(card.tmuxSession, card.tmuxServer ?? sessionsTmuxServer()).find((t) => t.exitStatus === undefined);
+  return terminalsOf(card.tmuxSession, cardServer(card)).find((t) => t.exitStatus === undefined);
 }
 
 /** `cc-main-39` as its tab says it without a title: `main-39`. */
@@ -148,7 +158,7 @@ async function revealExisting(session: string, server: string): Promise<vscode.T
 /** A card's open Claude terminal whose tmux client still runs, checked as `liveTerminal` does; undefined outside tmux. */
 export async function liveCardTerminal(card: { tmuxSession?: string; tmuxServer?: string }): Promise<vscode.Terminal | undefined> {
   if (!card.tmuxSession) return undefined;
-  return liveTerminal(card.tmuxSession, card.tmuxServer ?? sessionsTmuxServer());
+  return liveTerminal(card.tmuxSession, cardServer(card));
 }
 
 /** The last name asked for each terminal being renamed, so polls don't ask again while VS Code renames it. */
@@ -443,7 +453,7 @@ export async function killTmuxSession(name: string, server = sessionsTmuxServer(
 
 /** Kills tmux session `name` on `server` (DevDesk's by default), without asking. */
 export function endTmuxSession(name: string, server?: string): Promise<string> {
-  return sessionsTmux(server)(['kill-session', '-t', `=${name}`]);
+  return sessionsTmux(server)(killSessionArgs(name));
 }
 
 /** Asks, then ends the worktree's own Claude session (`cc-<feature>`). */

@@ -5,7 +5,8 @@ import type { SessionCard } from './core/sessions';
 import { sessionName } from './core/tmux';
 import { deletePlan, deleteWorktree } from './core/worktreeDelete';
 import { failureSummary } from './core/worktreeTasks';
-import type { Feature } from './core/worktrees';
+import { isWithin } from './core/paths';
+import { type Feature, featureDirs } from './core/worktrees';
 import { endTmuxSession } from './claudeSessions';
 import { sessionsStateDir, workspaceRoot, worktreesDeleteCommand } from './config';
 import type { FeatureNode } from './featuresTree';
@@ -13,8 +14,7 @@ import { workspaceProvider } from './core/workspaceProvider';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 
-const inside = (path: string | undefined, dir: string) => !!path && (path === dir || path.startsWith(`${dir}/`));
-const inFeature = (path: string | undefined, f: Feature) => inside(path, f.dir) || (!!f.realDir && inside(path, f.realDir));
+const inFeature = (path: string | undefined, f: Feature) => !!path && featureDirs(f).some((d) => isWithin(path, d));
 
 /** The Claude sessions of the worktree: running, stopped or parked, the ones DevDesk lists for it. */
 function sessionsOf(cards: readonly SessionCard[], feature: Feature): SessionCard[] {

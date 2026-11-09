@@ -139,6 +139,7 @@ export async function countUsage(reader: UsageReader, req: CountRequest, onProgr
         progress.found = found;
         report();
       },
+      (path) => reader.firstTimestamp(path),
     );
     files.sort((a, b) => a.startMs - b.startMs);
     progress.totalFiles = files.length;

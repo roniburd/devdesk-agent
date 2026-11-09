@@ -81,7 +81,7 @@ export function isInternal(name: string): boolean {
 }
 
 /** How many skills a message can stack (`/a /b … text`). */
-const MAX_STACKED = 6;
+export const MAX_STACKED = 6;
 
 /**
  * The names and aliases (lower case) of the built-ins the board handles (A–E): no skill stacks after them, as only a

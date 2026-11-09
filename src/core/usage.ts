@@ -2,6 +2,7 @@ import type { Dirent } from 'node:fs';
 import { type FileHandle, open, readdir, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { GrowingFiles, isFiniteNumber, LineScan, parseObject, positiveNumber } from './json';
+import { mapLimit } from './limit';
 
 /**
  * Token usage for the board's stats: what Claude sessions used (from their transcripts, subagents included) and what
@@ -140,6 +141,8 @@ export interface TranscriptFile {
 
 /** How far into a transcript to look for its first timestamp (a subagent's first line holds its whole prompt). */
 const HEAD_BYTES = 256 * 1024;
+/** How many folders `changedTranscripts` lists at a time. */
+const LIST_CONCURRENCY = 8;
 const HEAD_CHUNK = 16 * 1024;
 const TIMESTAMP = /"timestamp":"([^"]+)"/;
 
@@ -170,21 +173,6 @@ export async function firstTimestamp(path: string): Promise<number | undefined> 
   }
 }
 
-/** Runs `work` on each item, at most `limit` at a time, keeping the order of the results. */
-/** `work` on each of `items`, at most `limit` at a time; the results in the items' order. */
-export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length);
-  let next = 0;
-  const run = async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await work(items[i]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
-  return out;
-}
-
 /**
  * Transcripts under `<Claude config dir>/projects` changed since a time: `<project>/<session>.jsonl` and
  * `<project>/<session>/subagents/*.jsonl`, each with the session it belongs to. `onFound` is told how many transcripts
@@ -195,25 +183,26 @@ export async function changedTranscripts(
   since: number,
   onListed?: (count: number) => void,
   onFound?: (count: number) => void,
+  startOf: (path: string) => Promise<number | undefined> = firstTimestamp,
 ): Promise<TranscriptFile[]> {
-  const found: { path: string; sessionId: string }[] = [];
   const list = async (dir: string): Promise<Dirent[]> => readdir(dir, { withFileTypes: true }).catch(() => [] as Dirent[]);
-  for (const project of await list(projectsDir)) {
-    if (!project.isDirectory()) continue;
-    const pdir = join(projectsDir, project.name);
-    for (const e of await list(pdir)) {
-      const path = join(pdir, e.name);
-      if (e.isFile() && e.name.endsWith('.jsonl')) {
-        found.push({ path, sessionId: basename(e.name, '.jsonl') });
-      } else if (e.isDirectory()) {
-        const sub = join(path, 'subagents');
-        for (const a of await list(sub)) {
-          if (a.isFile() && a.name.endsWith('.jsonl')) found.push({ path: join(sub, a.name), sessionId: e.name });
-        }
-      }
-      onFound?.(found.length);
-    }
-  }
+  const projects = (await list(projectsDir)).filter((p) => p.isDirectory()).map((p) => join(projectsDir, p.name));
+  let foundCount = 0;
+  // Listed a few folders at a time; the transcripts kept in the folders' order.
+  const perProject = await mapLimit(projects, LIST_CONCURRENCY, async (pdir) => {
+    const entries = await list(pdir);
+    const subagents = await mapLimit(entries, LIST_CONCURRENCY, (e) => (e.isDirectory() ? list(join(pdir, e.name, 'subagents')) : Promise.resolve([])));
+    const files: { path: string; sessionId: string }[] = [];
+    entries.forEach((e, k) => {
+      if (e.isFile() && e.name.endsWith('.jsonl')) files.push({ path: join(pdir, e.name), sessionId: basename(e.name, '.jsonl') });
+      const sub = join(pdir, e.name, 'subagents');
+      for (const a of subagents[k]) if (a.isFile() && a.name.endsWith('.jsonl')) files.push({ path: join(sub, a.name), sessionId: e.name });
+    });
+    foundCount += files.length;
+    onFound?.(foundCount);
+    return files;
+  });
+  const found = perProject.flat();
   let listed = 0;
   const files = await mapLimit(found, 16, async (f): Promise<TranscriptFile | undefined> => {
     const s = await stat(f.path).catch(() => undefined);
@@ -222,7 +211,7 @@ export async function changedTranscripts(
       return undefined;
     }
     const created = s.birthtimeMs > 0 ? Math.min(s.birthtimeMs, s.mtimeMs) : s.mtimeMs;
-    const first = await firstTimestamp(f.path);
+    const first = await startOf(f.path);
     onListed?.(++listed);
     return { ...f, size: s.size, mtimeMs: s.mtimeMs, startMs: first ?? created };
   });
@@ -232,6 +221,8 @@ export async function changedTranscripts(
 /** Transcripts' usage, kept across reads so each file reads only what was appended. */
 export class UsageReader {
   private readonly files = new GrowingFiles(() => new UsageScan());
+  /** Each transcript's first timestamp, which never changes once there is one. */
+  private readonly starts = new Map<string, number>();
 
   async read(path: string): Promise<UsageScan> {
     return (await this.files.read(path)) ?? new UsageScan();
@@ -242,14 +233,25 @@ export class UsageReader {
     return this.files.peek(path)?.offset ?? 0;
   }
 
+  /** A transcript's first timestamp ({@link firstTimestamp}), read once. */
+  async firstTimestamp(path: string): Promise<number | undefined> {
+    const known = this.starts.get(path);
+    if (known !== undefined) return known;
+    const at = await firstTimestamp(path);
+    if (at !== undefined) this.starts.set(path, at);
+    return at;
+  }
+
   /** Forgets a file: one that will not be read again. */
   forget(path: string): void {
     this.files.forget(path);
+    this.starts.delete(path);
   }
 
   /** Forgets every file not in `keep`. */
   retain(keep: ReadonlySet<string>): void {
     this.files.retain(keep);
+    for (const path of this.starts.keys()) if (!keep.has(path)) this.starts.delete(path);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { mkdir, open, readdir, readFile, realpath, stat, unlink, utimes } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, realpath, stat, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { writeFileAtomic } from './core/atomicWrite';
 import { FileLockBusy, withFileLock } from './core/fileLock';
@@ -13,9 +13,9 @@ import {
   parseHistoryFile,
   projectDirsInScope,
   stubOf,
-  trimSlashes,
 } from './core/historyIndex';
-import { mapLimit } from './core/usage';
+import { mapLimit } from './core/limit';
+import { trimSlashes } from './core/paths';
 
 const CHUNK = 1024 * 1024;
 const MARK_BYTES = 64;
@@ -223,8 +223,6 @@ export class HistoryIndexer {
 
   /** `run`'s indexing, while holding the index file's lock. */
   private async indexLocked(now: number, s: RunSettings, path: string, generation: number): Promise<void> {
-    const lock = `${path}.lock`;
-    const touch = () => utimes(lock, new Date(), new Date()).catch(() => undefined);
     const started = Date.now();
     const heapBefore = process.memoryUsage().heapUsed;
     let untrack = () => {};
@@ -251,7 +249,7 @@ export class HistoryIndexer {
         if (this.disposed) return;
         const buffer = buffers.pop() ?? Buffer.alloc(CHUNK);
         try {
-          let got = await this.index(t.path, t.size, t.mtimeMs, before[t.path], touch, buffer);
+          let got = await this.index(t.path, t.size, t.mtimeMs, before[t.path], buffer);
           if (got !== before[t.path]) {
             read++;
             const was = before[t.path];
@@ -269,7 +267,6 @@ export class HistoryIndexer {
         } finally {
           buffers.push(buffer);
         }
-        await touch();
         this.current.indexed++;
         if (this.current.indexed % 10 === 0) this.emit();
       });
@@ -358,11 +355,9 @@ export class HistoryIndexer {
   private async list(now: number, s: RunSettings): Promise<{ listed: Listed[]; older: number; overCap: number }> {
     const names = (await readdir(s.projectsDir, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory()).map((d) => d.name);
     const since = now - s.days * DAY;
-    const paths: string[] = [];
-    for (const name of projectDirsInScope(names, s.root, s.scope, this.realRoot)) {
-      const files = await readdir(join(s.projectsDir, name), { withFileTypes: true }).catch(() => []);
-      for (const f of files) if (f.isFile() && f.name.endsWith('.jsonl')) paths.push(join(s.projectsDir, name, f.name));
-    }
+    const dirs = projectDirsInScope(names, s.root, s.scope, this.realRoot);
+    const listings = await mapLimit(dirs, STAT_CONCURRENCY, (name) => readdir(join(s.projectsDir, name), { withFileTypes: true }).catch(() => []));
+    const paths = dirs.flatMap((name, k) => listings[k].filter((f) => f.isFile() && f.name.endsWith('.jsonl')).map((f) => join(s.projectsDir, name, f.name)));
     const infos = await mapLimit(paths, STAT_CONCURRENCY, (path) => stat(path).catch(() => undefined));
     const recent = paths.flatMap((path, k) => {
       const info = infos[k];
@@ -374,7 +369,7 @@ export class HistoryIndexer {
     return { listed, older, overCap: recent.length - listed.length };
   }
 
-  private async index(path: string, size: number, mtimeMs: number, saved: IndexedTranscript | undefined, touch: () => Promise<unknown>, buffer: Buffer): Promise<IndexedTranscript> {
+  private async index(path: string, size: number, mtimeMs: number, saved: IndexedTranscript | undefined, buffer: Buffer): Promise<IndexedTranscript> {
     if (isCurrent({ size, mtimeMs }, saved)) return saved!;
     const file = await open(path, 'r');
     // The bytes just before `end`, to tell a grown transcript from one rewritten in place.
@@ -392,7 +387,6 @@ export class HistoryIndexer {
         const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, size - scan.offset), scan.offset);
         if (!bytesRead) break;
         scan.feed(buffer.subarray(0, bytesRead));
-        await touch();
         await new Promise((r) => setImmediate(r));
       }
       return { size, mtimeMs, offset: scan.settled, mark: await markAt(scan.settled), entry: scan.entry };

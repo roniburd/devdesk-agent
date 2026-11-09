@@ -1,9 +1,10 @@
 import { watch, type FSWatcher } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 import * as vscode from 'vscode';
 import { writeFileAtomic } from '../core/atomicWrite';
 import { withFileLock } from '../core/fileLock';
+import { readTextIfExists } from '../core/json';
 import { log } from '../log';
 
 export interface JsonFileFormat<T> {
@@ -104,14 +105,8 @@ export class JsonFileStore<T> implements vscode.Disposable {
 
   /** The file's content; `empty` when it does not exist. Throws when it exists but cannot be read or parsed. */
   private async read(): Promise<T> {
-    let text: string;
-    try {
-      text = await readFile(this.file, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return this.format.empty();
-      throw err;
-    }
-    return this.format.parse(text);
+    const text = await readTextIfExists(this.file);
+    return text === undefined ? this.format.empty() : this.format.parse(text);
   }
 
   private damaged(err: unknown): void {

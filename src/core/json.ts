@@ -11,6 +11,16 @@ export function parseObject(text: string): Record<string, unknown> | undefined {
   }
 }
 
+/** The text of the file at `path`; undefined when it does not exist. Throws when it exists but cannot be read. */
+export async function readTextIfExists(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+}
+
 /** The JSON object in the file at `path`; undefined when it is missing, unreadable or not an object. */
 export async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try {

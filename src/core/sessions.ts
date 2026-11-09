@@ -1,8 +1,10 @@
-import { open } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
+import { readTailText } from './transcriptTail';
 import { isFiniteNumber, parseObject, readJsonFiles } from './json';
 import { DEFAULT_SERVER, isNumberedSession, isShellCommand, serverOf, sessionName, type TmuxPane } from './tmux';
 import type { SessionChild } from './sessionChildren';
-import type { Feature } from './worktrees';
+import { featureDirs, type Feature } from './worktrees';
+import { isWithin, trimSlashes } from './paths';
 import type { EndedRecord, EndReason } from './ended';
 import type { RegistryEntry } from './sessionInfo';
 
@@ -170,47 +172,65 @@ export function transcriptEnd(tail: string): 'moved' | 'interrupted' | undefined
 const TRANSCRIPT_TAIL_BYTES = 65536;
 
 /**
+ * How each transcript ends (`transcriptEnd`), kept by path with the size and mtime it was read at, so a refresh reads
+ * only the tails of transcripts that changed. Forgets transcripts no record named in the last `readHookRecords`.
+ */
+export class TranscriptEnds {
+  private known = new Map<string, { size: number; mtimeMs: number; end: ReturnType<typeof transcriptEnd> }>();
+  private seen = new Set<string>();
+
+  /** How the transcript at `path` ends and when it last changed; undefined when unreadable. */
+  async read(path: string): Promise<{ end: ReturnType<typeof transcriptEnd>; mtimeMs: number } | undefined> {
+    this.seen.add(path);
+    const now = await stat(path).catch(() => undefined);
+    if (!now) return undefined;
+    const cached = this.known.get(path);
+    if (cached && cached.size === now.size && cached.mtimeMs === now.mtimeMs) return cached;
+    const tail = await readTailText(path, TRANSCRIPT_TAIL_BYTES);
+    if (!tail) return undefined;
+    const read = { size: tail.size, mtimeMs: tail.mtimeMs, end: transcriptEnd(tail.text) };
+    this.known.set(path, read);
+    return read;
+  }
+
+  /** Forgets transcripts not read since the last call. */
+  prune(): void {
+    for (const path of this.known.keys()) if (!this.seen.has(path)) this.known.delete(path);
+    this.seen = new Set();
+  }
+}
+
+/**
  * Corrects a record with what its transcript shows happened after the last hook event. An interrupt only counts when
  * the transcript changed after the record, so a prompt submitted since then is not shown as interrupted.
  */
-async function withTranscriptEnd(record: HookRecord): Promise<HookRecord> {
+async function withTranscriptEnd(record: HookRecord, ends: TranscriptEnds): Promise<HookRecord> {
   if (!record.transcriptPath) return record;
-  let tail: string;
-  let mtime: number;
-  try {
-    const file = await open(record.transcriptPath, 'r');
-    try {
-      const { size, mtimeMs } = await file.stat();
-      const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
-      const buffer = Buffer.alloc(length);
-      await file.read(buffer, 0, length, size - length);
-      tail = buffer.toString('utf8');
-      mtime = mtimeMs;
-    } finally {
-      await file.close();
-    }
-  } catch {
-    return record;
-  }
-  const end = transcriptEnd(tail);
-  if (end === 'moved') return { ...record, state: 'idle', detail: MOVED_DETAIL };
-  if (end === 'interrupted' && (record.state === 'working' || record.state === 'waiting') && mtime >= record.updatedAt) {
+  const read = await ends.read(record.transcriptPath);
+  if (!read) return record;
+  if (read.end === 'moved') return { ...record, state: 'idle', detail: MOVED_DETAIL };
+  if (read.end === 'interrupted' && (record.state === 'working' || record.state === 'waiting') && read.mtimeMs >= record.updatedAt) {
     // A finished turn like any other (the board's done lane), shown in its own colour.
     return { ...record, state: 'done', detail: INTERRUPTED_DETAIL };
   }
   return record;
 }
 
-/** Valid records from `<dir>/*.json`, corrected by their transcripts; unreadable or invalid files are skipped. */
-export function readHookRecords(dir: string): Promise<HookRecord[]> {
-  return readJsonFiles(
+/**
+ * Valid records from `<dir>/*.json`, corrected by their transcripts; unreadable or invalid files are skipped. Pass a
+ * long-lived `ends` to re-read only the transcripts that changed since the last call.
+ */
+export async function readHookRecords(dir: string, ends = new TranscriptEnds()): Promise<HookRecord[]> {
+  const records = await readJsonFiles(
     dir,
     (n) => n.endsWith('.json'),
     async (text) => {
       const record = parseHookRecord(text);
-      return record && withTranscriptEnd(record);
+      return record && withTranscriptEnd(record, ends);
     },
   );
+  ends.prune();
+  return records;
 }
 
 /** True if a process with this pid exists (EPERM means it exists but belongs to someone else). */
@@ -227,8 +247,8 @@ export function featureForCwd(features: readonly Feature[], cwd: string): Featur
   let best: Feature | undefined;
   let bestLength = -1;
   for (const f of features) {
-    for (const dir of f.realDir ? [f.dir, f.realDir] : [f.dir]) {
-      if ((cwd === dir || cwd.startsWith(`${dir}/`)) && dir.length > bestLength) {
+    for (const dir of featureDirs(f)) {
+      if (isWithin(cwd, dir) && dir.length > bestLength) {
         best = f;
         bestLength = dir.length;
       }
@@ -309,10 +329,8 @@ const ORDER: Record<SessionState, number> = { waiting: 0, blocked: 1, working: 2
  */
 export function cardsInScope(cards: readonly SessionCard[], dirs: readonly string[], features: readonly Feature[] = []): SessionCard[] {
   if (!dirs.length) return [...cards];
-  const roots = [...dirs, ...features.flatMap((f) => (f.realDir ? [f.dir, f.realDir] : [f.dir]))]
-    .map((d) => (d.length > 1 ? d.replace(/\/+$/, '') : d))
-    .filter(Boolean);
-  const inside = (cwd: string) => roots.some((d) => cwd === d || cwd.startsWith(d === '/' ? d : `${d}/`));
+  const roots = [...dirs, ...features.flatMap(featureDirs)].map(trimSlashes).filter(Boolean);
+  const inside = (cwd: string) => roots.some((d) => isWithin(cwd, d));
   return cards.filter((c) => (c.cwd ? inside(c.cwd) : c.featureDir !== undefined));
 }
 

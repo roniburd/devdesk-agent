@@ -304,6 +304,11 @@ export function typedLine(text: string): string {
 /** Most UTF-8 bytes of text one `send-keys` carries: tmux refuses a command over about 16 KB ("command too long"). */
 export const SEND_KEYS_CHUNK_BYTES = 8 * 1024;
 
+/** tmux arguments that kill session `name` exactly (`=` stops tmux matching a prefix). */
+export function killSessionArgs(name: string): string[] {
+  return ['kill-session', '-t', `=${name}`];
+}
+
 /**
  * The tmux commands that type `text` into pane `target` and submit it: `send-keys -l` (literal, so key names such as
  * `Enter` or `C-c` in the text stay text), one per piece of at most `SEND_KEYS_CHUNK_BYTES` (a whole line in one

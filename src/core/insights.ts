@@ -1,5 +1,6 @@
 import { isFiniteNumber, parseObject, positiveNumber } from './json';
 import { isInjectedPrompt, type SessionCard } from './sessions';
+import { clip } from './text';
 
 /**
  * DevDesk's Haiku insights: a small model reads the end of a session's transcript and says what Claude is doing, where
@@ -37,16 +38,12 @@ export type InsightKind = 'status' | 'done' | 'ask';
 /** When the card's finished turn ended; a record from an older hook script has no turn times, so its last update. */
 export const turnEnd = (card: SessionCard): number | undefined => card.turnEndedAt ?? card.updatedAt;
 
-const text = (v: unknown, max: number): string | undefined => {
-  if (typeof v !== 'string' || !v.trim()) return undefined;
-  const s = v.replace(/\s+/g, ' ').trim();
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
-};
+const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' ? clip(v, max) : undefined);
 
 const STATUS_MAX = 80;
 const SUMMARY_MAX = 200;
 export const TITLE_MAX = 40;
-export const OBJECTIVE_MAX = 70;
+const OBJECTIVE_MAX = 70;
 const ASK_MAX = 100;
 
 export function parseInsight(raw: string): Insight | undefined {

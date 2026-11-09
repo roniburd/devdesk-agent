@@ -1,7 +1,8 @@
 import { parseQuery, type SearchMatch } from './boardSearch';
 import { type Excerpt, type HistoryDoc, type HistoryHit, HISTORY_RESULTS_MAX, searchTranscripts } from './historySearch';
 import { featureForCwd, type SessionCard } from './sessions';
-import type { Feature } from './worktrees';
+import { isWithin } from './paths';
+import { type Feature, featureDirs } from './worktrees';
 
 // The Claude Board's past sessions (from the history index) as the panel handles them.
 
@@ -16,7 +17,7 @@ export function historyWorktree(features: readonly Feature[], cwd: string | unde
   if (!cwd) return 'no worktree';
   const feature = featureForCwd(features, cwd);
   if (feature && !feature.isMain) return feature.name;
-  const dirs = feature ? [feature.dir, feature.realDir].filter((d): d is string => !!d && (cwd === d || cwd.startsWith(`${d}/`))) : [''];
+  const dirs = feature ? featureDirs(feature).filter((d) => isWithin(cwd, d)) : [''];
   for (const dir of dirs) {
     const m = WORKTREE_DIR.exec(cwd.slice(dir.length));
     if (m && (!feature || m.index === 0)) return m[1];

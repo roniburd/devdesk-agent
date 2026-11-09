@@ -16,7 +16,7 @@ import {
   unreadCards,
   withHandMarks,
 } from './core/sessionsView';
-import { claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
+import { cardServer, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
 import { sessionsReadAfterMs, sessionsTmuxServer } from './config';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
@@ -184,7 +184,7 @@ export class SessionsReadState implements vscode.Disposable {
         return of ? [`${of.server}\n${of.session}`] : [];
       }),
     );
-    return this.model.current.filter((c) => c.tmuxSession && shown.has(`${c.tmuxServer ?? sessionsTmuxServer()}\n${c.tmuxSession}`)).map((c) => c.id);
+    return this.model.current.filter((c) => c.tmuxSession && shown.has(`${cardServer(c)}\n${c.tmuxSession}`)).map((c) => c.id);
   }
 
   /** Saves these changes (a signature, or undefined for unread) on top of what is saved now. */

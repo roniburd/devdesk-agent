@@ -1,6 +1,7 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { boardClaudeConfigFile, sessionsClaudeEnv } from './config';
+import { readTextIfExists } from './core/json';
 import { needsTrust, repoRootFromGitFile, type TrustPlace } from './core/trust';
 
 /** Where `dir` is for the CLI's trust check: its real path, its git root, and the main repository's root. */
@@ -28,10 +29,10 @@ async function trustPlace(dir: string): Promise<TrustPlace> {
 export async function claudeNeedsTrust(dir: string): Promise<boolean> {
   let json: unknown;
   try {
-    json = JSON.parse(await readFile(boardClaudeConfigFile(), 'utf8'));
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return false;
-    json = {};
+    const text = await readTextIfExists(boardClaudeConfigFile());
+    json = text === undefined ? {} : JSON.parse(text);
+  } catch {
+    return false;
   }
   return needsTrust(json, await trustPlace(dir), { ...process.env, ...sessionsClaudeEnv() });
 }

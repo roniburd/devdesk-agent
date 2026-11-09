@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { isWithin } from './paths';
 
 /** What the Worktrees view needs of a Claude session card. */
 export interface CardLike {
@@ -60,11 +61,11 @@ export function sessionSignals(prev: SeenCards, cards: readonly CardLike[]): Ses
  */
 export function packageForPath(path: string, packageDirs: readonly string[], realDirs: ReadonlyMap<string, string> = new Map()): string | undefined {
   const candidates = [path];
-  for (const [real, dir] of realDirs) if (path === real || path.startsWith(`${real}/`)) candidates.push(dir + path.slice(real.length));
+  for (const [real, dir] of realDirs) if (isWithin(path, real)) candidates.push(dir + path.slice(real.length));
   let best: string | undefined;
   for (const p of candidates) {
     for (const dir of packageDirs) {
-      if ((p === dir || p.startsWith(`${dir}/`)) && (!best || dir.length > best.length)) best = dir;
+      if (isWithin(p, dir) && (!best || dir.length > best.length)) best = dir;
     }
   }
   return best;

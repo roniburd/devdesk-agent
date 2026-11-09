@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,6 +16,7 @@ import {
   parseHookRecord,
   processAlive,
   readHookRecords,
+  TranscriptEnds,
   splitRecords,
   transcriptEnd,
 } from '../src/core/sessions';
@@ -108,6 +109,17 @@ describe('readHookRecords', () => {
     expect(byId.s3).toMatchObject({ state: 'working', detail: 'Running Bash' });
     expect(byId.s4).toMatchObject({ state: 'done', detail: 'Fixed' });
     expect(byId.s5).toMatchObject({ state: 'waiting', detail: 'Running Bash' });
+  });
+  it('with a kept TranscriptEnds, reads a transcript again only once it changed', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'devdesk-state-'));
+    const transcript = join(dir, 't.jsonl');
+    await writeFile(transcript, `${line(interrupt)}\n`);
+    await writeFile(join(dir, 's1.json'), JSON.stringify(rec({ transcriptPath: transcript, updatedAt: 1000 })));
+    const ends = new TranscriptEnds();
+    expect((await readHookRecords(dir, ends))[0]).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL });
+    expect((await readHookRecords(dir, ends))[0]).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL });
+    await appendFile(transcript, `${line({ type: 'assistant', message: { content: [] } })}\n`);
+    expect((await readHookRecords(dir, ends))[0]).toMatchObject({ state: 'working', detail: 'Running Bash' });
   });
 });
 

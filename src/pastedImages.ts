@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { boardPastedImagesDir } from './config';
 import { fileMention } from './core/composer';
+import { removeOldFiles } from './core/oldFiles';
 import { decodePastedImage, isPastedImageName, PASTED_IMAGE_MAX_AGE_MS, pastedImageName } from './core/pastedImage';
 import { log } from './log';
 
@@ -26,12 +27,7 @@ export async function savePastedImage(mime: string, data: string): Promise<strin
 /** Deletes the images pasted more than 30 days ago (only files `savePastedImage` named). */
 async function deleteOldPastedImages(dir: string): Promise<void> {
   try {
-    const cutoff = Date.now() - PASTED_IMAGE_MAX_AGE_MS;
-    for (const name of await readdir(dir)) {
-      if (!isPastedImageName(name)) continue;
-      const file = join(dir, name);
-      if ((await stat(file)).mtimeMs < cutoff) await unlink(file);
-    }
+    await removeOldFiles(dir, isPastedImageName, Date.now() - PASTED_IMAGE_MAX_AGE_MS);
   } catch (err) {
     log.warn(`cannot clean up pasted images in ${dir}: ${(err as Error).message}`);
   }

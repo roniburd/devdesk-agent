@@ -21,6 +21,17 @@ export function shellCommand(bin: string, args: readonly string[]): string {
   return `${bin} ${args.map(shellQuote).join(' ')}`;
 }
 
+/**
+ * A one-shot `claude -p --bare` call (shell syntax): `model` with `systemPrompt`, no tools or MCP servers, JSON output,
+ * nothing saved as a session. The input goes on stdin.
+ */
+export function headlessClaudeCommand(claude: string, model: string, systemPrompt: string): string {
+  return shellCommand(claude, [
+    '-p', '--bare', '--model', model, '--output-format', 'json', '--system-prompt', systemPrompt,
+    '--tools', '', '--strict-mcp-config', '--no-session-persistence',
+  ]);
+}
+
 /** Runs `command` (shell syntax) in a login shell, as Claude sessions run, so PATH and the toolbox are there. */
 export function spawnLoginShell(command: string, cwd: string): ChildProcessWithoutNullStreams {
   return spawn(process.env.SHELL || '/bin/sh', ['-lc', `exec ${command}`], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });

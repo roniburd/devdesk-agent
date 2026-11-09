@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { UNSTACKABLE } from '../src/core/commandMenu';
+import { MAX_STACKED, UNSTACKABLE } from '../src/core/commandMenu';
 import { dayKey } from '../src/core/usageHistory';
 import { scopedPopover } from '../src/core/usageScope';
 import { projectFolder } from './boardProjectFolder';
@@ -92,7 +92,7 @@ async function board({
     return down;
   }
 
-  win.postMessage({ type: 'board', composer: { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, ...composer }, sessions: [], tasks: [] }, '*');
+  win.postMessage({ type: 'board', composer: { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED, ...composer }, sessions: [], tasks: [] }, '*');
   await settle();
   const release = async () => {
     pending.splice(0).forEach((answer) => answer());
@@ -161,7 +161,7 @@ describe('board webview: /model <id> the model list did not have yet', () => {
     expect(b.pill()).toContain('high');
     await b.host({ type: 'setChoice', model: 'opus[1m]' });
     const added = { value: 'opus[1m]', label: 'opus[1m]', description: '', efforts: EFFORTS };
-    await b.host({ type: 'board', composer: { notReady: '', modes: [], defaultMode: '', models: [router, opus, added], worktrees: [], unstackable: UNSTACKABLE }, sessions: [], tasks: [] });
+    await b.host({ type: 'board', composer: { notReady: '', modes: [], defaultMode: '', models: [router, opus, added], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED }, sessions: [], tasks: [] });
     expect(b.pill()).toContain('high');
     const sent = await b.send('hello');
     expect(sent.model).toBe('opus[1m]');
@@ -559,7 +559,7 @@ describe('board webview: a / popup left open when the focus moves to a card', ()
     const b = await board();
     const session = (id: string) => ({ id, look: 'idle', lookLabel: 'Idle', title: `Session ${id}`, worktree: 'main', canOpen: true });
     const data = { worktrees: ['main'], lanes: [{ id: 'needs', title: 'Needs you', sessions: [session('s1'), session('s2')] }] };
-    const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE };
+    const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED };
     await b.host({ type: 'board', loaded: true, board: data, composer });
     await b.type('/cl');
     expect(b.popup.hidden).toBe(false);
@@ -584,7 +584,7 @@ describe('board webview: → from the Claude view', () => {
     const b = await board();
     const session = (id: string) => ({ id, look: 'idle', lookLabel: 'Idle', title: `Session ${id}`, worktree: 'main', canOpen: true });
     const data = { worktrees: ['main'], lanes: [{ id: 'needs', title: 'Needs you', sessions: [session('s1'), session('s2')] }] };
-    const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE };
+    const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED };
     await b.host({ type: 'board', loaded: true, board: data, composer });
     const doc = b.prompt.ownerDocument;
     const card = (id: string) => doc.querySelector(`.card[data-session="${id}"]`) as HTMLElement;
@@ -601,7 +601,7 @@ describe('board webview: → from the Claude view', () => {
 });
 
 describe('board webview: a board update while a card is clicked', () => {
-  const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE };
+  const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED };
   const session = (id: string, title = `Session ${id}`) => ({ id, look: 'working', lookLabel: 'Working', title, worktree: 'main', canOpen: true, canFork: true });
   const boardOf = (...sessions: ReturnType<typeof session>[]) => ({
     type: 'board',
@@ -757,7 +757,7 @@ describe('board webview: pasting an image', () => {
 
 describe('board webview: the prompt box above the lanes (devdesk.board.promptPlacement top)', () => {
   const session = (id: string) => ({ id, look: 'idle', lookLabel: 'Idle', title: `Session ${id}`, worktree: 'main', canOpen: true });
-  const composer = (placement: string) => ({ notReady: '', placement, modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE });
+  const composer = (placement: string) => ({ notReady: '', placement, modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED });
   const boardOf = (placement: string) => ({
     type: 'board',
     loaded: true,
@@ -788,7 +788,7 @@ describe('board webview: the prompt box above the lanes (devdesk.board.promptPla
 });
 
 describe('board webview: session cards', () => {
-  const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE };
+  const composer = { notReady: '', modes: [], defaultMode: '', models: [{ value: 'Default', label: 'Default', efforts: [] }], worktrees: [], unstackable: UNSTACKABLE, maxStacked: MAX_STACKED };
   const hoverParts = [
     { text: 'Raise login timeout' },
     { label: 'Where it stands', text: 'TIMEOUT_MS raised to 30s; tests pass' },

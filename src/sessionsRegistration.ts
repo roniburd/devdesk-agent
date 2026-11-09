@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import type { SessionCard } from './core/sessions';
 import { colorCommand, SESSION_COLORS } from './core/sessionColors';
 import { cardView } from './core/sessionsView';
-import { installTmux, registerTerminalRestore, type TerminalTitles } from './claudeSessions';
+import { findByTmux, installTmux, registerTerminalRestore, type TerminalTitles } from './claudeSessions';
 import { openSettings, sessionsNotifyWhenWaiting, sessionsTmuxServer, setGlobalSetting } from './config';
 import { hooksStatus, installHooksCommand, removeHooksCommand } from './hooksCommands';
 import type { InsightsWorker } from './insightsWorker';
@@ -151,7 +151,7 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
 function terminalTitles(sessions: SessionsModel): TerminalTitles {
   return {
     title: (session, server) => {
-      const card = sessions.current.find((c) => c.tmuxSession === session && (c.tmuxServer ?? sessionsTmuxServer()) === server);
+      const card = findByTmux(sessions.current, session, server);
       return card && cardView(card, Date.now()).title;
     },
     loaded: () => (sessions.isLoaded ? Promise.resolve() : sessions.fresh()),

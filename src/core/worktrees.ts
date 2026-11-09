@@ -17,6 +17,9 @@ export interface Feature {
   realDir?: string;
 }
 
+/** The worktree's directory, and its symlink-resolved one when that differs. */
+export const featureDirs = (f: Feature): string[] => (f.realDir ? [f.dir, f.realDir] : [f.dir]);
+
 /** True when `a` and `b` describe the same worktree with the same packages, so its row can stay as it is. */
 export function sameFeature(a: Feature, b: Feature): boolean {
   return (

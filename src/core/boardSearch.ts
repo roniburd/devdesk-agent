@@ -3,6 +3,7 @@ import type { BoardData, BoardSession } from './board';
 import { promptText } from './insights';
 import { parseObject } from './json';
 import type { SessionCard } from './sessions';
+import { clip as cut } from './text';
 
 // Searching the Claude Board's sessions: the as-you-type matcher (media/board.js has a copy; keep them the same, see
 // test/boardSearchWebview.test.ts) and, for Enter, the digests, request and answer of the model's search.
@@ -84,7 +85,7 @@ export interface SearchSession {
 }
 
 /** How many sessions one search sends: the board's cards first, then the hidden parked ones. */
-export const SEARCH_SESSIONS_MAX = 300;
+const SEARCH_SESSIONS_MAX = 300;
 
 export function searchSessions(board: BoardData, cards: readonly SessionCard[]): SearchSession[] {
   const byId = new Map(cards.map((c) => [c.id, c]));
@@ -116,11 +117,6 @@ export interface SessionDigest {
   found?: string;
 }
 
-const cut = (s: string | undefined, max: number): string | undefined => {
-  const t = s?.replace(/\s+/g, ' ').trim();
-  if (!t) return undefined;
-  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
-};
 const DIGEST = { title: 60, recap: 140, insight: 80, ask: 80, prompt: 60, prompts: 4, found: 160 } as const;
 
 /** The last `n` user prompts in a transcript's lines, oldest first, without repeats (meta lines and tool results skipped). */

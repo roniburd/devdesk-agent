@@ -176,7 +176,7 @@ export async function timed<T>(label: string, work: () => Promise<T>): Promise<T
  * `run` as a command handler that logs, at debug level, how long it took (until its promise settled), so a slow key
  * press or click in the Claude view or the board shows which command and how long.
  */
-export function timedCommand<A extends unknown[], R>(id: string, run: (...args: A) => R): (...args: A) => R {
+function timedCommand<A extends unknown[], R>(id: string, run: (...args: A) => R): (...args: A) => R {
   return (...args: A): R => {
     const start = Date.now();
     const done = track(`command ${id}`);

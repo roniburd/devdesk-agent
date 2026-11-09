@@ -2,8 +2,7 @@ import * as vscode from 'vscode';
 import { usageDefaultScope, workspaceRoot } from './config';
 import { type Place, placeOf } from './core/usagePlace';
 import { parseScope, resolveScope, type UsageScope } from './core/usageScope';
-
-const KEY = 'devdesk.usage.scope';
+import { MementoValue } from './state/mementoState';
 
 /**
  * The project (or worktree) whose token usage this window shows, shared by the board's 📊 popup and the Claude Usage
@@ -14,11 +13,14 @@ export class UsageScopeState implements vscode.Disposable {
   readonly onDidChange = this.changed.event;
   private cached: { root: string; place: Place } | undefined;
   private readonly settings: vscode.Disposable;
+  /** The scope chosen in this window, if any. */
+  private readonly chosen: MementoValue<UsageScope | undefined>;
 
-  constructor(private readonly memento: vscode.Memento) {
+  constructor(memento: vscode.Memento) {
+    this.chosen = new MementoValue(memento, 'devdesk.usage.scope', parseScope);
     // A new default changes what a window with no chosen scope shows: the popup and the page follow it at once.
     this.settings = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devdesk.usage.defaultScope') && !parseScope(this.memento.get(KEY))) this.changed.fire();
+      if (e.affectsConfiguration('devdesk.usage.defaultScope') && !this.chosen.get()) this.changed.fire();
     });
   }
 
@@ -35,17 +37,17 @@ export class UsageScopeState implements vscode.Disposable {
   }
 
   get(): UsageScope {
-    return resolveScope(parseScope(this.memento.get(KEY)), usageDefaultScope(), this.windowPlace());
+    return resolveScope(this.chosen.get(), usageDefaultScope(), this.windowPlace());
   }
 
   async set(scope: UsageScope): Promise<void> {
-    await this.memento.update(KEY, scope);
+    await this.chosen.set(scope);
     this.changed.fire();
   }
 
   /** Forgets the chosen scope, so the window shows `devdesk.usage.defaultScope` again (for the e2e tests). */
   async clear(): Promise<void> {
-    await this.memento.update(KEY, undefined);
+    await this.chosen.set(undefined);
     this.changed.fire();
   }
 

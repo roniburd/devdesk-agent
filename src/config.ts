@@ -106,6 +106,11 @@ export function claudeConfigDir(): string {
   return process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude');
 }
 
+/** Where Claude Code keeps its transcripts: `projects` in its config directory. */
+export function claudeProjectsDir(): string {
+  return join(claudeConfigDir(), 'projects');
+}
+
 /**
  * Where Claude Code lists its running sessions and their names (setting `devdesk.sessions.claudeSessionsDir`).
  * Empty means `sessions` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
@@ -567,7 +572,7 @@ export function boardSearchHistoryMaxSessions(): number {
 
 /** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in Claude's config directory). */
 export function boardSearchHistoryDir(): string {
-  return expandHome(cfg().get<string>('boardSearch.historyDir')) || join(claudeConfigDir(), 'projects');
+  return expandHome(cfg().get<string>('boardSearch.historyDir')) || claudeProjectsDir();
 }
 
 /** How long a ✨ search may take (setting `devdesk.boardSearch.timeoutSeconds`, 5–300). */

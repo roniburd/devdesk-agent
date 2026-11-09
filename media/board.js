@@ -1343,8 +1343,9 @@
 
     /**
      * The `/` or `@` word the caret is in, if any: `/` at the very start, or after whitespace (`stacked`: skills only,
-     * after up to five `/commands` or `inline` in the middle of the text), unless the text starts with a built-in the
-     * board handles (`info.unstackable`). The same rule as `slashTrigger` in src/core/commandMenu.ts, which tests it.
+     * after fewer than `info.maxStacked` `/commands`, else `inline`, as in the middle of the text), unless the text
+     * starts with a built-in the board handles (`info.unstackable`). The same rule as `slashTrigger` in
+     * src/core/commandMenu.ts, which tests it.
      */
     function trigger() {
       const at = prompt.selectionStart;
@@ -1359,7 +1360,7 @@
         const lead = /^(?:\/[\w:.-]+[ \t]+)*/.exec(prefix)[0];
         const leading = lead.match(/\/[\w:.-]+/g) || [];
         if (leading.some((c) => (info.unstackable || []).includes(c.slice(1).toLowerCase()))) return undefined;
-        const inline = lead.length < prefix.length || leading.length >= 6;
+        const inline = lead.length < prefix.length || leading.length >= info.maxStacked;
         return { kind: '/', start, query: word[1], stacked: true, inline };
       }
       const mention = /(^|\s)@([^\s@]*)$/.exec(before);

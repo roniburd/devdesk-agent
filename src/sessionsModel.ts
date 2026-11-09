@@ -7,9 +7,9 @@ import { endedDir, listableEnded, readEndedRecords, removeEndedRecord, writeEnde
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
 import { ChildrenReader } from './core/sessionChildren';
 import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
-import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords } from './core/sessions';
+import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
 import { transitionsToWaiting } from './core/sessionsView';
-import { DEFAULT_SERVER, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
+import { DEFAULT_SERVER, killSessionArgs, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
 import { discoverFeatures, type Feature } from './core/worktrees';
 import { applyInsight } from './core/insights';
 import { type PendingTurn, withPendingTurns, withRecords } from './core/livePatches';
@@ -112,11 +112,16 @@ export class SessionsModel implements vscode.Disposable {
   /** Whether the user has read what a session shows (`setReadCheck`); until told, nothing counts as read. */
   private isRead: (card: SessionCard) => boolean = () => false;
   /** Transcripts of sessions the view did not list, read before parking them (`withChildren`). */
-  private parkChildrenReader = new ChildrenReader();
-  /** Session transcripts scanned so far; kept across refreshes so each one reads only what was appended. */
-  private childrenReader = new ChildrenReader();
+  private readonly parkChildrenReader = new ChildrenReader();
+  /** How each record's transcript ends, re-read only when the transcript changed. */
+  private readonly transcriptEnds = new TranscriptEnds();
+  /**
+   * Session transcripts scanned so far; kept across refreshes (and stops: paths are absolute, and a file that shrank is
+   * read again) so each one reads only what was appended.
+   */
+  private readonly childrenReader = new ChildrenReader();
   /** Session transcripts' titles and recaps, read incrementally the same way. */
-  private metaReader = new MetaReader();
+  private readonly metaReader = new MetaReader();
   /** Which session each background job was forked from; never changes, so kept for the extension's lifetime. */
   private readonly forkParentReader = new ForkParentReader();
   private readonly changed = new vscode.EventEmitter<SessionCard[]>();
@@ -174,6 +179,19 @@ export class SessionsModel implements vscode.Disposable {
     if (this.users++ === 0) this.start();
   }
 
+  /** A hold its owner turns on and off (a view while it is visible): acquires on, releases off, and nothing twice. */
+  holder(): { set(want: boolean): void } {
+    let held = false;
+    return {
+      set: (want) => {
+        if (want === held) return;
+        held = want;
+        if (want) this.acquire();
+        else this.release();
+      },
+    };
+  }
+
   /**
    * The cards as they are now: waits for a refresh that starts after this call (holding the model meanwhile), for a
    * list that includes a session started a moment ago.
@@ -219,8 +237,6 @@ export class SessionsModel implements vscode.Disposable {
     this.lastKey = undefined;
     this.records.clear();
     this.features = undefined;
-    this.childrenReader = new ChildrenReader();
-    this.metaReader = new MetaReader();
   }
 
   /** The session each record outside tmux was forked from (a /fork runs as a background job), by session id. */
@@ -312,39 +328,39 @@ export class SessionsModel implements vscode.Disposable {
 
   private async startWatcher(generation: number): Promise<void> {
     const dir = this.o.stateDir();
+    this.watcher = await this.watchDir(dir, generation, (name) => {
+      // The hook writes a `.tmp` file, then renames it over the state file: only the rename matters.
+      if (name?.endsWith('.tmp')) return;
+      this.schedule();
+      // A session's state file: its card changes now, before the refresh.
+      if (name?.endsWith('.json')) void this.readRecord(join(dir, name), generation);
+    });
+    if (generation !== this.generation) return;
+    // New insights show without waiting for the poll (else on the next poll).
+    this.insightsWatcher = await this.watchDir(insightsDir(dir), generation, (name) => {
+      if (!name || name.endsWith('.json')) this.schedule();
+    });
+  }
+
+  /**
+   * Watches `dir` (created if missing), calling `onEvent` with each changed file name; undefined when it cannot, or when
+   * stopped or restarted meanwhile (so no watcher leaks). A watcher that fails closes, leaving polling.
+   */
+  private async watchDir(dir: string, generation: number, onEvent: (name: string | undefined) => void): Promise<FSWatcher | undefined> {
     try {
       await mkdir(dir, { recursive: true });
-      // Stopped or restarted while mkdir was pending: do not leak a watcher.
-      if (generation !== this.generation) return;
-      const watcher = watch(dir, (_event, name) => {
-        this.schedule();
-        // A session's state file: its card changes now, before the refresh.
-        if (name && String(name).endsWith('.json')) void this.readRecord(join(dir, String(name)), generation);
-      });
+      if (generation !== this.generation) return undefined;
+      const watcher = watch(dir, (_event, name) => onEvent(name ? String(name) : undefined));
       watcher.on('error', () => {
         log.warn(`watcher for ${dir} failed; continuing with polling only`);
         watcher.close();
         if (this.watcher === watcher) this.watcher = undefined;
-      });
-      this.watcher = watcher;
-    } catch (err) {
-      log.warn(`cannot watch ${dir}: ${(err as Error).message}; polling only`);
-    }
-    // New insights show without waiting for the poll.
-    try {
-      const idir = insightsDir(dir);
-      await mkdir(idir, { recursive: true });
-      if (generation !== this.generation) return;
-      const watcher = watch(idir, (_event, name) => {
-        if (!name || String(name).endsWith('.json')) this.schedule();
-      });
-      watcher.on('error', () => {
-        watcher.close();
         if (this.insightsWatcher === watcher) this.insightsWatcher = undefined;
       });
-      this.insightsWatcher = watcher;
-    } catch {
-      // Insights then show on the next poll.
+      return watcher;
+    } catch (err) {
+      log.warn(`cannot watch ${dir}: ${(err as Error).message}; polling only`);
+      return undefined;
     }
   }
 
@@ -371,13 +387,23 @@ export class SessionsModel implements vscode.Disposable {
   /** Applies the hook records read since the last refresh and the pending turns to the current cards, and tells listeners. */
   private publish(): void {
     if (!this.loaded || this.users === 0) return;
-    const seeded = withPendingTurns(withRecords(this.cards, this.readRecords()), this.pendingTurns, Date.now());
+    this.commit(this.cards, Date.now());
+  }
+
+  /**
+   * Makes `cards`, with the hook records read since the last refresh and the pending turns applied, the current cards,
+   * and tells listeners: what changed, then which sessions started waiting (none on the first load).
+   */
+  private commit(cards: SessionCard[], now: number): void {
+    const seeded = withPendingTurns(withRecords(cards, this.readRecords()), this.pendingTurns, now);
     this.pendingTurns = seeded.pending;
-    if (seeded.cards === this.cards) return;
-    const newlyWaiting = transitionsToWaiting(this.cards, seeded.cards);
-    this.cards = seeded.cards;
-    this.fire(seeded.cards, Date.now());
-    if (newlyWaiting.length) this.waiting.fire(seeded.cards.filter((c) => newlyWaiting.includes(c.id)));
+    const next = seeded.cards;
+    if (next === this.cards) return;
+    const newlyWaiting = this.loaded ? transitionsToWaiting(this.cards, next) : [];
+    this.cards = next;
+    this.loaded = true;
+    this.fire(next, now);
+    if (newlyWaiting.length) this.waiting.fire(next.filter((c) => newlyWaiting.includes(c.id)));
   }
 
   private readRecords(): Map<string, HookRecord> {
@@ -421,7 +447,7 @@ export class SessionsModel implements vscode.Disposable {
       const registryDir = this.o.claudeSessionsDir();
       const [paneLists, records, ended, procs, registry] = await Promise.all([
         Promise.all(listing),
-        readHookRecords(dir),
+        readHookRecords(dir, this.transcriptEnds),
         readEndedRecords(endedDir(dir)),
         listProcesses(),
         registryDir ? readRegistry(registryDir) : Promise.resolve([]),
@@ -449,7 +475,7 @@ export class SessionsModel implements vscode.Disposable {
       // The dead record that shows a crash is deleted below: keep the mark while the session stays stopped.
       for (const c of all) if (c.state === 'stopped' && this.crashed.has(c.id)) c.crashed = true;
       this.crashed = new Set(all.filter((c) => c.crashed).map((c) => c.id));
-      let next = this.o.workspaceOnly() ? cardsInScope(all, await this.scopeDirs(), features) : all;
+      const next = this.o.workspaceOnly() ? cardsInScope(all, await this.scopeDirs(), features) : all;
       if (generation !== this.generation) return;
       steps.mark('cards');
       await Promise.all([this.addChildren(next), this.addInfo(next, registry)]);
@@ -463,17 +489,10 @@ export class SessionsModel implements vscode.Disposable {
       // What changed since the state files were read, and the sessions just started: as `publish` showed them.
       const now = Date.now();
       for (const [id, r] of this.records) if (r.read <= reads) this.records.delete(id);
-      const seeded = withPendingTurns(withRecords(next, this.readRecords()), this.pendingTurns, now);
-      this.pendingTurns = seeded.pending;
-      next = seeded.cards;
-      const newlyWaiting = this.loaded ? transitionsToWaiting(this.cards, next) : [];
-      this.cards = next;
-      this.loaded = true;
-      this.fire(next, now);
-      if (newlyWaiting.length) this.waiting.fire(next.filter((c) => newlyWaiting.includes(c.id)));
+      this.commit(next, now);
       steps.mark('listeners');
       noteLatency('sessions refresh', steps.total());
-      if (steps.total() >= SLOW_REFRESH_MS) log.debug(`sessions refresh: ${steps.total()}ms (${steps.describe()}), ${next.length} sessions`);
+      if (steps.total() >= SLOW_REFRESH_MS) log.debug(`sessions refresh: ${steps.total()}ms (${steps.describe()}), ${this.cards.length} sessions`);
     } catch (err) {
       log.warn(`sessions refresh failed: ${(err as Error).message}`);
     } finally {
@@ -525,7 +544,7 @@ export class SessionsModel implements vscode.Disposable {
           if (!record) continue;
           await writeEndedRecord(endedDir(dir), record, 'parked', now);
         }
-        await this.o.tmux(server)(['kill-session', '-t', `=${card.tmuxSession}`]);
+        await this.o.tmux(server)(killSessionArgs(card.tmuxSession!));
         parked++;
         log.info(`parked Claude session ${card.sessionId} (tmux ${card.tmuxSession}, ${why}), inactive since ${new Date(card.updatedAt ?? 0).toISOString()}`);
       } catch (err) {

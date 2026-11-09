@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runInShell } from '../src/shellCall';
-import { readTail } from '../src/transcriptTail';
+import { readTail } from '../src/core/transcriptTail';
 
 describe('runInShell', () => {
   it('passes the input on stdin and returns stdout', async () => {

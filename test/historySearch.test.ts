@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptyEntry, type HistoryEntry } from '../src/core/historyIndex';
-import { buildDocs, foldWithMap, historyCandidates, historyDigest, searchCandidates, searchHistory, searchTranscripts } from '../src/core/historySearch';
+import { buildDocs, foldWithMap, historyDigest, searchCandidates, searchTranscripts } from '../src/core/historySearch';
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 3);
@@ -10,7 +10,7 @@ const entry = (id: string, o: Partial<HistoryEntry> & { prompts?: string[]; repl
   return e;
 };
 const docsOf = (entries: HistoryEntry[]) => buildDocs(entries.map((entry, i) => ({ path: `/p/${i}.jsonl`, entry })), { root: '/w/app', scope: 'workspace', worktreeOf: (cwd) => (cwd?.includes('feat') ? 'feat' : 'main') });
-const search = (entries: HistoryEntry[], q: string, exclude: string[] = []) => searchHistory(docsOf(entries), q, { now: NOW, limit: 20, exclude: new Set(exclude) });
+const search = (entries: HistoryEntry[], q: string, exclude: string[] = []) => searchTranscripts(docsOf(entries), q, { now: NOW, limit: 20, onBoard: new Set(exclude) }).past;
 
 describe('buildDocs', () => {
   it('leaves out entries without a session id, out of scope, and keeps the latest copy of a session', () => {
@@ -29,7 +29,7 @@ describe('buildDocs', () => {
   });
 });
 
-describe('searchHistory', () => {
+describe('searchTranscripts (past)', () => {
   it('needs every term, case and accent insensitive, in any field', () => {
     const es = [entry('a', { prompts: ['Fix the flaky parser test'] }), entry('b', { replies: ['The café build passes'] }), entry('c', { files: ['/w/app/src/Parser.ts'] })];
     expect(search(es, 'parser flaky').map((h) => h.id)).toEqual(['a']);
@@ -41,9 +41,9 @@ describe('searchHistory', () => {
 
   it('ranks a match in the title over one in a reply, and a recent match over an old one', () => {
     const byField = [entry('reply', { customTitle: 'other', replies: ['deploy'] }), entry('title', { customTitle: 'deploy', prompts: ['other words here'] })];
-    expect(historyCandidates(docsOf(byField), 'deploy', { now: NOW, limit: 2, exclude: new Set() }).map((c) => c.hit.id)).toEqual(['title', 'reply']);
+    expect(searchCandidates(docsOf(byField), 'deploy', { now: NOW, limit: 2, onBoard: new Set() }).past.map((c) => c.hit.id)).toEqual(['title', 'reply']);
     const recent = [entry('old', { prompts: ['deploy'], lastAt: NOW - 60 * DAY }), entry('new', { prompts: ['deploy'], lastAt: NOW - DAY })];
-    expect(historyCandidates(docsOf(recent), 'deploy', { now: NOW, limit: 2, exclude: new Set() })[0].hit.id).toBe('new');
+    expect(searchCandidates(docsOf(recent), 'deploy', { now: NOW, limit: 2, onBoard: new Set() }).past[0].hit.id).toBe('new');
   });
 
   it('returns the best matches newest first', () => {
@@ -96,7 +96,7 @@ describe('excerpts: turns without a word', () => {
 
   it('matches wt: against the worktree folded (accents, case)', () => {
     const docs = buildDocs([{ path: '/p/a.jsonl', entry: entry('a', { prompts: ['auth'] }) }], { root: '/w/app', scope: 'workspace', worktreeOf: () => 'Fëat-A' });
-    expect(searchHistory(docs, 'auth wt:feat-a', { now: NOW, limit: 20, exclude: new Set() }).map((h) => h.worktree)).toEqual(['Fëat-A']);
+    expect(searchTranscripts(docs, 'auth wt:feat-a', { now: NOW, limit: 20, onBoard: new Set() }).past.map((h) => h.worktree)).toEqual(['Fëat-A']);
   });
 });
 
@@ -148,11 +148,11 @@ describe('foldWithMap', () => {
   });
 });
 
-describe('historyCandidates', () => {
+describe('searchCandidates (past)', () => {
   it('takes the matches first, then fills with the newest others', () => {
     const es = [entry('match', { prompts: ['parser'], lastAt: NOW - 50 * DAY }), entry('n1', { lastAt: NOW - DAY }), entry('n2', { lastAt: NOW - 2 * DAY }), entry('n3', { lastAt: NOW - 3 * DAY })];
-    expect(historyCandidates(docsOf(es), 'the parser one', { now: NOW, limit: 3, exclude: new Set() }).map((c) => c.hit.id)).toEqual(['match', 'n1', 'n2']);
-    expect(historyCandidates(docsOf(es), 'what did I do yesterday', { now: NOW, limit: 2, exclude: new Set(['n1']) }).map((c) => c.hit.id)).toEqual(['n2', 'n3']);
+    expect(searchCandidates(docsOf(es), 'the parser one', { now: NOW, limit: 3, onBoard: new Set() }).past.map((c) => c.hit.id)).toEqual(['match', 'n1', 'n2']);
+    expect(searchCandidates(docsOf(es), 'what did I do yesterday', { now: NOW, limit: 2, onBoard: new Set(['n1']) }).past.map((c) => c.hit.id)).toEqual(['n2', 'n3']);
   });
 });
 
@@ -160,7 +160,7 @@ describe('historyDigest', () => {
   it('is a short digest marked as history', () => {
     const e = entry('a', { prompts: ['p1', 'p2', 'p3', 'x'.repeat(500)], replies: ['r'], files: ['/a', '/b', '/c', '/d', '/e', '/f'], customTitle: 'Title' });
     const docs = docsOf([e]);
-    const [{ hit }] = historyCandidates(docs, 'p1', { now: NOW, limit: 1, exclude: new Set() });
+    const [{ hit }] = searchCandidates(docs, 'p1', { now: NOW, limit: 1, onBoard: new Set() }).past;
     const d = historyDigest(hit, docs[0]);
     expect(d.id).toBe('a');
     expect(d.state).toBe('History: ended');
@@ -179,11 +179,11 @@ describe.skipIf(!process.env.DEVDESK_PERF)('performance', () => {
       entry(`s${i}`, { prompts: [`deploy ${chunk.repeat(500)}`], replies: [chunk.repeat(600)], lastAt: NOW - i * 60_000 }));
     const docs = docsOf(es);
     const t0 = performance.now();
-    const hits = searchHistory(docs, 'deploy', { now: NOW, limit: 20, exclude: new Set() });
+    const hits = searchTranscripts(docs, 'deploy', { now: NOW, limit: 20, onBoard: new Set() }).past;
     const t1 = performance.now();
-    const cands = historyCandidates(docs, 'deploy', { now: NOW, limit: 40, exclude: new Set() });
+    const cands = searchCandidates(docs, 'deploy', { now: NOW, limit: 40, onBoard: new Set() }).past;
     const t2 = performance.now();
-    console.log(`searchHistory ${(t1 - t0).toFixed(1)} ms, historyCandidates ${(t2 - t1).toFixed(1)} ms`);
+    console.log(`searchTranscripts ${(t1 - t0).toFixed(1)} ms, searchCandidates ${(t2 - t1).toFixed(1)} ms`);
     expect(hits.length).toBe(20);
     expect(cands.length).toBe(40);
     expect(t1 - t0).toBeLessThan(50);
@@ -197,9 +197,9 @@ describe.skipIf(!process.env.DEVDESK_PERF)('performance', () => {
     const docs = docsOf(es);
     const query = Array.from({ length: 50 }, (_, i) => words.split(' ')[i % 20]).join(' ');
     const t0 = performance.now();
-    const hits = searchHistory(docs, query, { now: NOW, limit: 20, exclude: new Set() });
+    const hits = searchTranscripts(docs, query, { now: NOW, limit: 20, onBoard: new Set() }).past;
     const t1 = performance.now();
-    console.log(`50 terms: searchHistory ${(t1 - t0).toFixed(1)} ms`);
+    console.log(`50 terms: searchTranscripts ${(t1 - t0).toFixed(1)} ms`);
     expect(hits.length).toBe(20);
     expect(t1 - t0).toBeLessThan(300);
   });
