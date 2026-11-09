@@ -22,12 +22,14 @@ Sessions idle for days are parked to free memory, and resume when you open them.
 
 ### Every session at a glance
 
-![The Claude view: sessions grouped by worktree, with state icons, unread dots and colored titles](images/manual-claude-view.png)
+![The Agent Sessions panel with colored sessions by worktree, next to a Claude session asking for permission to edit a file](images/terminal.png)
 
 Each session is the real Claude Code CLI in its own editor tab, with all its keys and slash commands. The side panel
 lists every session by worktree, the most urgent first: *needs permission*, *question for you*, *plan to review*,
 *working*, *done*, with a dot on the ones you haven't read. **N need you** in the status bar jumps to the next one.
 **Fork** a session to try something without losing the conversation.
+
+![The same sessions grouped by worktree, and as one flat list where each row names its worktree](images/sessions-tree-flat.png)
 
 Group the sessions by worktree, or click **List All Sessions** for one flat list, most urgent first. Background work a
 session started (a long shell command, a subagent) shows under it. Right-click a session and pick **Color ▸** to tell
@@ -35,7 +37,7 @@ sessions apart at a glance: the color shows in the panel and on the board.
 
 ### Worktrees and their diffs
 
-![The Worktrees section: each worktree with its changed files](images/manual-worktrees.png)
+![The Worktrees section with a worktree's changed files, and the diff of one of them](images/diff.png)
 
 **New Worktree Session** makes a Claude Code worktree named after your task and starts Claude there. The **Worktrees**
 section lists what each worktree changed; click a file for its diff against the main branch or only the uncommitted
@@ -44,6 +46,8 @@ repository, with every `git worktree` (including Claude Code's own `.claude/work
 repository, sessions and the board work as usual, all in main, and there are no worktrees.
 
 ### The Claude Board
+
+![The Claude Board: prompts for later, and every session in lanes by state; Needs you cards say what Claude asks](images/board.png)
 
 Every session as a card in lanes, moving on its own as Claude works:
 

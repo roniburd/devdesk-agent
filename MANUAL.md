@@ -28,6 +28,8 @@ This manual explains everything DevDesk Claude does. New here? Read the [README]
 
 DevDesk Claude runs Claude Code inside tmux. VS Code only shows what tmux runs. So when you close VS Code, Claude keeps working.
 
+![The Claude view in the sidebar, next to a Claude terminal](images/terminal.png)
+
 A few words this manual uses:
 
 | Word | Meaning |
@@ -118,6 +120,8 @@ A worktree row shows:
 Worktrees made with **New Worktree Session** keep their row, with the task, even when no session runs in them. While they have no session, they sort last.
 
 To see one flat list instead, click **List All Sessions** in the title bar. Each row then names its worktree. Click the tree button to group again. Setting: `devdesk.sessions.groupByWorktree`.
+
+![The same sessions grouped by worktree, and as one flat list where each row names its worktree](images/sessions-tree-flat.png)
 
 ### Order
 
@@ -398,6 +402,8 @@ Expand a worktree, then a package, to see its changed files. By default, only pa
 
 Click a file to open its diff.
 
+![A worktree's changed file and its diff against mainline](images/diff.png)
+
 The diff base button switches what the diff compares:
 
 - **mainline**: everything the worktree changed since it branched (the label says *vs mainline*),
@@ -449,6 +455,8 @@ The timed refresh keeps the worktree rows as they are and looks for added or rem
 If a git command hangs (a stale `index.lock`, a slow disk), DevDesk stops it after `devdesk.worktrees.gitTimeoutSeconds`. Its package then shows the error.
 
 ## 8. The Claude Board
+
+![The Claude Board: prompts for later, and every session in lanes by state; Needs you cards say what Claude asks (a permission, a plan to review, a question), and colored sessions keep their color](images/board.png)
 
 The Claude Board is a preview. Turn on `devdesk.board.enabled` to use it.
 
