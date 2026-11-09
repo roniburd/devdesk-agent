@@ -2,7 +2,8 @@
 // A stand-in for the Claude Code CLI, for the e2e tests and manual checks of the Claude Board. It never calls a model.
 //
 // Every run appends one JSON line { event: 'run', argv, cwd, pid, time } to $DEVDESK_FAKE_CLAUDE_LOG (default
-// $TMPDIR/devdesk-fake-claude.jsonl). Then:
+// $TMPDIR/devdesk-fake-claude.jsonl), except `--version`, which prints a version and exits (DevDesk asks it to pick
+// the hook events it installs). Then:
 // - `-p --input-format stream-json`: answers the `initialize` control request (matched by request_id) with
 //   ../../test/fixtures/initialize.json (Claude Code 2.1.316's real answer: 112 commands, 18 models), then after
 //   $DEVDESK_FAKE_CLAUDE_CHANGED_MS (default 300) a `system/commands_changed` event with one more command,
@@ -10,7 +11,11 @@
 // - `-p <prompt>`: prints a line and exits.
 // - otherwise (interactive, as tmux runs it): draws Claude's prompt box (a rule, `❯ ` and what is typed, a rule) so
 //   `claudePromptIsEmpty` reads it, shows the first prompt (the argument after `--`, or the last one) and each submitted line, and logs each
-//   line as { event: 'line', text, pid }. Ctrl+C exits.
+//   line as { event: 'line', text, pasted, pid } (`pasted`: some of it came in a bracketed paste, which it turns on
+//   as Claude does; a line break in a paste stays in the line). `--prefill <draft>` starts with the draft typed at the
+//   prompt, not submitted. Ctrl+C exits. Like Claude Code 2.1.295+, it probes for the Program Status
+//   Protocol (`ESC]7501;?`); once answered (DevDesk's relay, devdesk.sessions.programStatus), it reports `idle`, or
+//   `working` when the first prompt holds `e2e-status-working`, and `done` once `e2e: finish` is submitted.
 import { appendFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +23,10 @@ import { createInterface } from 'node:readline';
 
 const LOG = process.env.DEVDESK_FAKE_CLAUDE_LOG || join(tmpdir(), 'devdesk-fake-claude.jsonl');
 const argv = process.argv.slice(2);
+if (argv.includes('--version')) {
+  process.stdout.write('2.1.316 (Claude Code)\n');
+  process.exit(0);
+}
 const log = (entry) => appendFileSync(LOG, `${JSON.stringify({ ...entry, pid: process.pid, time: Date.now() })}\n`);
 log({ event: 'run', argv, cwd: process.cwd() });
 
@@ -28,7 +37,8 @@ const write = (m) => process.stdout.write(`${JSON.stringify(m)}\n`);
 // with '-' (and is not behind `--`) is refused.
 const end = argv.indexOf('--');
 const options = end < 0 ? argv : argv.slice(0, end);
-const notOption = options.find((a) => /^-/.test(a) && /\s/.test(a));
+// The value of `--prefill` is never an option, whatever it starts with.
+const notOption = options.find((a, i) => /^-/.test(a) && /\s/.test(a) && options[i - 1] !== '--prefill');
 if (notOption !== undefined) {
   process.stderr.write(`error: unknown option '${notOption}'\n`);
   process.exit(1);
@@ -67,35 +77,61 @@ function streamJson() {
 
 function interactive() {
   const seen = [];
-  const first = end < 0 ? argv.at(-1) : argv[end + 1];
+  // `--prefill <draft>`: the draft is typed at the prompt, not submitted.
+  const prefill = options.indexOf('--prefill');
+  const draft = prefill >= 0 ? options[prefill + 1] : undefined;
+  const first = end < 0 ? (draft === undefined ? argv.at(-1) : undefined) : argv[end + 1];
   if (first && (end >= 0 || !first.startsWith('-'))) seen.push(`> ${first}`);
-  let typed = '';
+  let typed = draft ?? '';
+  // Inside a bracketed paste (asked for below, as Claude does), and whether the line being typed got one.
+  let pasting = false;
+  let pasted = false;
   const rule = `\x1b[38;5;244m${'─'.repeat(40)}\x1b[39m`;
   const draw = () => {
     process.stdout.write(`\x1b[2J\x1b[H fake Claude (pid ${process.pid})\r\n`);
     for (const line of seen.slice(-10)) process.stdout.write(`${line}\r\n`);
     process.stdout.write(`${rule}\r\n❯ ${typed}\x1b[7m \x1b[0m\r\n${rule}\r\n`);
   };
+  let statusOn = false;
+  const report = (body) => statusOn && process.stdout.write(`\x1b]7501;${body}:app=claude-code\x1b\\`);
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (chunk) => {
+  process.stdin.on('data', (data) => {
+    let chunk = data;
+    const reply = /\x1b\]7501;\?:[^\x07\x1b]*(?:\x07|\x1b\\)/.exec(chunk);
+    if (reply) {
+      chunk = chunk.replace(reply[0], '');
+      if (!statusOn) {
+        statusOn = true;
+        log({ event: 'programStatus' });
+        report(first?.includes('e2e-status-working') ? `state=working:msg=${Buffer.from('Running the e2e checks').toString('base64')}` : 'state=idle');
+      }
+    }
     for (let i = 0; i < chunk.length; i++) {
       const ch = chunk[i];
-      if (ch === '\x03') process.exit(0);
+      if (ch === '\x03' && !pasting) process.exit(0);
       if (ch === '\x1b') {
-        // An escape sequence (arrow keys): skipped.
+        // An escape sequence (arrow keys): skipped; bracketed paste's start and end markers, as Claude reads them.
         const m = /^\x1b(\[[0-9;?]*[A-Za-z~]|.)?/.exec(chunk.slice(i));
+        if (m?.[0] === '\x1b[200~') pasting = pasted = true;
+        else if (m?.[0] === '\x1b[201~') pasting = false;
         i += (m?.[0].length ?? 1) - 1;
-      } else if (ch === '\r' || ch === '\n') {
+      } else if (pasting && (ch === '\r' || ch === '\n')) typed += '\n';
+      else if (ch === '\r' || ch === '\n') {
         if (typed) {
-          log({ event: 'line', text: typed });
-          seen.push(`> ${typed}`);
+          log({ event: 'line', text: typed, pasted });
+          seen.push(`> ${typed.replace(/\n/g, ' ⏎ ')}`);
+          if (typed === 'e2e: finish') report('state=done');
         }
         typed = '';
+        pasted = false;
       } else if (ch === '\x7f' || ch === '\b') typed = typed.slice(0, -1);
       else if (ch >= ' ') typed += ch;
     }
     draw();
   });
+  process.stdout.write('\x1b]7501;?\x07');
+  // Bracketed paste on, as Claude asks for it: tmux's `paste-buffer -p` then marks what it pastes.
+  process.stdout.write('\x1b[?2004h');
   draw();
 }

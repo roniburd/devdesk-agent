@@ -18,6 +18,8 @@ export function withRecord(card: SessionCard, record: HookRecord): SessionCard {
   // under this id, which the refresh corrects again.
   if (card.detail === MOVED_DETAIL) return card;
   const next: SessionCard = { ...card, state: record.state, detail: record.detail, updatedAt: record.updatedAt };
+  if (record.waitKind) next.waitKind = record.waitKind;
+  else delete next.waitKind;
   if (record.prompt) next.prompt = record.prompt;
   // The same finished turn (an idle reminder rewrote it): keep what the card says, which may be the insight's answer.
   const sameDone = record.state === 'done' && card.state === 'done' && record.turnEndedAt !== undefined && record.turnEndedAt === card.turnEndedAt;

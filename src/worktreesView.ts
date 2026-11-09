@@ -1,6 +1,5 @@
-import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { type DiffMode, diffSides } from './core/git';
+import type { DiffMode } from './core/git';
 import { featureForCwd } from './core/sessions';
 import { LOOK_TEXT, stateLook } from './core/sessionsView';
 import type { SessionCard } from './core/sessions';
@@ -10,12 +9,13 @@ import { discoverFeatures, type Feature } from './core/worktrees';
 import { isClaudeTerminal, killClaude } from './claudeSessions';
 import { featureDiscovery, openSettings, sessionsStuckMs, setGlobalSetting, workspaceRoot, worktreesPauseWhenUnfocused, worktreesRefreshSeconds } from './config';
 import { type FeatureNode, FeaturesTree, type FileNode } from './featuresTree';
-import { GitContentProvider, SCHEME, toGitUri } from './gitContent';
+import { GitContentProvider, SCHEME } from './gitContent';
 import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { openFeatureSession } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
 import { deleteWorktreeRow } from './worktreeDelete';
+import { openDiff } from './worktreeDiffs';
 
 /** `workspaceState` key of the Worktrees view's diff base (`branch` or `uncommitted`). */
 const MODE_KEY = 'devdesk.mode';
@@ -23,15 +23,6 @@ const MODE_KEY = 'devdesk.mode';
 /** Sets `devdesk.inWorkspace`, which shows the Claude and Worktrees views only when a local folder is open (a package workspace, a git repository or a plain folder). */
 export function updateWorkspaceContext(): void {
   void vscode.commands.executeCommand('setContext', 'devdesk.inWorkspace', workspaceRoot() !== undefined);
-}
-
-async function openDiff(node: FileNode): Promise<void> {
-  const { pkg, base, change } = node;
-  const sides = diffSides(change, base);
-  const empty = toGitUri({ dir: pkg.dir, ref: '', path: change.path });
-  const left = sides.left === 'empty' ? empty : toGitUri({ dir: pkg.dir, ...sides.left });
-  const right = sides.right === 'empty' ? empty : vscode.Uri.file(join(pkg.dir, change.path));
-  await vscode.commands.executeCommand('vscode.diff', left, right, `${pkg.name}/${change.path} (${base.label} ↔ working tree)`);
 }
 
 /** The Worktrees view and its rows' state text (each worktree's most urgent session's), by worktree directory. */

@@ -62,6 +62,32 @@ describe('parseHookRecord', () => {
     expect(parseHookRecord(JSON.stringify({ ...rec({ state: 'done' }), asksQuestion: false }))).not.toHaveProperty('asksQuestion');
     expect(parseHookRecord(JSON.stringify({ ...rec({}), asksQuestion: null }))).not.toHaveProperty('asksQuestion');
   });
+  it("keeps when the session's Claude process started it, and puts it on the card", () => {
+    expect(parseHookRecord(JSON.stringify({ ...rec({}), sessionStartedAt: 900 }))?.sessionStartedAt).toBe(900);
+    expect(parseHookRecord(JSON.stringify({ ...rec({}), sessionStartedAt: null }))).not.toHaveProperty('sessionStartedAt');
+    const [card] = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [rec({ sessionStartedAt: 900 })], features, alive);
+    expect(card.sessionStartedAt).toBe(900);
+  });
+  it("lists one card after a /clear: the new session's record wins the Claude process", () => {
+    const old = rec({ sessionId: 'old', state: 'waiting', updatedAt: 1000 });
+    const cleared = rec({ sessionId: 'new', state: 'idle', detail: 'Ready', updatedAt: 2000 });
+    const cards = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [old, cleared], features, alive);
+    expect(cards.map((c) => [c.id, c.tmuxSession])).toEqual([['new', 'cc-af2-dp-alarms']]);
+  });
+  it('reads what a waiting record waits on, and ignores it otherwise', () => {
+    const waiting = { ...rec({ state: 'waiting', detail: 'Asking: which?' }), wait: { kind: 'question', toolUseId: 'toolu_1' } };
+    expect(parseHookRecord(JSON.stringify(waiting))?.waitKind).toBe('question');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: { kind: 'other' } }))).not.toHaveProperty('waitKind');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: null }))).not.toHaveProperty('waitKind');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, state: 'working' }))).not.toHaveProperty('waitKind');
+  });
+  it('reads what a waiting record waits on, and ignores it otherwise', () => {
+    const waiting = { ...rec({ state: 'waiting', detail: 'Asking: which?' }), wait: { kind: 'question', toolUseId: 'toolu_1' } };
+    expect(parseHookRecord(JSON.stringify(waiting))?.waitKind).toBe('question');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: { kind: 'other' } }))).not.toHaveProperty('waitKind');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: null }))).not.toHaveProperty('waitKind');
+    expect(parseHookRecord(JSON.stringify({ ...waiting, state: 'working' }))).not.toHaveProperty('waitKind');
+  });
   it('rejects broken or incomplete records', () => {
     expect(parseHookRecord('{"sessionId":')).toBeUndefined();
     expect(parseHookRecord('null')).toBeUndefined();

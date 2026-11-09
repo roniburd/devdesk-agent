@@ -71,7 +71,9 @@ real sessions too.
 | `src/migrate.ts` | Copies renamed settings once (`MIGRATED_SETTINGS`). |
 | `src/core/` | Pure logic, no VS Code: tmux, sessions, hooks, worktrees, git, the board, usage. Unit-tested. |
 | `src/sessions*.ts`, `src/claudeSessions.ts` | The Claude view, its commands, read and unread, the Claude terminals. |
-| `src/worktreesView.ts`, `src/featuresTree.ts` | The Worktrees view and its diffs. |
+| `src/worktreesView.ts`, `src/featuresTree.ts`, `src/worktreeDiffs.ts` | The Worktrees view and its diffs. |
+| `src/reviewComments.ts`, `src/core/reviewNotes.ts` | Notes for Claude on diff lines (VS Code comments), and the prompt they make. |
+| `src/devdeskCli.ts`, `src/core/devdeskCli.ts` | The `devdesk` command Claude runs (a Python script), and this window's end of it: its record and the requests it takes, through files in `~/.claude/devdesk/ipc`. |
 | `src/boardPanel.ts`, `src/boardComposer.ts`, `src/board/` | The Claude Board and its prompt box. |
 | `media/` | The webviews' scripts and styles: `board.js`, `usage.js`. |
 | `src/log.ts` | The **DevDesk** output channel. |
@@ -85,7 +87,7 @@ workspaces; in this repository it has none, so DevDesk works with git repositori
    `"scope": "machine"`, so a repository's workspace settings can't change what runs.
 2. Read it through one function in `src/config.ts`. An empty string means the default. Expand a leading `~`.
 3. Make a change take effect without a reload: listen to `onDidChangeConfiguration`.
-4. List it in the [All settings](MANUAL.md#17-all-settings) table of the manual.
+4. List it in the [All settings](MANUAL.md#18-all-settings) table of the manual.
 
 ### Where state lives
 

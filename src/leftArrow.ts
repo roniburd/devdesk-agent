@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { claudePromptIsEmpty } from './core/claudePrompt';
+import { programStatusBusy, readCardProgramStatus } from './core/programStatus';
+import { processAlive } from './core/sessions';
 import { skipShellUpdate } from './core/skipShell';
 import { claudeTerminalOfTab, claudeTerminalSession, isClaudeTerminal } from './claudeSessions';
-import { sessionsLeftArrowOpensSidebar, sessionsTmux } from './config';
+import { programStatusDir, sessionsLeftArrowOpensSidebar, sessionsTmux } from './config';
 import { log, registerTimedCommand } from './log';
 import type { SessionsTree } from './sessionsTree';
 
@@ -33,16 +35,20 @@ async function leftArrow(tree: SessionsTree): Promise<void> {
   const terminal = terminalInFront();
   if (!terminal) return;
   const target = claudeTerminalSession(terminal);
+  const card = tree.focusedCard(terminal);
   let empty = false;
   if (target) {
     try {
+      // Claude's own report (Program Status relay) shows a turn or a dialog without reading the screen; only the screen
+      // shows whether text is typed.
+      const status = card?.tmuxSession === target.session ? await readCardProgramStatus(programStatusDir(), card, processAlive) : undefined;
       // The session's current pane is the one its attached client shows.
-      empty = claudePromptIsEmpty(await sessionsTmux(target.server)(['capture-pane', '-p', '-e', '-t', `=${target.session}:`]));
+      empty = !programStatusBusy(status) && claudePromptIsEmpty(await sessionsTmux(target.server)(['capture-pane', '-p', '-e', '-t', `=${target.session}:`]));
     } catch (err) {
       log.debug(`cannot read the prompt of ${target.session}: ${(err as Error).message}`);
     }
   }
-  if (empty) await tree.focus(tree.focusedCard(terminal));
+  if (empty) await tree.focus(card);
   else terminal.sendText(LEFT, false);
 }
 

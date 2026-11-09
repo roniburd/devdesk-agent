@@ -164,6 +164,20 @@ describe('ChildrenReader', () => {
     expect(flat(await new ChildrenReader().read(transcript, { ...opts, live: false }))).toEqual(['shell:Server:stopped']);
   });
 
+  it('shows what an earlier Claude process started as stopped once the session resumed', async () => {
+    const later = (id: string, taskId: string, description: string) =>
+      shellLaunch(id, taskId, description).replace(T, '2026-10-29T12:00:00.000Z');
+    await writeFile(transcript, shellLaunch('t1', 'b1', 'Before') + agentLaunch('t2', 'a2', 'Old agent') + later('t3', 'b3', 'After'));
+    const since = Date.parse('2026-10-29T11:00:00.000Z');
+    expect(flat(await new ChildrenReader().read(transcript, { ...opts, since }))).toEqual([
+      'shell:Before:stopped',
+      'agent:Old agent:stopped',
+      'shell:After:running',
+    ]);
+    // A record from an older hook script has no start: nothing changes.
+    expect(flat(await new ChildrenReader().read(transcript, opts)).filter((c) => c.endsWith('running'))).toHaveLength(3);
+  });
+
   it('groups a finished workflow by phase from its summary', async () => {
     await writeFile(
       transcript,

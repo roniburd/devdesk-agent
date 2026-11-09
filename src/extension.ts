@@ -4,6 +4,8 @@ import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import * as vscode from 'vscode';
 import { refreshHookScript } from './core/hooks';
+import { refreshStatusLineScript } from './core/statusLine';
+import { installStatusLineCommand, removeStatusLineCommand } from './statusLineCommands';
 import { cardView } from './core/sessionsView';
 import {
   claudeConfigDir,
@@ -32,6 +34,8 @@ import {
 import { BacklogStore } from './backlogStore';
 import { backlogItemBelongs } from './core/board';
 import { BoardPanel } from './boardPanel';
+import { CliBridge, registerCliCommands } from './devdeskCli';
+import { ReviewComments } from './reviewComments';
 import { InsightsWorker } from './insightsWorker';
 import { applyCrashDiagnostics, cleanDiagnosticsRegularly, log, registerTimedCommand, watchEventLoop } from './log';
 import { freeMemoryPercent } from './memory';
@@ -105,6 +109,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(log, sessions, sessionsTree, worktreeTasks, backlog, board, usagePanel, usage, usageScope);
   const worktrees = registerWorktreesView(ctx, sessions, sessionsTree);
   registerSessions(ctx, { sessions, sessionsTree, worktreeTasks, insights });
+  // The `devdesk` command Claude runs to open files and diffs here, and notes left on diff lines for Claude.
+  const cli = new CliBridge(sessions, () => worktrees.tree.mode);
+  const review = new ReviewComments(ctx.workspaceState, sessions, sessionsTree);
+  ctx.subscriptions.push(cli, review, ...registerCliCommands(cli));
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
@@ -115,6 +123,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
   void refreshHookScript(claudeConfigDir()).then(
     (changed) => changed && log.info('updated the Claude status hook script'),
     (err) => log.warn(`cannot update the Claude status hook script: ${(err as Error).message}`),
+  );
+  void refreshStatusLineScript(claudeConfigDir()).then(
+    (changed) => changed && log.info("updated DevDesk's Claude status line script"),
+    (err) => log.warn(`cannot update DevDesk's Claude status line script: ${(err as Error).message}`),
   );
   ctx.subscriptions.push(
     watchEventLoop(() => worktrees.tree.treeItemCalls, diagnosticsConfig),
@@ -134,6 +146,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
     registerTimedCommand('devdesk.board.fromSidebar', () => board.focusPrompt()),
     vscode.commands.registerCommand('devdesk.board.addTask', (arg: unknown) => board.addTask(arg)),
     vscode.commands.registerCommand('devdesk.claude.showUsage', () => usagePanel.open()),
+    registerTimedCommand('devdesk.usage.installStatusLine', installStatusLineCommand),
+    registerTimedCommand('devdesk.usage.removeStatusLine', removeStatusLineCommand),
     vscode.commands.registerCommand('devdesk.sessions.diagnostics', async () => {
       // The extension's log folder: on the machine running it (the remote machine over Remote-SSH), next to the DevDesk log.
       const dir = ctx.logUri.fsPath;
@@ -145,7 +159,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review });
 }
 
 export function deactivate(): void {}

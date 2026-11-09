@@ -1,18 +1,20 @@
+import { randomBytes } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { claudeIsWorking, claudePromptIsEmpty } from '../core/claudePrompt';
 import { findDescendant, listProcesses } from '../core/processes';
-import { isClaudeCommand } from '../core/sessions';
+import { readCardProgramStatus, screenWithProgramStatus } from '../core/programStatus';
+import { isClaudeCommand, processAlive } from '../core/sessions';
 import type { SessionCard } from '../core/sessions';
 import { currentCard, NEW_SESSION, type PromptScreen, runningSessions, sessionEnded, sessionPicks } from '../core/sessionSend';
-import { FIELD_SEP, isShellCommand, paneTarget, sendKeysArgs } from '../core/tmux';
-import { sessionsTmux, sessionsTmuxServer } from '../config';
+import { commandLine, commandParts, FIELD_SEP, pastedText, isShellCommand, paneTarget, pasteArgs, pasteBufferName, pasteSubmitDelayMs, typeArgs } from '../core/tmux';
+import { boardPasteSettleMs, programStatusDir, sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
 import { openSessionCard } from '../sessionsCommands';
 import type { SessionsTree } from '../sessionsTree';
-
-/** How long Claude gets to show what was typed (and its `/` menu) before Enter submits it. */
-const SUBMIT_DELAY_MS = 150;
 
 /**
  * The running sessions as the board's prompt box reaches them (`composer.sessions`): which one a command goes to, whether
@@ -72,7 +74,9 @@ export class BoardSessions {
   /**
    * What the session's pane shows: Claude's prompt empty (no question or dialog open), Claude in a turn, the pane in a
    * tmux mode (copy mode), Claude exited (its old prompt box can stay above the shell prompt). Claude is looked for
-   * after the capture, so a capture taken while it still ran is not taken for its prompt once gone.
+   * after the capture, so a capture taken while it still ran is not taken for its prompt once gone. Claude's own
+   * report (OSC 7501, for sessions under the Program Status relay) says whether it works or a dialog is open, where
+   * there is one; the capture says the rest, and all of it without one.
    */
   async promptScreen(card: SessionCard): Promise<PromptScreen> {
     const pane = paneOf(card);
@@ -80,21 +84,46 @@ export class BoardSessions {
     const capture = await pane.tmux(['capture-pane', '-p', '-e', '-t', pane.target]);
     const format = `#{pane_pid}${FIELD_SEP}#{pane_in_mode}${FIELD_SEP}#{pane_current_command}`;
     const [pid, inMode, command = ''] = (await pane.tmux(['display-message', '-p', '-t', pane.target, format])).trim().split(FIELD_SEP);
-    return {
-      empty: claudePromptIsEmpty(capture),
-      working: claudeIsWorking(capture),
-      exited: !(await claudeRunsIn(Number(pid), command)),
-      inMode: inMode === '1',
-    };
+    const status = await readCardProgramStatus(programStatusDir(), card, processAlive);
+    return screenWithProgramStatus(
+      {
+        empty: claudePromptIsEmpty(capture),
+        working: claudeIsWorking(capture),
+        exited: !(await claudeRunsIn(Number(pid), command)),
+        inMode: inMode === '1',
+      },
+      status,
+    );
   }
 
-  /** Types `text` (as one line) into the session's pane and presses Enter, as if typed in its terminal. */
-  async typeInto(card: SessionCard, text: string): Promise<void> {
+  /**
+   * Enters `text` (as one command line: `commandLine`) at Claude's prompt in the session's pane: the `/name ` before an
+   * argument typed, the rest as one bracketed paste through a tmux paste buffer of its own (`commandParts`), then Enter
+   * once Claude has taken it in (`devdesk.board.pasteSettleMs`). With `multiline`, text that is not a `/command` keeps
+   * its line breaks (a bracketed paste of several lines is one prompt; only a `/command` must be one line).
+   */
+  async typeInto(card: SessionCard, text: string, opts: { multiline?: boolean } = {}): Promise<void> {
     const pane = paneOf(card);
     if (!pane) throw new Error('it does not run in tmux');
-    const { type, submit } = sendKeysArgs(pane.target, text);
-    for (const piece of type) await pane.tmux(piece);
-    await new Promise((r) => setTimeout(r, SUBMIT_DELAY_MS));
+    const keepLines = opts.multiline && !text.trimStart().startsWith('/');
+    const { lead, rest } = keepLines ? { lead: '', rest: pastedText(text).replace(/\\$/, '\\ ') } : commandParts(commandLine(text));
+    // A file only this user reads, gone once loaded: tmux reads it, as an argument this long would be too long for it.
+    const dir = await mkdtemp(join(tmpdir(), 'devdesk-send-'));
+    const { load, paste, drop, submit } = pasteArgs(pane.target, pasteBufferName(randomBytes(8).toString('hex')), join(dir, 'text'));
+    try {
+      await writeFile(load.at(-1)!, rest, { mode: 0o600 });
+      await pane.tmux(load);
+      try {
+        if (lead) await pane.tmux(typeArgs(pane.target, lead));
+        await pane.tmux(paste);
+      } catch (err) {
+        await pane.tmux(drop).catch(() => undefined);
+        throw err;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    await new Promise((r) => setTimeout(r, pasteSubmitDelayMs(boardPasteSettleMs(), Buffer.byteLength(rest))));
     await pane.tmux(submit);
   }
 

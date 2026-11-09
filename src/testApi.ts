@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import type { BoardPanel } from './boardPanel';
+import type { CliBridge } from './devdeskCli';
+import type { ReviewComments } from './reviewComments';
 import { claudeTerminalSession, restoreTerminals } from './claudeSessions';
 import { type OpenTerminal, REATTACH_KEY, reattachKey } from './state/reattachTerminals';
 import { sessionsTmuxServer } from './config';
@@ -8,6 +10,7 @@ import { SEEN_KEY } from './sessionsReadState';
 import type { SessionNode, SessionsTree } from './sessionsTree';
 import { hostKey } from './state/mementoState';
 import type { UsageScope } from './core/usageScope';
+import { planLimits } from './planLimits';
 import type { UsagePanel } from './usagePanel';
 import type { UsageScopeState } from './usageScopeState';
 import type { WorktreesView } from './worktreesView';
@@ -35,7 +38,17 @@ export function testApi(
     board,
     usagePanel,
     usageScope,
-  }: { sessionsTree: SessionsTree; worktrees: WorktreesView; board: BoardPanel; usagePanel: UsagePanel; usageScope: UsageScopeState },
+    cli,
+    review,
+  }: {
+    sessionsTree: SessionsTree;
+    worktrees: WorktreesView;
+    board: BoardPanel;
+    usagePanel: UsagePanel;
+    usageScope: UsageScopeState;
+    cli: CliBridge;
+    review: ReviewComments;
+  },
 ) {
   const tree = worktrees.tree;
   /** How many times the usage scope changed: each time, the 📊 popup and the Claude Usage page are posted again. */
@@ -162,6 +175,8 @@ export function testApi(
     boardMakeRoomBeside: () => board.makeRoomBeside(),
     /** What the board's 📊 popover shows, for the window's scope or `scope`. */
     boardUsage: (scope?: UsageScope) => board.usage(scope),
+    /** The 📊 popup's plan limits now (from DevDesk's status line), or its offer to install that. */
+    boardPlanLimits: () => planLimits(),
     /** Whether the Claude Usage page is open, and what it shows (for the window's scope or `scope`). */
     usagePageOpen: () => usagePanel.isOpen,
     usagePage: (scope?: UsageScope) => usagePanel.data(scope),
@@ -173,5 +188,13 @@ export function testApi(
     /** Whether the Claude view is showing. */
     sessionsViewVisible: () => sessionsTree.visible,
     claudeTerminalActive,
+    /** The `devdesk` command's path, and how many of its requests this window has handled. */
+    cliCommand: () => cli.command,
+    cliHandled: () => cli.handled,
+    /** Adds a note for Claude on lines `start`-`end` (0-based) of `file` in the worktree at `featureDir`, as the diff's comment box does. */
+    addReviewNote: (file: string, featureDir: string, start: number, end: number, text: string) =>
+      review.addAt(vscode.Uri.file(file), featureDir, new vscode.Range(start, 0, end, 0), text),
+    /** Notes for Claude not sent yet, by worktree directory. */
+    reviewNoteCounts: () => Object.fromEntries(review.counts()),
   };
 }

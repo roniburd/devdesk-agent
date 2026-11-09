@@ -279,6 +279,8 @@
     // One line under the title (devdesk.board.cardLine, the ☰ button): what Claude asks in Needs you, what it is doing in Working.
     const ask = showLine ? s.ask : '';
     if (showLine && s.doing) card.append(el('div', 'doing', s.doing));
+    // The note Claude set on its card (`devdesk note`).
+    if (s.note) card.append(el('div', 'note', `\u{1F4CC} ${s.note}`));
     // Needs you: what Claude asks, in one line, under what kind of ask it is.
     if (ask) {
       const box = el('div', 'ask');
@@ -498,7 +500,9 @@
     plan.title = 'Start it in plan mode: Claude explores and presents a plan before changing anything';
     const spec = action('Spec', 'spec', t.id, false, off);
     spec.title = 'Start it with a design spec first (devdesk.board.specPrompt)';
-    acts.append(start, plan, spec, action('Edit', 'edit', t.id, false, off), action('Delete', 'delete', t.id, false, off));
+    const draft = action('Draft', 'draft', t.id, false, off);
+    draft.title = 'Start a session with it typed at Claude\'s prompt, not sent: edit it there, then press Enter';
+    acts.append(start, plan, spec, draft, action('Edit', 'edit', t.id, false, off), action('Delete', 'delete', t.id, false, off));
     card.append(acts);
     return card;
   }
@@ -1802,11 +1806,47 @@
       parts.push(el('div', 'stats-note', 'It keeps counting when you close this, and what is counted is saved.'));
       waiting.replaceChildren(...parts);
     }
-    function show(u) {
+    /**
+     * Claude's plan limits (for the whole account, so above the project): % of the 5-hour and weekly limits used, with a
+     * bar and when each resets; or, while DevDesk's status line that records them is not installed, the offer to install it.
+     */
+    function limitsPart(l) {
+      if (l && l.view) {
+        const box = el('div', 'stats-limits');
+        box.append(section(`Plan limits${l.view.asOf ? ` (${l.view.asOf})` : ''}`));
+        for (const r of l.view.rows) {
+          const line = el('div', 'stats-limit');
+          const bar = el('meter', 'stats-limit-bar');
+          bar.min = 0;
+          bar.max = 100;
+          bar.low = 70;
+          bar.high = 90;
+          bar.optimum = 0;
+          bar.value = r.percent;
+          bar.setAttribute('aria-label', `${r.label} limit used`);
+          line.append(el('span', 'stats-label', r.label), bar, el('span', 'stats-num', r.percentText), el('span', 'stats-limit-reset', r.resetsText));
+          if (r.resetsAt) line.title = `Resets ${new Date(r.resetsAt).toLocaleString()}`;
+          box.append(line);
+        }
+        return box;
+      }
+      if (l && l.setup) {
+        const line = el('div', 'stats-note stats-limits-setup', "Claude's 5-hour and weekly limits: ");
+        const b = button('link', 'Show…', () => send('setupLimits'));
+        b.title = "Install DevDesk's Claude status line, which records them (Claude.ai Pro and Max)";
+        line.append(b);
+        return line;
+      }
+      return undefined;
+    }
+    function show(u, limits) {
       if (pop.hidden || !u) return;
       const calls = (d) => `${d.requests} calls${d.failed ? `, ${d.failed} failed` : ''}`;
       const all = u.scope.kind === 'all';
-      const parts = [el('div', 'stats-title', TITLE), scopeLine(u), head(), section(all ? 'Claude sessions' : 'Claude sessions here')];
+      const parts = [el('div', 'stats-title', TITLE)];
+      const lp = limitsPart(limits);
+      if (lp) parts.push(lp);
+      parts.push(scopeLine(u), head(), section(all ? 'Claude sessions' : 'Claude sessions here'));
       for (const p of u.periods) parts.push(row(p.label, p.sessions, `${p.sessions.requests} requests`));
       const places = (u.today.places || []).slice(0, 5);
       if (places.length > (all ? 0 : 1)) {
@@ -2101,7 +2141,7 @@
     },
     openPicker: (m) => composer.openPicker(m.picker),
     clearBox: (m) => composer.clearBox(m.started),
-    usage: (m) => stats.show(m.usage),
+    usage: (m) => stats.show(m.usage, m.limits),
     usageProgress: (m) => stats.progress(m.progress),
   };
   window.addEventListener('message', (ev) => {

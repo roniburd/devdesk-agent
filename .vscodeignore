@@ -10,3 +10,4 @@ vitest.config.ts
 .gitignore
 Config
 vsix/**
+docs/**

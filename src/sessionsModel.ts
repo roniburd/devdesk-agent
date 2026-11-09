@@ -5,6 +5,8 @@ import * as vscode from 'vscode';
 import { findDescendant, listProcesses } from './core/processes';
 import { endedDir, listableEnded, readEndedRecords, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
+import { cardsWithProgramStatus, programStatusDirIn, readProgramStatuses } from './core/programStatus';
+import { cardsWithNotes, notesDirIn, readNotes, staleNotes } from './core/devdeskCli';
 import { ChildrenReader } from './core/sessionChildren';
 import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
 import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
@@ -290,7 +292,7 @@ export class SessionsModel implements vscode.Disposable {
       cards.map(async (card) => {
         if (!card.transcriptPath) return;
         const live = card.pid !== undefined && card.state !== 'stopped' && processAlive(card.pid);
-        const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live });
+        const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live, since: card.sessionStartedAt });
         if (children.length) card.children = children;
       }),
     );
@@ -445,12 +447,16 @@ export class SessionsModel implements vscode.Disposable {
       // Showing everything also covers your own (default) tmux server.
       if (showAll && server !== DEFAULT_SERVER) listing.push(listPanes(this.o.tmux(DEFAULT_SERVER), DEFAULT_SERVER));
       const registryDir = this.o.claudeSessionsDir();
-      const [paneLists, records, ended, procs, registry] = await Promise.all([
+      const [paneLists, records, ended, procs, registry, statuses, notes] = await Promise.all([
         Promise.all(listing),
         readHookRecords(dir, this.transcriptEnds),
         readEndedRecords(endedDir(dir)),
         listProcesses(),
         registryDir ? readRegistry(registryDir) : Promise.resolve([]),
+        // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without hooks.
+        readProgramStatuses(programStatusDirIn(dir), processAlive),
+        // Notes Claude set on its cards (`devdesk note`), by pane.
+        readNotes(notesDirIn(dir)),
       ]);
       steps.mark('list');
       const tmuxPanes = paneLists.flat();
@@ -471,7 +477,10 @@ export class SessionsModel implements vscode.Disposable {
       steps.mark('forks');
       const split = splitRecords(records, panes, processAlive);
       const { listed, stale } = listableEnded(ended, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])));
-      const all = buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed);
+      const all = cardsWithNotes(
+        cardsWithProgramStatus(buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed), statuses),
+        notes,
+      );
       // The dead record that shows a crash is deleted below: keep the mark while the session stays stopped.
       for (const c of all) if (c.state === 'stopped' && this.crashed.has(c.id)) c.crashed = true;
       this.crashed = new Set(all.filter((c) => c.crashed).map((c) => c.id));
@@ -484,6 +493,9 @@ export class SessionsModel implements vscode.Disposable {
       for (const r of split.dead) void removeDead(dir, r);
       // Running again (resumed by an older hook script, which leaves the ended record), or nothing left to resume.
       for (const r of stale) void removeEndedRecord(endedDir(dir), r.sessionId);
+      // Notes of panes that are gone, on the servers just listed.
+      const listedPanes = new Map(listing.map((_, i) => [i === 0 ? server : DEFAULT_SERVER, paneLists[i].map((p) => p.paneId)] as const));
+      for (const name of staleNotes(notes.keys(), listedPanes)) void unlink(join(notesDirIn(dir), name)).catch(() => undefined);
       // Every session, also those of other workspaces: a window that lists them may not be open.
       void this.park(all, records, server);
       // What changed since the state files were read, and the sessions just started: as `publish` showed them.
@@ -566,7 +578,7 @@ export class SessionsModel implements vscode.Disposable {
       cards.map(async (card) => {
         if (card.children !== undefined || !card.transcriptPath || !parkable(card, server)) return card;
         const live = card.pid !== undefined && processAlive(card.pid);
-        const children = await this.parkChildrenReader.read(card.transcriptPath, { finishedLimit, live });
+        const children = await this.parkChildrenReader.read(card.transcriptPath, { finishedLimit, live, since: card.sessionStartedAt });
         if (!children.length) return card;
         const copy = { ...card, children };
         original.set(copy, card);

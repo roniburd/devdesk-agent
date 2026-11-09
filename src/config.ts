@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
 import { parseModels } from './core/composer';
+import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
+import { isSortMode, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { claudeConfigFilePath } from './core/trust';
@@ -12,6 +14,7 @@ import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
 import { noteLatency } from './log';
+import { programStatusLaunchWrapper } from './programStatusLaunch';
 
 export function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration('devdesk');
@@ -220,7 +223,22 @@ export function sessionsTmuxInstallCommand(): string {
  */
 export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode()): string {
   const c = cfg();
-  return claudeShellCommand({ command: c.get<string>('sessions.command'), path: claudeBinary(), args: c.get<string>('sessions.claudeArgs') }, joinArgs(mode.args, extraArgs));
+  const command = c.get<string>('sessions.command');
+  const wrapper = !command?.trim() && sessionsProgramStatus() ? programStatusLaunchWrapper(claudeConfigDir(), programStatusDir()) : undefined;
+  return claudeShellCommand({ command, path: claudeBinary(), args: c.get<string>('sessions.claudeArgs'), wrapper }, joinArgs(mode.args, extraArgs));
+}
+
+/**
+ * New sessions run Claude under DevDesk's Program Status relay, which gets Claude to report its state (OSC 7501) to a
+ * file per pane (setting `devdesk.sessions.programStatus`).
+ */
+export function sessionsProgramStatus(): boolean {
+  return cfg().get<boolean>('sessions.programStatus', true);
+}
+
+/** Where the Program Status relay writes each pane's status: `status` in the sessions state directory. */
+export function programStatusDir(): string {
+  return programStatusDirIn(sessionsStateDir());
 }
 
 /** The Claude binary new sessions run (setting `devdesk.sessions.claudePath`; empty: the toolbox Claude, else `claude` on PATH). */
@@ -267,6 +285,20 @@ export function sessionsReadAfterMs(): number {
  */
 export function sessionsResortWorkingMs(): number {
   return numberSetting('sessions.resortWorkingMinutes', 5, 0) * 60_000;
+}
+
+/** How the Claude view and the Claude Board order sessions (setting `devdesk.sessions.sort`): `urgency` or `attention`. */
+export function sessionsSort(): SortMode {
+  const v = cfg().get<string>('sessions.sort');
+  return isSortMode(v) ? v : 'urgency';
+}
+
+/**
+ * With `urgency` order, an unread finished turn sorts above working sessions for this long (setting
+ * `devdesk.sessions.recentlyFinishedMinutes`, at least 1).
+ */
+export function sessionsRecentlyFinishedMs(): number {
+  return numberSetting('sessions.recentlyFinishedMinutes', 15, 1) * 60_000;
 }
 
 /** Unread sessions sort above every read one (setting `devdesk.sessions.unreadFirst`); else only within their state. */
@@ -443,6 +475,18 @@ export function boardLaneWidth(): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.max(MIN_LANE_WIDTH, Math.round(v)) : DEFAULT_LANE_WIDTH;
 }
 
+/** Default of `devdesk.board.pasteSettleMs`. */
+export const DEFAULT_PASTE_SETTLE_MS = 500;
+
+/**
+ * How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter
+ * (setting `devdesk.board.pasteSettleMs`; 0 or more, and 1 ms more per 4 KB pasted: `pasteSubmitDelayMs`).
+ */
+export function boardPasteSettleMs(): number {
+  const v = cfg().get<number>('board.pasteSettleMs', DEFAULT_PASTE_SETTLE_MS);
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.round(v)) : DEFAULT_PASTE_SETTLE_MS;
+}
+
 /** Working and Needs you cards show one line on what Claude is doing or asks (setting `devdesk.board.cardLine`, on by default; the board's ☰ button toggles it). */
 export function boardCardLine(): boolean {
   return cfg().get<boolean>('board.cardLine', true);
@@ -593,4 +637,14 @@ export function usageHistoryMaxBytes(): number {
 /** What the 📊 popup and the Claude Usage page show until a project is chosen in them (setting `devdesk.usage.defaultScope`). */
 export function usageDefaultScope(): 'project' | 'all' {
   return cfg().get<string>('usage.defaultScope') === 'all' ? 'all' : 'project';
+}
+
+/** Whether this window takes requests from the `devdesk` command Claude runs (setting `devdesk.cli.enabled`). */
+export function cliEnabled(): boolean {
+  return cfg().get<boolean>('cli.enabled', true);
+}
+
+/** Whether the 📊 popup shows Claude's plan limits, or offers DevDesk's status line to record them (setting `devdesk.usage.planLimits`). */
+export function usagePlanLimits(): boolean {
+  return cfg().get<boolean>('usage.planLimits', true);
 }

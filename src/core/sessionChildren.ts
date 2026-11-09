@@ -231,6 +231,11 @@ export interface ChildrenOptions {
   finishedLimit: number;
   /** False when the session's Claude process is gone: nothing it started can still be running. */
   live: boolean;
+  /**
+   * When the running Claude process started the session (a resume, or a /clear): what started before ran in an earlier
+   * process, which is gone, so it cannot still be running either.
+   */
+  since?: number;
 }
 
 /** Transcripts scanned so far, by path. Reuse one across refreshes so each refresh reads only what was appended. */
@@ -267,7 +272,7 @@ export class ChildrenReader {
     } else if (l.kind === 'workflow' && l.runId) {
       await this.workflow(base, l, sessionDir, options);
     }
-    if (!options.live) stopAll(base);
+    if (!options.live || (options.since !== undefined && l.startedAt !== undefined && l.startedAt < options.since)) stopAll(base);
     return base;
   }
 

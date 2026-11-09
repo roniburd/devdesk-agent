@@ -90,6 +90,15 @@ describe('buildBoard', () => {
     expect(stuck.lookLabel).toBe('NO PROGRESS (STUCK?)');
   });
 
+  it("shows the note Claude set on its card (devdesk note), in its hover too, and finds it", () => {
+    const board = buildBoard([card('a', { note: 'waiting for CI' }), card('b')], [], opts);
+    const [a, b] = ['a', 'b'].map((id) => board.lanes.flatMap((l) => l.sessions).find((s) => s.id === id)!);
+    expect(a.note).toBe('waiting for CI');
+    expect(a.hoverParts).toContainEqual({ label: "Claude's note", text: 'waiting for CI' });
+    expect(a.search.all).toContain('waiting for ci');
+    expect(b.note).toBeUndefined();
+  });
+
   it('marks the card whose Claude terminal is in front', () => {
     const board = buildBoard([card('a'), card('b')], [], { ...opts, focused: 'b' });
     const flags = board.lanes.flatMap((l) => l.sessions).map((s) => [s.id, s.focused]);

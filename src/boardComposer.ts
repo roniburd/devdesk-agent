@@ -34,7 +34,7 @@ import { claudeNeedsTrust } from './claudeTrust';
 import { sessionName } from './core/tmux';
 import { MementoValue } from './state/mementoState';
 import { trustNotice } from './core/trust';
-import { promptArg } from './core/shell';
+import { prefillArg, promptArg } from './core/shell';
 import { boardModels, boardOpensSession, boardPromptPlacement, boardSpecPrompt, sessionsClaudeCommand, sessionsDefaultMode, sessionsModes, sessionsTmuxServer, workspaceRoot } from './config';
 import type { SessionCard } from './core/sessions';
 import type { SessionsModel } from './sessionsModel';
@@ -89,8 +89,11 @@ export interface ComposerInfo {
 /** A row in the composer's `/` or `@` popup: what it shows, and what picking it puts in the prompt (`@` rows use some fields). */
 export type Completion = CommandRow;
 
-/** How a prompt for later is started: as saved, in plan mode, or behind the spec instruction. */
-export type StartHow = 'start' | 'plan' | 'spec';
+/**
+ * How a prompt for later is started: as saved, in plan mode, behind the spec instruction, or as a draft (typed at the
+ * new session's prompt, not sent).
+ */
+export type StartHow = 'start' | 'plan' | 'spec' | 'draft';
 
 /** How `start` launches a session besides the choice. */
 export interface StartOptions {
@@ -111,6 +114,11 @@ export interface StartOptions {
    * a command that opens a panel instead (category D).
    */
   turn?: boolean;
+  /**
+   * The prompt is typed at the new session's prompt, not sent (Claude's `--prefill`), as a draft to edit there: no turn
+   * starts, and the session's terminal opens.
+   */
+  draft?: boolean;
 }
 
 /**
@@ -305,6 +313,8 @@ export class BoardComposer implements vscode.Disposable {
     // Nor on another model than the one saved.
     if (saved && !allowed.models.includes(saved)) throw new Error(`The model ${saved} is not offered any more: Edit the prompt to pick its model.`);
     const choice = parseChoice(item.choice ?? {}, allowed);
+    // A draft is text to edit at Claude's prompt, whatever it holds (a command too): typed in as saved, not run.
+    if (how === 'draft') return this.start(item.prompt.trim(), choice, { draft: true, ui });
     const submission = await this.classify(item.prompt, choice.where);
     if (how !== 'start' && submission.kind === 'unknown') {
       // As the unknown-command handler does, but sent as text it still starts as Plan or Spec said.
@@ -362,23 +372,23 @@ export class BoardComposer implements vscode.Disposable {
     // Claude asks to trust the folder first, and reports no turn until answered: its card shows as it is meanwhile.
     let asksTrust = false;
     const untrusted = async (dir: string) => (asksTrust = await this.warnIfUntrusted(dir, options.ui));
-    const open = options.open ?? boardOpensSession();
+    const open = options.draft || (options.open ?? boardOpensSession());
     const launchMode = options.mode ?? pickMode(sessionsModes(), choice.mode);
     // The directories added with /add-dir go to this launch only.
     const dirs = this.launchDirs;
     const extraArgs = joinArgs(choiceArgs(choice), addDirArgs(dirs), options.extraArgs ?? '');
     const text = launchPrompt(prompt, { ultracode: options.ultracode === true, prefix: options.prefix });
-    const launched = this.launched(choice.model, options.turn === false ? undefined : prompt, () => asksTrust);
+    const launched = this.launched(choice.model, options.turn === false || options.draft ? undefined : prompt, () => asksTrust);
     let started = true;
     if (choice.where === 'new') {
       const noWorktrees = noWorktreesReason(root);
       if (noWorktrees) throw new Error(noWorktrees);
       if (open) await this.beforeOpen();
-      started = await newWorktreeSession(this.model, this.tree, this.tasks, prompt, { name: choice.worktreeName, prompt: text, mode: launchMode, extraArgs, open, started: launched, untrusted });
+      started = await newWorktreeSession(this.model, this.tree, this.tasks, prompt, { name: choice.worktreeName, prompt: text, draft: options.draft, mode: launchMode, extraArgs, open, started: launched, untrusted });
     } else {
       const opens = (await untrusted(feature.dir)) || open;
       if (opens) await this.beforeOpen();
-      await startNumbered(this.model, this.tree, sessionName(feature), feature.dir, sessionsClaudeCommand(joinArgs(extraArgs, promptArg(text)), launchMode), opens, launched);
+      await startNumbered(this.model, this.tree, sessionName(feature), feature.dir, sessionsClaudeCommand(joinArgs(extraArgs, options.draft ? prefillArg(text) : promptArg(text)), launchMode), opens, launched);
     }
     if (started && dirs.length) {
       this.launchDirs = this.launchDirs.filter((d) => !dirs.includes(d));

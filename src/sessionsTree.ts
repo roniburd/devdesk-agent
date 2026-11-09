@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { runningCount, type SessionChild } from './core/sessionChildren';
 import type { SessionCard } from './core/sessions';
 import {
-  attentionOrder,
   badgeFor,
   cardShown,
   cardSignature,
@@ -19,9 +18,10 @@ import {
   type Settle,
 } from './core/sessionsView';
 import { oneLine } from './core/text';
+import { sortSessions } from './core/urgency';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
 import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
-import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
+import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsRecentlyFinishedMs, sessionsSort, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
 import { hooksInstalled, hooksSettingsShown } from './hooksCommands';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
@@ -63,8 +63,8 @@ const SESSION_SCHEME = 'devdesk-session';
 const COLORS_KEY = 'devdesk.sessions.colors';
 
 /**
- * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in attention
- * order, unread ones marked (a dot badge, read titles greyed: `devdesk.sessions.unreadBadge`, `dimRead`), with a
+ * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in the order
+ * of `devdesk.sessions.sort`, unread ones marked (a dot badge, read titles greyed: `devdesk.sessions.unreadBadge`, `dimRead`), with a
  * needs-input badge and a "needs you" status bar item.
  */
 export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscode.FileDecorationProvider, vscode.Disposable {
@@ -112,7 +112,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       this.decorationsChanged,
       vscode.window.registerFileDecorationProvider(this),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('devdesk.sessions.groupByWorktree') || e.affectsConfiguration('devdesk.sessions.resortWorkingMinutes')) this.changed.fire(undefined);
+        const reorders = ['groupByWorktree', 'resortWorkingMinutes', 'sort', 'recentlyFinishedMinutes', 'unreadFirst', 'idleMinutes', 'stuckMinutes'];
+        if (reorders.some((k) => e.affectsConfiguration(`devdesk.sessions.${k}`))) this.changed.fire(undefined);
         if (e.affectsConfiguration('devdesk.sessions.dimRead') || e.affectsConfiguration('devdesk.sessions.unreadBadge')) this.decorationsChanged.fire(undefined);
       }),
       model.onDidChange(() => this.update()),
@@ -170,12 +171,21 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     return { order: this.settledOrder, everyMs: sessionsResortWorkingMs() };
   }
 
-  /** Cards in attention order. */
+  /** Cards in the order `devdesk.sessions.sort` names (urgency or attention). */
   get cards(): SessionCard[] {
-    return attentionOrder(this.model.current, Date.now(), sessionsIdleMs(), this.read.unread, sessionsUnreadFirst(), this.settle);
+    return sortSessions(this.model.current, {
+      mode: sessionsSort(),
+      now: Date.now(),
+      idleMs: sessionsIdleMs(),
+      stuckMs: sessionsStuckMs(),
+      recentMs: sessionsRecentlyFinishedMs(),
+      unread: this.read.unread,
+      unreadFirst: sessionsUnreadFirst(),
+      settle: this.settle,
+    });
   }
 
-  /** Top-level rows: the worktrees with sessions or a recorded task, each with its cards in attention order. */
+  /** Top-level rows: the worktrees with sessions or a recorded task (by their first card), each with its cards in order. */
   groups(): WorktreeGroup[] {
     return groupCards(this.cards, this.model.featureList, this.tasks.all());
   }

@@ -3,7 +3,17 @@ import type { HistoryAnswer } from '../core/boardHistory';
 import { type KeepPatch, type KeptState, parseKeep } from '../core/boardKept';
 import type { HistoryHit } from '../core/historySearch';
 import { parseScope, type ScopedPopover, type UsageScope } from '../core/usageScope';
+import type { LimitsView } from '../core/statusLine';
 import type { CountProgress } from '../usageCount';
+
+/**
+ * The 📊 popup's plan limits: the 5-hour and weekly use (`view`, undefined without numbers), or `setup` when DevDesk's
+ * status line, which records them, is not installed (and `devdesk.usage.planLimits` is on).
+ */
+export interface PlanLimits {
+  view?: LimitsView;
+  setup?: boolean;
+}
 import type { NoticeTone } from './types';
 
 // The board webview's protocol. `media/board.js` handles what the extension posts in `HOST_MESSAGES`; what it posts
@@ -42,7 +52,7 @@ export type PanelMessage =
   /** Text to put at the caret (`@` mentions of attached files or a pasted image). */
   | { type: 'insert'; text: string }
   /** The 📊 popover's numbers, for the window's usage scope, with the projects to choose from. */
-  | { type: 'usage'; usage: ScopedPopover }
+  | { type: 'usage'; usage: ScopedPopover; limits?: PlanLimits }
   /** How far the usage count in progress has got, for the 📊 popover while it shows "Counting…" (no stored days). */
   | { type: 'usageProgress'; progress: Omit<CountProgress, 'stored'> }
   /**
@@ -105,9 +115,9 @@ export type BoardMessage =
   | { type: 'rendered'; ms: number; cards: number; postedAt?: number; script?: number; rebuilt?: number };
 
 /** Messages with no fields. */
-const BARE = ['ready', 'settings', 'toggleCardLine', 'noticeDismissed', 'forgetTypedModels', 'usage', 'usageMore', 'cancelSearch'] as const;
+const BARE = ['ready', 'settings', 'toggleCardLine', 'noticeDismissed', 'forgetTypedModels', 'usage', 'usageMore', 'cancelSearch', 'setupLimits'] as const;
 /** A session card's (`open`, `fork`, `end`) or prompt for later's buttons, on the card `id`. */
-const CARD_ACTIONS = ['open', 'fork', 'end', 'start', 'plan', 'spec', 'edit', 'delete'] as const;
+const CARD_ACTIONS = ['open', 'fork', 'end', 'start', 'plan', 'spec', 'draft', 'edit', 'delete'] as const;
 
 /** A Claude session id, as history messages name past sessions. */
 const HISTORY_ID = /^[\w-]{1,100}$/;

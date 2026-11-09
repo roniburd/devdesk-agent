@@ -7,7 +7,7 @@ import { endedDir, type EndedRecord, readEndedRecords } from './core/ended';
 import { parkedIn } from './core/park';
 import { processAlive, readHookRecords } from './core/sessions';
 import { readRegistry } from './core/sessionInfo';
-import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, killSessionArgs, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, killSessionArgs, launchTags, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
 import { type OpenTerminal, ReattachTerminals, reattachKey, type RestoreOutcome } from './state/reattachTerminals';
@@ -274,8 +274,10 @@ export async function startClaudeDetached(session: string, dir: string, command 
  */
 function newSessionShell(session: string, dir: string, command: string, detached = false): { shellPath: string; shellArgs: string[] } {
   const { bin = 'tmux', configFile } = sessionsTmuxSetup();
-  const args = attachArgs(session, dir, tmuxCommand(command), sessionEnv(bin), sessionsTmuxOptions(), detached);
-  return { shellPath: bin, shellArgs: serverArgs(sessionsTmuxServer(), args, configFile) };
+  const server = sessionsTmuxServer();
+  const env = { ...sessionEnv(bin), ...launchTags(session, server) };
+  const args = attachArgs(session, dir, tmuxCommand(command), env, sessionsTmuxOptions(), detached);
+  return { shellPath: bin, shellArgs: serverArgs(server, args, configFile) };
 }
 
 /**
@@ -291,7 +293,10 @@ function tmuxCommand(command: string): string {
   return scripted.command;
 }
 
-/** A Claude session's environment. The status hook asks tmux for the session name, so it is told which tmux when not the one on PATH. */
+/**
+ * A Claude session's environment. The status hook asks tmux for the session name of a session without DevDesk's tags
+ * (`launchTags`), so it is told which tmux when not the one on PATH.
+ */
 function sessionEnv(bin: string): Record<string, string> {
   return bin === 'tmux' ? sessionsClaudeEnv() : { ...sessionsClaudeEnv(), DEVDESK_TMUX: bin };
 }

@@ -73,6 +73,18 @@ describe('withRecord', () => {
     expect(withRecord(waiting, rec()).askSummary).toBeUndefined();
   });
 
+  it('takes what the record waits on, and drops it once it waits no more', () => {
+    const waiting = withRecord(card({ state: 'working' }), rec({ event: 'PermissionRequest', state: 'waiting', detail: 'Asking: which?', waitKind: 'question' }));
+    expect(waiting.waitKind).toBe('question');
+    expect(withRecord(waiting, rec({ updatedAt: NOW + 1 })).waitKind).toBeUndefined();
+  });
+
+  it('takes what the record waits on, and drops it once it waits no more', () => {
+    const waiting = withRecord(card({ state: 'working' }), rec({ event: 'PermissionRequest', state: 'waiting', detail: 'Asking: which?', waitKind: 'question' }));
+    expect(waiting.waitKind).toBe('question');
+    expect(withRecord(waiting, rec({ updatedAt: NOW + 1 })).waitKind).toBeUndefined();
+  });
+
   it('keeps the prompt when the record has none, and takes asksQuestion from it', () => {
     const next = withRecord(card({ state: 'working' }), rec({ event: 'Stop', state: 'done', detail: 'Shall I?', prompt: undefined, asksQuestion: true }));
     expect(next).toMatchObject({ prompt: 'run the tests', asksQuestion: true });

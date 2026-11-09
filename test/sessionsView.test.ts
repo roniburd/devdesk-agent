@@ -346,6 +346,16 @@ describe('attention', () => {
     expect(look({ state: 'waiting', detail: 'Plan ready for your review' })).toBe('plan');
     expect(look({ state: 'waiting', detail: 'Claude needs your permission to use Bash' })).toBe('permission');
     expect(look({ state: 'waiting', detail: 'Claude needs your input' })).toBe('input');
+    // A record that says what it waits on wins over its detail.
+    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'question' })).toBe('question');
+    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'plan' })).toBe('plan');
+    expect(look({ state: 'waiting', detail: 'Asking: which one?', waitKind: 'permission' })).toBe('permission');
+    expect(look({ state: 'waiting', detail: 'Needs your permission', waitKind: 'elicitation' })).toBe('input');
+    // A record that says what it waits on wins over its detail.
+    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'question' })).toBe('question');
+    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'plan' })).toBe('plan');
+    expect(look({ state: 'waiting', detail: 'Asking: which one?', waitKind: 'permission' })).toBe('permission');
+    expect(look({ state: 'waiting', detail: 'Needs your permission? no', waitKind: 'elicitation' })).toBe('input');
     expect(look({ state: 'blocked', detail: 'rate_limit: Too many requests' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'You have reached your usage limit' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'API Error: 500' })).toBe('error');

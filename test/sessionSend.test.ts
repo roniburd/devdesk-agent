@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { claudeIsWorking, claudePromptIsEmpty } from '../src/core/claudePrompt';
 import type { SessionCard } from '../src/core/sessions';
 import { currentCard, missingArgument, runningSessions, sendBlocker, sessionPicks, WHILE_WORKING } from '../src/core/sessionSend';
-import { paneTarget, SEND_KEYS_CHUNK_BYTES, sendKeysArgs, typedLine } from '../src/core/tmux';
+import { commandLine, commandParts, INERT_ESCAPE, paneTarget, PASTE_BYTES_PER_MS, pasteArgs, pasteBufferName, pastedText, pasteSubmitDelayMs, typeArgs, typedLine } from '../src/core/tmux';
 
 const card = (id: string, over: Partial<SessionCard> = {}): SessionCard => ({
   id,
@@ -34,54 +34,94 @@ describe('typedLine', () => {
   });
 });
 
-describe('sendKeysArgs', () => {
-  it('types the text literally, then presses Enter in a second command', () => {
-    expect(sendKeysArgs('%3', '/compact keep the tests')).toEqual({
-      type: [['send-keys', '-t', '%3', '-l', '--', '/compact keep the tests']],
+describe('pastedText', () => {
+  it('defuses ESC bytes, so a paste cannot end early or move the cursor', () => {
+    expect(pastedText('a\x1b[201~b\x1b')).toBe(`a${INERT_ESCAPE}[201~b${INERT_ESCAPE}`);
+    expect(pastedText('/rename esc\x1b[31mred')).toBe('/rename esc<ESC>[31mred');
+  });
+  it('keeps line breaks (as \\n) and tabs, drops other control characters', () => {
+    expect(pastedText('a\r\nb\rc\nd\te\x03f\x7fg\x00')).toBe('a\nb\nc\nd\tefg');
+  });
+  it('keeps everything else as it is: quotes, $, backticks, ;, key names, unicode', () => {
+    const text = `$HOME \`uname\` "q" 'q' ; \\; Enter C-c ✓ -x`;
+    expect(pastedText(text)).toBe(text);
+  });
+});
+
+describe('commandLine', () => {
+  it('is one line, as Claude runs a pasted /command only on one line', () => {
+    expect(commandLine('  /btw why\nis it\r\nslow?\t ')).toBe('/btw why is it slow?');
+    expect(commandLine('/rename a\x1b[Db')).toBe('/rename a<ESC>[Db');
+  });
+  it('does not end with a backslash, which Claude Code reads with Enter as "insert a newline"', () => {
+    expect(commandLine('/export C:\\out\\')).toBe('/export C:\\out\\ ');
+    expect(commandLine('/btw is the path foo\\\n')).toBe('/btw is the path foo\\ ');
+    expect(commandLine('/btw a\\b')).toBe('/btw a\\b');
+  });
+  it('keeps a trailing ; and key names as text (a paste reads nothing as a key)', () => {
+    expect(commandLine('/rename Enter C-c;')).toBe('/rename Enter C-c;');
+  });
+});
+
+describe('pasteArgs', () => {
+  it('loads the file into its own buffer, pastes it bracketed and deletes it, then Enter on its own', () => {
+    expect(pasteArgs('%3', 'devdesk-send-ab12', '/tmp/x/text')).toEqual({
+      load: ['load-buffer', '-b', 'devdesk-send-ab12', '/tmp/x/text'],
+      paste: ['paste-buffer', '-d', '-p', '-b', 'devdesk-send-ab12', '-t', '%3'],
+      drop: ['delete-buffer', '-b', 'devdesk-send-ab12'],
       submit: ['send-keys', '-t', '%3', 'Enter'],
     });
-  });
-  it('keeps key names, a trailing ; and a leading - as text', () => {
-    // tmux drops an argument's trailing `;` (a command separator) unless it is escaped: `\;` reaches the pane as `;`.
-    expect(sendKeysArgs('=cc-main:', '/rename Enter C-c;').type).toEqual([['send-keys', '-t', '=cc-main:', '-l', '--', '/rename Enter C-c\\;']]);
-    expect(sendKeysArgs('%1', '/rename a\\;').type[0].at(-1)).toBe('/rename a\\\\;');
-    expect(sendKeysArgs('%1', '-x').type[0].slice(-2)).toEqual(['--', '-x']);
-  });
-  it('does not end the typed text with a backslash, which Claude Code reads with Enter as "insert a newline"', () => {
-    const typed = (text: string) => sendKeysArgs('%1', text).type.map((t) => t.at(-1)).join('');
-    expect(typed('/export C:\\out\\')).toBe('/export C:\\out\\ ');
-    expect(typed('/btw is the path foo\\\n')).toBe('/btw is the path foo\\ ');
-    expect(typed('/btw a\\b')).toBe('/btw a\\b');
-    const long = '/btw ' + 'y'.repeat(SEND_KEYS_CHUNK_BYTES * 2) + '\\';
-    const pieces = sendKeysArgs('%1', long).type.map((t) => t.at(-1)!);
-    expect(pieces.at(-1)!.endsWith('\\ ')).toBe(true);
-    expect(pieces.every((p) => Buffer.byteLength(p) <= SEND_KEYS_CHUNK_BYTES)).toBe(true);
-  });
-  it('flattens line breaks', () => {
-    expect(sendKeysArgs('%1', '/btw a\nb').type[0].at(-1)).toBe('/btw a b');
-  });
-  it('types a long line in pieces tmux accepts (it refuses a command over about 16 KB), then one Enter', () => {
-    const long = '/btw ' + 'y'.repeat(20000);
-    const { type, submit } = sendKeysArgs('%1', long);
-    expect(type.length).toBe(3);
-    expect(type.map((t) => t.at(-1)).join('')).toBe(long);
-    for (const t of type) {
-      expect(t.slice(0, 5)).toEqual(['send-keys', '-t', '%1', '-l', '--']);
-      expect(Buffer.byteLength(t.at(-1)!)).toBeLessThanOrEqual(SEND_KEYS_CHUNK_BYTES);
-    }
-    expect(submit).toEqual(['send-keys', '-t', '%1', 'Enter']);
-  });
-  it('splits between characters, never inside one, and escapes a piece ending in ;', () => {
-    const wide = 'é'.repeat(SEND_KEYS_CHUNK_BYTES); // 2 bytes each
-    const pieces = sendKeysArgs('%1', wide).type.map((t) => t.at(-1)!);
-    expect(pieces.join('')).toBe(wide);
-    expect(pieces.every((p) => Buffer.byteLength(p) <= SEND_KEYS_CHUNK_BYTES)).toBe(true);
-    const semi = 'a'.repeat(SEND_KEYS_CHUNK_BYTES - 1) + ';' + 'b';
-    expect(sendKeysArgs('%1', semi).type.map((t) => t.at(-1))).toEqual(['a'.repeat(SEND_KEYS_CHUNK_BYTES - 1) + '\\;', 'b']);
+    expect(pasteArgs('=cc-main:', 'b', 'f').paste.at(-1)).toBe('=cc-main:');
   });
   it('rejects other targets', () => {
-    expect(() => sendKeysArgs('cc-main', '/x')).toThrow(/not a tmux pane target/);
-    expect(() => sendKeysArgs('=a:b:c', '/x')).toThrow();
+    expect(() => pasteArgs('cc-main', 'b', 'f')).toThrow(/not a tmux pane target/);
+    expect(() => pasteArgs('=a:b:c', 'b', 'f')).toThrow();
+  });
+});
+
+describe('commandParts', () => {
+  it('types /name before an argument, and pastes the argument', () => {
+    expect(commandParts('/rename a b ; c')).toEqual({ lead: '/rename ', rest: 'a b ; c' });
+    expect(commandParts('/plugin:skill-x do it')).toEqual({ lead: '/plugin:skill-x ', rest: 'do it' });
+    expect(commandParts('/btw ' + 'y'.repeat(20000)).rest.length).toBe(20000);
+  });
+  it('pastes a line with no argument, or not a command, whole', () => {
+    expect(commandParts('/cost')).toEqual({ lead: '', rest: '/cost' });
+    expect(commandParts('/cost ')).toEqual({ lead: '', rest: '/cost ' });
+    expect(commandParts('hello there')).toEqual({ lead: '', rest: 'hello there' });
+    expect(commandParts('/we$ird x')).toEqual({ lead: '', rest: '/we$ird x' });
+  });
+});
+
+describe('typeArgs', () => {
+  it('types literally', () => {
+    expect(typeArgs('%2', '/rename ')).toEqual(['send-keys', '-t', '%2', '-l', '--', '/rename ']);
+  });
+  it('refuses a trailing ; (tmux would read a command separator) and other targets', () => {
+    expect(() => typeArgs('%2', 'a;')).toThrow();
+    expect(() => typeArgs('cc-main', 'a')).toThrow(/not a tmux pane target/);
+  });
+});
+
+describe('pasteBufferName', () => {
+  it('names a DevDesk buffer, unique by its suffix', () => {
+    expect(pasteBufferName('0a1b')).toBe('devdesk-send-0a1b');
+    expect(pasteBufferName('a')).not.toBe(pasteBufferName('b'));
+    expect(() => pasteBufferName('a b')).toThrow();
+    expect(() => pasteBufferName('')).toThrow();
+  });
+});
+
+describe('pasteSubmitDelayMs', () => {
+  it('is the settle delay, and 1 ms more per 4 KB pasted', () => {
+    expect(pasteSubmitDelayMs(500, 0)).toBe(500);
+    expect(pasteSubmitDelayMs(500, 1)).toBe(501);
+    expect(pasteSubmitDelayMs(500, PASTE_BYTES_PER_MS * 10)).toBe(510);
+    expect(pasteSubmitDelayMs(0, 20000)).toBe(5);
+  });
+  it('takes a negative or broken setting as 0', () => {
+    expect(pasteSubmitDelayMs(-5, 0)).toBe(0);
+    expect(pasteSubmitDelayMs(Number.NaN, 4096)).toBe(1);
   });
 });
 

@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "0.5.76",
+  "version": "2.0.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -341,6 +341,16 @@
         "icon": "$(add)"
       },
       {
+        "command": "devdesk.usage.installStatusLine",
+        "title": "Show Claude Plan Limits (Install DevDesk's Status Line)",
+        "category": "DevDesk"
+      },
+      {
+        "command": "devdesk.usage.removeStatusLine",
+        "title": "Remove DevDesk's Claude Status Line",
+        "category": "DevDesk"
+      },
+      {
         "command": "devdesk.sessions.installHooks",
         "title": "Install Claude Status Hooks",
         "category": "Worktrees"
@@ -359,6 +369,50 @@
         "command": "devdesk.claude.openWorktree",
         "title": "Open a Worktree's Claude Session",
         "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.review.addNote",
+        "title": "Add Note for Claude",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.review.deleteNote",
+        "title": "Delete Note",
+        "category": "Worktrees",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devdesk.review.deleteThread",
+        "title": "Delete Notes Here",
+        "category": "Worktrees",
+        "icon": "$(close)"
+      },
+      {
+        "command": "devdesk.review.sendThread",
+        "title": "Send Notes to Claude",
+        "category": "Worktrees",
+        "icon": "$(send)"
+      },
+      {
+        "command": "devdesk.review.send",
+        "title": "Send Notes to Claude",
+        "category": "Worktrees",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devdesk.review.clear",
+        "title": "Clear Notes for Claude",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.cli.installSkill",
+        "title": "Teach Claude the devdesk Command (Install Skill)",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.cli.removeSkill",
+        "title": "Remove the devdesk Skill",
+        "category": "Claude"
       }
     ],
     "menus": {
@@ -569,6 +623,16 @@
           "command": "devdesk.sessions.markUnread",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\sread$/",
           "group": "read@1"
+        },
+        {
+          "command": "devdesk.review.send",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "review@1"
+        },
+        {
+          "command": "devdesk.review.clear",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "review@2"
         }
       ],
       "webview/context": [
@@ -716,6 +780,22 @@
         {
           "command": "devdesk.board.openFromEditorTitle",
           "when": "false"
+        },
+        {
+          "command": "devdesk.review.addNote",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.deleteNote",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.deleteThread",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.sendThread",
+          "when": "false"
         }
       ],
       "devdesk.sessions.color": [
@@ -791,6 +871,32 @@
           "group": "navigation@100",
           "when": "config.devdesk.board.enabled && config.devdesk.board.editorTitleButton && activeWebviewPanelId != devdesk.board"
         }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "devdesk.review.addNote",
+          "group": "inline",
+          "when": "commentController == devdesk.review"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "devdesk.review.sendThread",
+          "group": "navigation@1",
+          "when": "commentController == devdesk.review && !commentThreadIsEmpty"
+        },
+        {
+          "command": "devdesk.review.deleteThread",
+          "group": "navigation@2",
+          "when": "commentController == devdesk.review && !commentThreadIsEmpty"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "devdesk.review.deleteNote",
+          "group": "inline",
+          "when": "commentController == devdesk.review && comment == devdesk.reviewNote"
+        }
       ]
     },
     "keybindings": [
@@ -851,42 +957,63 @@
             "markdownDescription": "The Claude view nests sessions under their worktree. Off: it lists every session in one list, in attention order, each row naming its worktree. Toggle it with the Claude view's list button.",
             "order": 3
           },
+          "devdesk.sessions.sort": {
+            "type": "string",
+            "enum": [
+              "urgency",
+              "attention"
+            ],
+            "enumDescriptions": [
+              "What needs you first: needs you (question, permission, plan, input, blocked; the longest waiting first), unread turns finished in the last few minutes (devdesk.sessions.recentlyFinishedMinutes), working, stuck, then read or older finished ones, not running and parked; newest first within each.",
+              "The order from before: needs input, blocked, unread done, working, read done, idle, then the rest, newest first; devdesk.sessions.unreadFirst puts unread sessions above read ones."
+            ],
+            "default": "urgency",
+            "description": "How the Claude view and the Claude Board order Claude sessions: in each worktree, in the flat list, and in each board lane.",
+            "order": 4
+          },
+          "devdesk.sessions.recentlyFinishedMinutes": {
+            "type": "number",
+            "default": 15,
+            "minimum": 1,
+            "markdownDescription": "With `#devdesk.sessions.sort#` `urgency`: a Claude session whose turn finished less than this many minutes ago, and that you haven't read, sorts above working sessions.",
+            "order": 5
+          },
           "devdesk.sessions.unreadFirst": {
             "type": "boolean",
             "default": true,
-            "description": "Sort unread Claude sessions above every read one. When off, unread sessions only sort first within their state (needs input, blocked, working, ...).",
-            "order": 4
+            "markdownDescription": "With `#devdesk.sessions.sort#` `attention`: sort unread Claude sessions above every read one. When off, unread sessions only sort first within their state (needs input, blocked, working, ...).",
+            "order": 6
           },
           "devdesk.sessions.dimRead": {
             "type": "boolean",
             "default": true,
             "description": "Grey the titles of Claude sessions you have read, so unread ones stand out in the Claude view.",
-            "order": 5
+            "order": 7
           },
           "devdesk.sessions.unreadBadge": {
             "type": "boolean",
             "default": true,
             "description": "Show a ● badge at the end of unread Claude session rows in the Claude view.",
-            "order": 6
+            "order": 8
           },
           "devdesk.sessions.notifyWhenWaiting": {
             "type": "boolean",
             "default": true,
             "description": "Show a notification when a Claude session starts waiting for you.",
-            "order": 7
+            "order": 9
           },
           "devdesk.sessions.statusBar": {
             "type": "boolean",
             "default": true,
             "description": "Show a status bar item with the number of Claude sessions needing input; click it to open the next one.",
-            "order": 8
+            "order": 10
           },
           "devdesk.sessions.stuckMinutes": {
             "type": "number",
             "default": 10,
             "minimum": 1,
             "description": "A working Claude session with no progress (no hook event) for this many minutes shows as stuck (orange watch).",
-            "order": 9
+            "order": 11
           },
           "devdesk.sessions.idleMinutes": {
             "scope": "machine",
@@ -894,41 +1021,41 @@
             "default": 30,
             "minimum": 1,
             "description": "A finished Claude session not updated for this many minutes sorts after working and recently finished sessions (it still shows as done).",
-            "order": 10
+            "order": 12
           },
           "devdesk.sessions.resortWorkingMinutes": {
             "type": "number",
             "default": 5,
             "minimum": 0,
             "description": "Working Claude sessions keep their order in the Claude view and on the Claude Board for this many minutes, then sort again (newest first), so rows don't move each time a session does something. A session that starts working goes first among them. 0: always sorted.",
-            "order": 11
+            "order": 13
           },
           "devdesk.sessions.readAfterSeconds": {
             "type": "number",
             "default": 1.5,
             "minimum": 0,
             "description": "A Claude session shows in bold (unread) when anything happened in it since you last looked; its terminal must be in front for this many seconds to count as read.",
-            "order": 12
+            "order": 14
           },
           "devdesk.sessions.finishedSessions": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many parked (not running) Claude sessions the Claude view lists per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
-            "order": 13
+            "order": 15
           },
           "devdesk.sessions.showChildren": {
             "type": "boolean",
             "default": true,
             "description": "List what each Claude session spun off under its row: subagents (and their own subagents and shells), background shell commands, and workflows with their phases and agents. Read from the session's transcript.",
-            "order": 14
+            "order": 16
           },
           "devdesk.sessions.finishedChildren": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many finished subagents, shells and workflows the Claude view lists per level; older ones fold into one `N earlier finished` row. Running ones are always listed. Applies when `#devdesk.sessions.showChildren#` is on.",
-            "order": 15
+            "order": 17
           },
           "devdesk.sessions.pollSeconds": {
             "type": "number",
@@ -936,7 +1063,7 @@
             "minimum": 1,
             "maximum": 3600,
             "description": "How often (seconds) the Claude Sessions panel re-checks tmux while it is open or notifications are on.",
-            "order": 16
+            "order": 18
           }
         }
       },
@@ -1053,6 +1180,13 @@
             "scope": "machine",
             "markdownDescription": "Full shell command tmux runs when it creates a feature's Claude session, overriding `#devdesk.sessions.claudePath#` and `#devdesk.sessions.claudeArgs#`. Empty: `<claudePath> <claudeArgs>; exec $SHELL -l`.",
             "order": 5
+          },
+          "devdesk.sessions.programStatus": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Start new Claude sessions under DevDesk's Program Status relay (`python3`, `~/.claude/devdesk/devdesk_status.py`). It answers Claude Code's status probe (OSC 7501, Claude Code 2.1.295 or later), which tmux can't, so Claude reports whether it is working, waiting for an approval or an answer, or at its prompt. Sessions without status hooks then show that state, and sending to a session checks it instead of only reading the screen. Not used with `#devdesk.sessions.command#`. Applies to sessions started after you change it.",
+            "order": 6
           }
         }
       },
@@ -1326,6 +1460,13 @@
             "scope": "machine",
             "markdownDescription": "Claude Code's global config file, read (never written) before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
             "order": 14
+          },
+          "devdesk.board.pasteSettleMs": {
+            "type": "number",
+            "default": 500,
+            "minimum": 0,
+            "markdownDescription": "How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter, so Claude has taken the paste in (1 ms more per 4 KB pasted). Raise it if a sent command stays typed at the session's prompt instead of running.",
+            "order": 15
           }
         }
       },
@@ -1477,13 +1618,33 @@
             "minimum": 0.1,
             "markdownDescription": "The most disk space the token usage history may take (MB). Past it, the oldest days are dropped, whatever `#devdesk.usage.historyDays#` allows. A day takes a few KB.",
             "order": 3
+          },
+          "devdesk.usage.planLimits": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show how much of Claude's 5-hour and weekly plan limits you've used at the top of the board's 📊 popup (Claude.ai Pro and Max subscriptions). The numbers come from DevDesk's Claude status line (**Show Claude Plan Limits** command), which runs your own status line after it. While it isn't installed, the popup offers it; turn this off to hide that.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.cli",
+        "title": "devdesk Command",
+        "order": 9,
+        "properties": {
+          "devdesk.cli.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Let Claude sessions ask this window to open a file or a diff, or set a note on their card, with the `devdesk` command (`~/.claude/devdesk/devdesk`, written when this is on; `devdesk --help`). Requests go through files in a folder only you can open, `~/.claude/devdesk/ipc`; no port is opened. To tell Claude the command exists, run **Claude: Teach Claude the devdesk Command**.",
+            "order": 1
           }
         }
       },
       {
         "id": "devdesk-claude.tmux",
         "title": "tmux",
-        "order": 9,
+        "order": 10,
         "properties": {
           "devdesk.sessions.tmuxServer": {
             "type": "string",
@@ -1532,7 +1693,7 @@
       {
         "id": "devdesk-claude.advanced",
         "title": "Advanced",
-        "order": 10,
+        "order": 11,
         "properties": {
           "devdesk.sessions.stateDir": {
             "type": "string",

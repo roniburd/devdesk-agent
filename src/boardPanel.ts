@@ -21,6 +21,7 @@ import { truncate } from './core/sessionsView';
 import { type ScopedPopover, scopedPopover, type UsageScope } from './core/usageScope';
 import type { UsageScopeState } from './usageScopeState';
 import type { UsageService } from './usageService';
+import { planLimits } from './planLimits';
 import type { BacklogStore } from './backlogStore';
 import { BOARD_TITLE, boardHtml } from './board/html';
 import { type BoardMessage, type HostMessage, type PanelMessage, parseBoardMessage } from './board/messages';
@@ -55,6 +56,8 @@ import {
   sessionsStuckMs,
   sessionsTmuxServer,
   sessionsUnreadBadge,
+  sessionsRecentlyFinishedMs,
+  sessionsSort,
   sessionsUnreadFirst,
   workspaceRoot,
 } from './config';
@@ -377,6 +380,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       launchedModels: this.composer.launchedModels(this.model.current),
       parkedLimit: sessionsFinishedSessions(),
       settle: this.tree.settle,
+      sort: sessionsSort(),
+      recentMs: sessionsRecentlyFinishedMs(),
       cardTitle: boardCardTitle(),
     });
   }
@@ -515,12 +520,15 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           // A count already running (started by an earlier click, or the Claude Usage page) shows how far it got.
           const progress = this.usageService.progress;
           if (progress) this.postToWebview({ type: 'usageProgress', progress });
-          return this.postToWebview({ type: 'usage', usage: await this.usage() });
+          return this.postToWebview({ type: 'usage', usage: await this.usage(), limits: await planLimits() });
         }
         case 'usageScope':
           return await this.usageScope.set(m.scope); // posts the popup again (onDidChange)
         case 'usageMore':
           return void (await vscode.commands.executeCommand('devdesk.claude.showUsage'));
+        case 'setupLimits':
+          if (await vscode.commands.executeCommand<boolean>('devdesk.usage.installStatusLine')) await this.postUsage();
+          return;
         case 'settings':
           return void (await openSettings('devdesk.board'));
         case 'toggleCardLine':
@@ -544,6 +552,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         case 'start':
         case 'plan':
         case 'spec':
+        case 'draft':
         case 'edit':
         case 'delete': {
           const item = this.backlog.find(m.id);
@@ -743,7 +752,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   /** The 📊 popover again, for the window's scope now (the webview shows it only while its popup is open). */
   private async postUsage(): Promise<void> {
     if (!this.panel) return;
-    this.postToWebview({ type: 'usage', usage: await this.usage() });
+    this.postToWebview({ type: 'usage', usage: await this.usage(), limits: await planLimits() });
   }
 
   /**

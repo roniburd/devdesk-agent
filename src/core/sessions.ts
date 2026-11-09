@@ -8,6 +8,13 @@ import { isWithin, trimSlashes } from './paths';
 import type { EndedRecord, EndReason } from './ended';
 import type { RegistryEntry } from './sessionInfo';
 
+/**
+ * What a waiting session waits on, from the hook record: a question (AskUserQuestion), a plan to review (ExitPlanMode),
+ * a permission, or an MCP server's input form.
+ */
+export type WaitKind = 'question' | 'plan' | 'permission' | 'elicitation';
+const WAIT_KINDS: ReadonlySet<string> = new Set(['question', 'plan', 'permission', 'elicitation']);
+
 /** `blocked`: the turn ended on an error (StopFailure). */
 export type RecordState = 'working' | 'waiting' | 'done' | 'idle' | 'blocked';
 /**
@@ -31,6 +38,8 @@ export interface HookRecord {
   event: string;
   state: RecordState;
   detail: string;
+  /** What a waiting session waits on (the record's `wait.kind`); missing from older hook scripts, whose detail tells. */
+  waitKind?: WaitKind;
   prompt?: string;
   updatedAt: number;
   /** A finished turn (`done`) whose reply ends with a question; missing from older hook scripts. */
@@ -38,6 +47,11 @@ export interface HookRecord {
   /** When the current turn started (UserPromptSubmit) and, once it finished (Stop), ended; missing from older hook scripts. */
   turnStartedAt?: number;
   turnEndedAt?: number;
+  /**
+   * When the running Claude process started (or resumed, or /clear started) the session; missing from older hook
+   * scripts. A subagent or background shell the transcript shows started before it ran in an earlier process.
+   */
+  sessionStartedAt?: number;
 }
 
 export interface SessionCard {
@@ -56,6 +70,8 @@ export interface SessionCard {
   transcriptPath?: string;
   state: SessionState;
   detail: string;
+  /** What a waiting session waits on, when its hook record says (see `HookRecord.waitKind`). */
+  waitKind?: WaitKind;
   prompt?: string;
   updatedAt?: number;
   attached: boolean;
@@ -73,6 +89,8 @@ export interface SessionCard {
   /** When the current turn started and, once finished, ended (from the hook record): insights are matched to turns by these. */
   turnStartedAt?: number;
   turnEndedAt?: number;
+  /** When the running Claude process started the session (see `HookRecord.sessionStartedAt`). */
+  sessionStartedAt?: number;
   /** What Claude is doing right now, from DevDesk's Haiku insight for this turn (working sessions only). */
   liveStatus?: string;
   /** A short name for the session's task, from DevDesk's Haiku insight. */
@@ -95,6 +113,8 @@ export interface SessionCard {
   /** A parked session: the tmux session it ran in and its server, which resuming it uses again when free. */
   formerTmuxSession?: string;
   formerTmuxServer?: string;
+  /** A note Claude set on its card (`devdesk note`), kept per tmux pane. */
+  note?: string;
 }
 
 export const NO_HOOKS_DETAIL = 'Install Claude status hooks to see what Claude is doing';
@@ -140,8 +160,11 @@ export function parseHookRecord(text: string): HookRecord | undefined {
   if (r.prompt && !isInjectedPrompt(r.prompt as string)) record.prompt = r.prompt as string;
   if (r.lastEditPath) record.lastEditPath = r.lastEditPath as string;
   if (r.asksQuestion === true) record.asksQuestion = true;
+  const wait = r.wait as { kind?: unknown } | null | undefined;
+  if (r.state === 'waiting' && typeof wait?.kind === 'string' && WAIT_KINDS.has(wait.kind)) record.waitKind = wait.kind as WaitKind;
   if (isFiniteNumber(r.turnStartedAt)) record.turnStartedAt = r.turnStartedAt;
   if (isFiniteNumber(r.turnEndedAt)) record.turnEndedAt = r.turnEndedAt;
+  if (isFiniteNumber(r.sessionStartedAt)) record.sessionStartedAt = r.sessionStartedAt;
   return record;
 }
 
@@ -404,11 +427,13 @@ export function buildSessionCards(
       transcriptPath: r.transcriptPath ?? undefined,
       state: r.state,
       detail: r.detail,
+      ...(r.waitKind ? { waitKind: r.waitKind } : {}),
       prompt: r.prompt,
       updatedAt: r.updatedAt,
       attached: pane?.attached ?? false,
       ...(r.asksQuestion ? { asksQuestion: true } : {}),
       ...turnTimes(r),
+      ...(r.sessionStartedAt !== undefined ? { sessionStartedAt: r.sessionStartedAt } : {}),
     });
   }
 

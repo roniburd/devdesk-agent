@@ -45,6 +45,10 @@ part, while Claude is still working. **✕** deletes a worktree you're done with
 repository, with every `git worktree` (including Claude Code's own `.claude/worktrees/*`). In a folder that isn't a git
 repository, sessions and the board work as usual, all in main, and there are no worktrees.
 
+Leave notes on the lines of a diff, then **Send Notes to Claude**: they go to the worktree's session as one prompt (see
+the [manual](MANUAL.md#leave-notes-for-claude-on-a-diff)). Claude can open files and diffs for you too, and put a note
+on its card, with the [`devdesk` command](MANUAL.md#16-the-devdesk-command).
+
 ### The Claude Board
 
 ![The Claude Board: prompts for later, and every session in lanes by state; Needs you cards say what Claude asks](images/board.png)

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { runningCount, type SessionChild } from './sessionChildren';
-import { INTERRUPTED_DETAIL, type SessionCard, type SessionState } from './sessions';
+import { INTERRUPTED_DETAIL, type SessionCard, type SessionState, type WaitKind } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
 import { oneLine, truncate } from './text';
 
@@ -158,7 +158,7 @@ export function badgeFor(cards: readonly SessionCard[]): { value: number; toolti
  * A done session whose subagents, background shells or workflows still run: its turn ended, but Claude picks up again
  * when they finish (for example after a background `sleep 600` it started to wait for a build).
  */
-function waitsOnBackground(card: SessionCard): boolean {
+export function waitsOnBackground(card: SessionCard): boolean {
   return card.state === 'done' && !!card.children && runningBackground(card.children);
 }
 
@@ -416,6 +416,8 @@ export type StateLook =
   | 'stopped'
   | 'parked';
 
+const WAIT_LOOKS: Record<WaitKind, StateLook> = { question: 'question', plan: 'plan', permission: 'permission', elicitation: 'input' };
+
 const LIMIT_RE = /\b(rate|usage)[ _-]?limit|limit (reached|exceeded)|\blimited\b/i;
 
 /**
@@ -426,6 +428,8 @@ export function stateLook(card: SessionCard, now: number, stuckMs: number): Stat
   const state = card.state;
   switch (state) {
     case 'waiting':
+      if (card.waitKind) return WAIT_LOOKS[card.waitKind];
+      // A record from an older hook script says what it waits on only in its detail.
       if (card.detail.startsWith('Asking:')) return 'question';
       if (card.detail.startsWith('Plan ready')) return 'plan';
       return /permission/i.test(card.detail) ? 'permission' : 'input';

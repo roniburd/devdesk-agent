@@ -3,9 +3,10 @@ import { DEFAULT_CHOICE, type LaunchChoice, type ModelChoice } from './composer'
 import { runningCount } from './sessionChildren';
 import type { SessionCard, SessionState } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
+import { sortSessions, type SortMode } from './urgency';
 import { oneLine, truncate } from './text';
 import { HIDDEN_PARKED_MAX, IDLE_DIVIDER, searchFields, searchLane, type SearchFields } from './boardSearch';
-import { attentionOrder, cardView, displayState, distinctions, formatAgo, shownLook, stateLook, type Settle, type StateLook } from './sessionsView';
+import { cardView, displayState, distinctions, formatAgo, shownLook, stateLook, type Settle, type StateLook } from './sessionsView';
 
 /** The Claude Board's swim lanes: the backlog, then one lane per kind of session state. */
 export type LaneId = 'backlog' | 'needs' | 'working' | 'review';
@@ -143,6 +144,8 @@ export interface BoardSession {
   ask?: string;
   /** In the Working lane: what Claude is doing now, in one line (DevDesk's live status, else the hook's detail). */
   doing?: string;
+  /** The note Claude set on its card (`devdesk note`), in any lane. */
+  note?: string;
   worktree: string;
   look: StateLook;
   lookLabel: string;
@@ -252,6 +255,10 @@ export interface BoardOptions {
   cardTitle?: CardTitleMode;
   /** Keeps working sessions in place between re-sorts (the Claude view's, so both show one order). */
   settle?: Settle;
+  /** How sessions are ordered in each lane (`devdesk.sessions.sort`); `attention` when undefined. */
+  sort?: SortMode;
+  /** With `urgency`: how long an unread finished turn sorts as recently finished. `idleMs` when undefined. */
+  recentMs?: number;
 }
 
 /** What a card's title says (setting `devdesk.board.cardTitle`). */
@@ -277,7 +284,7 @@ export function liveLaunches(launches: ReadonlyMap<string, Launch>, listed: Read
   return new Map([...launches].filter(([key, l]) => listed.has(key) || now - l.at < LAUNCH_GRACE_MS));
 }
 
-/** The board: prompts for later newest first, and the sessions in attention order, each in its state's lane. */
+/** The board: prompts for later newest first, and the sessions in `sort` order, each in its state's lane. */
 export function buildBoard(cards: readonly SessionCard[], backlog: readonly BacklogItem[], o: BoardOptions): BoardData {
   const lanes: BoardLane[] = LANES.map((l) => ({ ...l, sessions: [], tasks: [], ...(l.id === 'review' ? { divider: IDLE_DIVIDER } : {}) }));
   const byId = new Map(lanes.map((l) => [l.id, l]));
@@ -295,11 +302,22 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
   let parked = 0;
   let hiddenCount = 0;
   const shown: { card: SessionCard; look: StateLook; lane: BoardLane; hidden: boolean; idle: boolean }[] = [];
-  for (const card of attentionOrder(cards, o.now, o.idleMs, o.unread, o.unreadFirst, o.settle)) {
+  const ordered = sortSessions(cards, {
+    mode: o.sort ?? 'attention',
+    now: o.now,
+    idleMs: o.idleMs,
+    stuckMs: o.stuckMs,
+    recentMs: o.recentMs ?? o.idleMs,
+    unread: o.unread,
+    unreadFirst: o.unreadFirst,
+    settle: o.settle,
+  });
+  for (const card of ordered) {
     const look = stateLook(card, o.now, o.stuckMs);
     const toReview = card.state === 'parked' && o.unread.has(card.id);
     const lane = byId.get(laneForLook(look))!;
     // Under the divider: read sessions that sort as idle or later (see `attentionOrder`); unread ones are to review.
+    // They are moved under the cards to review below, whatever the order put between them.
     const idle = lane.id === 'review' && !o.unread.has(card.id) && IDLE_STATES.has(displayState(card, o.now, o.idleMs));
     if (card.state === 'parked' && !toReview && o.parkedLimit !== undefined && ++parked > o.parkedLimit) {
       lane.more = (lane.more ?? 0) + 1;
@@ -344,6 +362,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
       hoverParts: hoverOf(titles[i], card, v, look, model, byObjective(card) ? latestTitles[i] : undefined),
       ...(lane.id === 'needs' ? { ask: askLine(card) } : {}),
       ...(lane.id === 'working' && (v.liveStatus || v.detail) ? { doing: v.liveStatus || v.detail } : {}),
+      ...(card.note ? { note: card.note } : {}),
       unread: o.unread.has(card.id),
       ...(o.colors?.get(card.id) ? { color: o.colors.get(card.id) } : {}),
       ...(o.focused === card.id ? { focused: true as const } : {}),
@@ -361,12 +380,14 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
         lookLabel: shown.label,
         state: card.state,
         model,
-        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight],
+        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight, card.note],
       }),
     };
     if (hidden) (lane.hidden ??= []).push(session);
     else lane.sessions.push(session);
   }
+  // The divider sits above the lane's first idle card, so every card to review goes above every idle one (a stable split).
+  for (const lane of lanes) if (lane.divider) lane.sessions = [...lane.sessions.filter((s) => !s.idle), ...lane.sessions.filter((s) => s.idle)];
   const names = new Set(lanes.flatMap((l) => l.sessions.map((s) => s.worktree)));
   const worktrees = [...names].filter((n) => n !== 'no worktree').sort();
   if (names.has('no worktree')) worktrees.push('no worktree');
@@ -396,6 +417,7 @@ function hoverOf(
   const parts: (HoverPart | false)[] = [
     { text: title },
     !!latest && latest !== title && { label: 'Latest step', text: latest },
+    !!card.note && { label: "Claude's note", text: card.note },
     !!v.liveStatus && { label: 'Doing now', text: v.liveStatus },
     !!v.insight && { label: 'Where it stands', text: v.insight },
     !!v.summary && { label: "Claude's recap", text: v.summary },

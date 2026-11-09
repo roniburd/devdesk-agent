@@ -16,7 +16,7 @@ import {
   withWorktreeTask,
   worktreeSlug,
 } from './core/worktreeTasks';
-import { promptArg } from './core/shell';
+import { prefillArg, promptArg } from './core/shell';
 import { discoverFeatures, isGitWorkspace, isPlainFolder, type PackageRepo } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
 import { sessionsClaudeCommand, sessionsWorktreeCreateCommand, sessionsWorktreeKind, sessionsWorktreeStartPrompt, workspaceRoot } from './config';
@@ -120,6 +120,8 @@ export interface WorktreeLaunch {
   name?: string;
   /** Claude's first prompt as is, instead of `devdesk.worktrees.startPrompt` filled in with the task. */
   prompt?: string;
+  /** The prompt is typed at Claude's prompt, not sent (`--prefill`), as a draft to edit there. */
+  draft?: boolean;
   /** The launch mode, instead of the default one. */
   mode?: LaunchMode;
   /** More Claude arguments (`--model`, `--effort`), in shell syntax. */
@@ -193,7 +195,7 @@ export async function newWorktreeSession(
   }
   model.rediscover();
   const prompt = launch.prompt ?? renderStartPrompt(sessionsWorktreeStartPrompt(), { task, worktree, dir });
-  const args = joinArgs(extraArgs, launch.extraArgs, promptArg(prompt));
+  const args = joinArgs(extraArgs, launch.extraArgs, launch.draft ? prefillArg(prompt) : promptArg(prompt));
   const open = (await launch.untrusted?.(launchDir)) || (launch.open ?? true);
   await startNumbered(model, tree, sessionName({ name: worktree, dir, isMain: false }), launchDir, sessionsClaudeCommand(args, launch.mode), open, launch.started);
   return true;
