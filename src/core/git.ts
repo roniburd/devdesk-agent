@@ -125,7 +125,7 @@ async function cachedMergeBase(run: Runner, dir: string, cache: BaseCache, refs:
 }
 
 /** The branches "vs mainline" diffs against, the first that exists. */
-const MAINLINE_CANDIDATES = ['origin/mainline', 'mainline', 'origin/HEAD', 'origin/main', 'main', 'origin/master', 'master'];
+export const MAINLINE_CANDIDATES = ['origin/mainline', 'mainline', 'origin/HEAD', 'origin/main', 'main', 'origin/master', 'master'];
 
 async function mergeBase(run: Runner, dir: string, first?: string): Promise<{ base: BaseRef; upstream: string } | undefined> {
   // Some repositories track mainline, most their default branch.
