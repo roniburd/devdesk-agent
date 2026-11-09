@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -71,6 +71,11 @@
       }
     ],
     "commands": [
+      {
+        "command": "devdesk.claude.switchVersion",
+        "title": "Switch Version…",
+        "category": "DevDesk Claude"
+      },
       {
         "command": "devdesk.features.refresh",
         "title": "Refresh",

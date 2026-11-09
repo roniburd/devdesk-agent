@@ -32,6 +32,7 @@ import {
 import { BacklogStore } from './backlogStore';
 import { backlogItemBelongs } from './core/board';
 import { BoardPanel } from './boardPanel';
+import { stepAsideForV2 } from './edition';
 import { InsightsWorker } from './insightsWorker';
 import { applyCrashDiagnostics, cleanDiagnosticsRegularly, log, registerTimedCommand, watchEventLoop } from './log';
 import { freeMemoryPercent } from './memory';
@@ -47,6 +48,7 @@ import { WorktreeTaskStore } from './worktreeSessions';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
 export async function activate(ctx: vscode.ExtensionContext) {
+  if (stepAsideForV2(ctx)) return undefined;
   for (const [from, to] of MIGRATED_SETTINGS) await migrateSetting(from, to);
   updateWorkspaceContext();
   const sessions = new SessionsModel({
