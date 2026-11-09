@@ -61,6 +61,8 @@ export interface SessionCard {
   attached: boolean;
   /** What the session spun off (subagents, background shells, workflows), when listed (`devdesk.sessions.showChildren`). */
   children?: SessionChild[];
+  /** Something the session started in the background (subagent, shell, workflow) still runs, whether or not `children` lists it. */
+  runsInBackground?: boolean;
   /** A stopped session whose Claude exited mid-turn without ending the session (crashed or was killed). */
   crashed?: boolean;
   /** The name Claude Code shows for the session (a /rename, a job name, or Claude's own title); see `claudeTitle`. */

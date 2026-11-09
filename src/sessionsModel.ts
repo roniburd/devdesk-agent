@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { findDescendant, listProcesses } from './core/processes';
 import { endedDir, listableEnded, readEndedRecords, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
-import { ChildrenReader } from './core/sessionChildren';
+import { ChildrenReader, runningBackground } from './core/sessionChildren';
 import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
 import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
 import { transitionsToWaiting } from './core/sessionsView';
@@ -282,16 +282,23 @@ export class SessionsModel implements vscode.Disposable {
     this.metaReader.prune();
   }
 
-  /** Lists what each session spun off, from its transcript. */
+  /**
+   * Lists what each session spun off, from its transcript, when the view shows it (`devdesk.sessions.showChildren`),
+   * and marks every live session that still runs something in the background (`runsInBackground`), which shows as
+   * waiting on background work either way.
+   */
   private async addChildren(cards: SessionCard[]): Promise<void> {
-    const finishedLimit = this.o.finishedChildren();
-    if (finishedLimit === undefined) return;
+    const shown = this.o.finishedChildren();
+    const finishedLimit = shown ?? 0;
     await Promise.all(
       cards.map(async (card) => {
         if (!card.transcriptPath) return;
-        const live = card.pid !== undefined && card.state !== 'stopped' && processAlive(card.pid);
+        const live = card.pid !== undefined && card.state !== 'stopped' && card.state !== 'parked' && processAlive(card.pid);
+        // Nothing to list, nor anything that can still run.
+        if (shown === undefined && !live) return;
         const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live });
-        if (children.length) card.children = children;
+        if (shown !== undefined && children.length) card.children = children;
+        if (live && runningBackground(children)) card.runsInBackground = true;
       }),
     );
     this.childrenReader.prune();

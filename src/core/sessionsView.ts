@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
-import { runningCount, type SessionChild } from './sessionChildren';
+import { runningBackground, type SessionChild } from './sessionChildren';
 import { INTERRUPTED_DETAIL, type SessionCard, type SessionState } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
 import { oneLine, truncate } from './text';
@@ -159,12 +159,7 @@ export function badgeFor(cards: readonly SessionCard[]): { value: number; toolti
  * when they finish (for example after a background `sleep 600` it started to wait for a build).
  */
 function waitsOnBackground(card: SessionCard): boolean {
-  return card.state === 'done' && !!card.children && runningBackground(card.children);
-}
-
-/** Some background child (or a child of one) still runs; a foreground one left running by an interrupted turn does not count. */
-function runningBackground(children: readonly SessionChild[]): boolean {
-  return children.some((c) => c.background && runningCount([c]) > 0);
+  return card.state === 'done' && (!!card.runsInBackground || (!!card.children && runningBackground(card.children)));
 }
 
 /** A done session not updated for `idleMs` sorts as idle (after working ones), unless it waits on background work; it still looks done. */
