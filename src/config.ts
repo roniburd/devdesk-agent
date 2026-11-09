@@ -138,7 +138,7 @@ export function worktreesShowCleanPackages(): boolean {
 
 /** Each worktree row of the Worktrees view lists its Claude sessions above its packages (setting `devdesk.worktrees.showSessions`). */
 export function worktreesShowSessions(): boolean {
-  return cfg().get<boolean>('worktrees.showSessions', false);
+  return cfg().get<boolean>('worktrees.showSessions', true);
 }
 
 /** Load every worktree's changes in the background while the Worktrees view is visible (`devdesk.worktrees.prefetch`). */
@@ -317,7 +317,7 @@ export function sessionsUnreadFirst(): boolean {
 
 /** The Claude view nests sessions under their worktree; off, it lists every session in one list (setting `devdesk.sessions.groupByWorktree`). */
 export function sessionsGroupByWorktree(): boolean {
-  return cfg().get<boolean>('sessions.groupByWorktree', true);
+  return cfg().get<boolean>('sessions.groupByWorktree', false);
 }
 
 /** Read session titles are greyed in the Claude view (setting `devdesk.sessions.dimRead`). */
@@ -365,7 +365,7 @@ export function sessionsStatusBar(): boolean {
 
 /** List subagents, background shells and workflows under each session (setting `devdesk.sessions.showChildren`). */
 export function sessionsShowChildren(): boolean {
-  return cfg().get<boolean>('sessions.showChildren', true);
+  return cfg().get<boolean>('sessions.showChildren', false);
 }
 
 /** Finished children listed per level, older ones folded into one row (setting `devdesk.sessions.finishedChildren`, at least 0). */

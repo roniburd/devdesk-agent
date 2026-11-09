@@ -157,7 +157,7 @@ Both settings also apply to the Claude Board.
 
 ### Groups
 
-Sessions are grouped by worktree. Sessions outside the workspace go under `no worktree`.
+With the tree button on (`devdesk.sessions.groupByWorktree`), sessions are grouped by worktree. Sessions outside the workspace go under `no worktree`.
 
 A session belongs to the worktree its Claude is working in. So a session can change groups. For example, a session started in `main` moves to a worktree's group when Claude switches into that worktree, or starts editing files in it.
 
@@ -169,7 +169,7 @@ A worktree row shows:
 
 Worktrees made with **New Worktree Session** keep their row, with the task, even when no session runs in them. While they have no session, they sort last.
 
-To see one flat list instead, click **List All Sessions** in the title bar. Each row then names its worktree. Click the tree button to group again. Setting: `devdesk.sessions.groupByWorktree`.
+By default the view shows one flat list instead, each row naming its worktree. Click the tree button in the title bar to group by worktree, and **List All Sessions** to go back to the flat list. Setting: `devdesk.sessions.groupByWorktree`.
 
 ![The same sessions grouped by worktree, and as one flat list where each row names its worktree](images/sessions-tree-flat.png)
 
@@ -236,7 +236,7 @@ These sessions stay with the done ones, not under needs input, because Claude is
 
 ### What a session started
 
-Under each session, the view lists what it spun off. DevDesk reads this from the session's transcript:
+With `devdesk.sessions.showChildren` on, the view lists under each session what it spun off. DevDesk reads this from the session's transcript:
 
 - **Subagents**, with their own subagents and background shells under them.
 - **Background shell commands**: `run_in_background`, and `!` commands you typed once they move to the background.
@@ -250,7 +250,7 @@ Click an item to open it, scrolled to the end:
 - a shell opens its output file,
 - a workflow opens its summary.
 
-Each level lists the running items and the last 10 finished ones (`devdesk.sessions.finishedChildren`). Older ones fold into one `N earlier finished` row. To hide all of this, turn off `devdesk.sessions.showChildren`. A session still shows as waiting on background work while one of them runs.
+Each level lists the running items and the last 10 finished ones (`devdesk.sessions.finishedChildren`). Older ones fold into one `N earlier finished` row. It is off by default. A session still shows as waiting on background work while one of them runs.
 
 ### See what a turn changed
 
@@ -578,7 +578,7 @@ How it reads them:
 - Merged and closed pull requests have nothing to fix. A check still running isn't counted.
 ### Show sessions under worktrees
 
-The comment button in the Worktrees title bar lists each worktree's sessions above its packages, like the Claude view does. Setting: `devdesk.worktrees.showSessions`.
+Each worktree lists its sessions above its packages, like the Claude view does. The comment button in the Worktrees title bar turns this off and on. Setting: `devdesk.worktrees.showSessions`.
 
 ### How DevDesk loads changes
 
@@ -1307,7 +1307,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 |---|---|
 | `devdesk.sessions.show` | `vscode` (`all` lists every Claude session on the machine) |
 | `devdesk.sessions.scope` | `workspace`: only sessions working in this window's workspace (`all` lists every folder's) |
-| `devdesk.sessions.groupByWorktree` | `true` (sessions nested under their worktree; `false`: one flat list, each row naming its worktree; the Claude view's list button toggles it) |
+| `devdesk.sessions.groupByWorktree` | `false` (one flat list, each row naming its worktree; `true`: sessions nested under their worktree; the Claude view's list button toggles it) |
 | `devdesk.sessions.sort` | `urgency`: what needs you first, then recently finished unread, working, stuck, the rest, not running, parked (`attention`: the order from before, see [Order](#order)) |
 | `devdesk.sessions.recentlyFinishedMinutes` | `15` (with `urgency`, an unread session whose turn finished less than this long ago sorts above working ones) |
 | `devdesk.sessions.unreadFirst` | `true` (with `attention`, unread sessions sort above every read one; `false`: only within their state) |
@@ -1321,7 +1321,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.resortWorkingMinutes` | `5` (working sessions keep their order this long before sorting again, newest first; `0`: always sorted) |
 | `devdesk.sessions.readAfterSeconds` | `1.5` (a session's terminal must be in front this long for what happened in it to count as read) |
 | `devdesk.sessions.finishedSessions` | `10` (parked sessions listed per worktree and on the board; older ones fold into one row) |
-| `devdesk.sessions.showChildren` | `true` (subagents, background shells and workflows under each session) |
+| `devdesk.sessions.showChildren` | `false` (`true`: subagents, background shells and workflows under each session) |
 | `devdesk.sessions.finishedChildren` | `10` (finished ones listed per level; older ones fold into one row) |
 | `devdesk.sessions.turnChangesTurns` | `30` (recent turns **Show Changes by Turn…** lists, see [See what a turn changed](#see-what-a-turn-changed)) |
 | `devdesk.sessions.turnChangesMaxMB` | `64` (MB read at most from the end of a session's transcript, and of each subagent's, to show a turn's changes) |
@@ -1355,7 +1355,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | Setting | Default |
 |---|---|
 | `devdesk.worktrees.root` | the git repository containing the first workspace folder (its main worktree), else the folder itself (no worktrees then); the views are hidden only with no folder open |
-| `devdesk.worktrees.showSessions` | `false` (`true`: each worktree lists its Claude sessions above its packages, as the Claude view does; the Worktrees view's comment button toggles it) |
+| `devdesk.worktrees.showSessions` | `true` (each worktree lists its Claude sessions above its packages, as the Claude view does; `false`: packages only; the Worktrees view's comment button toggles it) |
 | `devdesk.worktrees.showCleanPackages` | `false` (only packages with changes are listed under a worktree; a clean worktree shows `No changes`) |
 | `devdesk.worktrees.refreshSeconds` | `20` (seconds between the end of one refresh and the start of the next; 0: refresh only on demand) |
 | `devdesk.worktrees.activeReloadSeconds` | `60` (a package of an expanded worktree, or of one a Claude session is busy in, loads again at least this often; 0: only when something says it changed) |

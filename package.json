@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -1008,7 +1008,7 @@
           },
           "devdesk.sessions.groupByWorktree": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "The Claude view nests sessions under their worktree. Off: it lists every session in one list, in attention order, each row naming its worktree. Toggle it with the Claude view's list button.",
             "order": 3
           },
@@ -1108,7 +1108,7 @@
           },
           "devdesk.sessions.showChildren": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "description": "List what each Claude session spun off under its row: subagents (and their own subagents and shells), background shell commands, and workflows with their phases and agents. Read from the session's transcript.",
             "order": 17
           },
@@ -1342,7 +1342,7 @@
           },
           "devdesk.worktrees.showSessions": {
             "type": "boolean",
-            "default": false,
+            "default": true,
             "description": "List each worktree's Claude sessions under its row, above its packages, as the Claude view shows them. Toggle it with the Worktrees view's comment button.",
             "order": 2
           },
