@@ -41,7 +41,7 @@ A few words this manual uses:
 | **Claude view** | The **Claude** section of the sidebar. It lists your sessions and their state. |
 | **Worktrees view** | The **Worktrees** section of the sidebar. It lists your worktrees and the files each one changed. |
 | **Worktree** | A separate checkout of your code. `main` is the workspace root. Other worktrees are git worktrees. |
-| **Claude Board** | An editor tab that shows every session as a card, in lanes by state. It is a preview feature. |
+| **Claude Board** | An editor tab that shows every session as a card, in lanes by state. |
 | **Status hooks** | Small scripts Claude Code runs on each event. They tell DevDesk each session's state. |
 | **Launch mode** | The permission mode a session starts in, such as Plan or Auto. |
 | **Unread** | Something happened in a session since you last looked at it. |
@@ -591,8 +591,6 @@ If a git command hangs (a stale `index.lock`, a slow disk), DevDesk stops it aft
 
 ![The Claude Board: prompts for later, and every session in lanes by state; Needs you cards say what Claude asks (a permission, a plan to review, a question), and colored sessions keep their color](images/board.png)
 
-The Claude Board is a preview. Turn on `devdesk.board.enabled` to use it.
-
 Open it with **DevDesk: Open Claude Board**, the board icon in the Claude view, or the colored board button at the top right of any editor group (next to editor buttons such as Claude Code's). Turn that button off with `devdesk.board.editorTitleButton`. **Ctrl+Cmd+B** (**Ctrl+Alt+Shift+B** on Windows and Linux, command **DevDesk: Focus Claude Board Prompt**) opens the board from anywhere, with the cursor in its prompt box. Change the key in **Keyboard Shortcuts** (search `devdesk.board.focusPrompt`).
 
 The board is an editor tab, in the editor area where the Claude terminals open. It shows every session the Claude view lists, as one card per session, in lanes by state.
@@ -706,8 +704,6 @@ folder where agents leave tens of thousands of transcripts, lower `historyMaxSes
 - It opens the first time you open the Agent Sessions sidebar in a window (`devdesk.board.openWithSidebar`).
 - It opens when the editor area has no tabs left (`devdesk.board.openWhenEmpty`). This doesn't happen right after you close the board itself.
 - It comes back after a window reload.
-
-Turning the preview off closes the board.
 
 ### Sessions beside the board
 
@@ -1374,7 +1370,6 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 
 | Setting | Default |
 |---|---|
-| `devdesk.board.enabled` | `false` (preview: the Claude Board) |
 | `devdesk.board.openWhenEmpty` | `true` (open the Claude Board when the editor area has no tabs) |
 | `devdesk.board.openWithSidebar` | `true` (open the Claude Board the first time you open the Agent Sessions sidebar in a window) |
 | `devdesk.board.editorTitleButton` | `true` (a colored board button at the top right of each editor group opens the Claude Board) |
