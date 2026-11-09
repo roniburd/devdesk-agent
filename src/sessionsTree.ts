@@ -22,7 +22,7 @@ import { oneLine } from './core/text';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
 import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
 import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsIdleMs, sessionsReadAfterMs, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsResortWorkingMs, sessionsUnreadBadge, sessionsUnreadFirst } from './config';
-import { hooksInstalled, hooksSettingsShown } from './hooksCommands';
+import { hooksInstalled, hooksSettingsShown, watchHooksSettings } from './hooksCommands';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { SessionsReadState } from './sessionsReadState';
@@ -84,6 +84,8 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
   /** The colors last drawn, to redraw when another window changed them. */
   private drawnColors: ReadonlyMap<string, string> | undefined;
   private hooksMissing = false;
+  /** Counts hook reads, so a slow earlier read cannot overwrite a later one. */
+  private hooksReads = 0;
   private readonly settledOrder = new SettledOrder();
   /** A tmux session just started from DevDesk: selected as soon as the model lists it. */
   private pending: { session: string; server: string; until: number } | undefined;
@@ -122,6 +124,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       vscode.window.onDidChangeActiveTerminal((t) => this.followTerminal(this.focusedCard(t))),
       vscode.window.tabGroups.onDidChangeTabs(() => this.followTab()),
       vscode.window.tabGroups.onDidChangeTabGroups(() => this.followTab()),
+      watchHooksSettings(() => this.refreshHooks()),
     ];
     this.status.text = '';
     this.syncAcquire();
@@ -144,10 +147,12 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     return d && new vscode.FileDecoration(d.badge, d.tooltip, d.color ? new vscode.ThemeColor(d.color) : undefined);
   }
 
-  /** Re-reads whether the hooks are installed (settings.json); not done on every poll. */
+  /** Re-reads whether the hooks are installed (settings.json): on activation, setting changes and when the file changes. */
   refreshHooks(): void {
+    const read = ++this.hooksReads;
     void hooksInstalled().then(
       (installed) => {
+        if (read !== this.hooksReads || this.hooksMissing === !installed) return;
         this.hooksMissing = !installed;
         this.changed.fire(undefined);
       },
