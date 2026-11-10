@@ -32,7 +32,9 @@ import {
 import { BacklogStore } from './backlogStore';
 import { backlogItemBelongs } from './core/board';
 import { BoardPanel } from './boardPanel';
-import { stepAsideForV2 } from './edition';
+import { registerEdition } from './edition';
+import { isSharedGlobalKey, isSharedProjectKey, SHARED_STATE_FILE } from './core/sharedState';
+import { SharedMemento } from './state/sharedMemento';
 import { InsightsWorker } from './insightsWorker';
 import { applyCrashDiagnostics, cleanDiagnosticsRegularly, log, registerTimedCommand, watchEventLoop } from './log';
 import { freeMemoryPercent } from './memory';
@@ -49,7 +51,18 @@ import { WorktreeTaskStore } from './worktreeSessions';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
 export async function activate(ctx: vscode.ExtensionContext) {
-  if (stepAsideForV2(ctx)) return undefined;
+  registerEdition(ctx);
+  // The state both versions keep (read state, colors, terminals to reattach, the board's draft), in this extension's
+  // storage folders, which v2 uses too: see core/sharedState.ts.
+  const globalState = new SharedMemento(ctx.globalState, join(ctx.globalStorageUri.fsPath, SHARED_STATE_FILE), isSharedGlobalKey, "this host's shared DevDesk for Claude Code state");
+  const projectState = new SharedMemento(
+    ctx.workspaceState,
+    ctx.storageUri && join(ctx.storageUri.fsPath, SHARED_STATE_FILE),
+    isSharedProjectKey,
+    "this project folder's shared DevDesk for Claude Code state",
+  );
+  ctx.subscriptions.push(globalState, projectState);
+  await Promise.all([globalState.load(ctx.extension.id), projectState.load(ctx.extension.id)]);
   for (const [from, to] of MIGRATED_SETTINGS) await migrateSetting(from, to);
   updateWorkspaceContext();
   const sessions = new SessionsModel({
@@ -81,7 +94,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   });
   const worktreeTasks = new WorktreeTaskStore(join(ctx.globalStorageUri.fsPath, 'worktree-tasks.json'));
   void worktreeTasks.load();
-  const viewState = new SessionViewState(sessions, ctx.globalState);
+  const viewState = new SessionViewState(sessions, globalState);
   const sessionsTree = new SessionsTree(sessions, worktreeTasks, viewState);
   sessions.setReadCheck((card) => viewState.isRead(card));
   // Prompts for later belong to the project folder (`storageUri`); a window with no folder uses the host-wide file,
@@ -105,12 +118,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
     vscode.Uri.joinPath(ctx.extensionUri, 'dist', 'usageWorker.js').fsPath,
   );
   // The project (or worktree) whose usage this window's 📊 popup and Claude Usage page show.
-  const usageScope = new UsageScopeState(ctx.workspaceState);
+  const usageScope = new UsageScopeState(projectState);
   const usagePanel = new UsagePanel(ctx.extensionUri, usage, usageScope);
-  const board = new BoardPanel(ctx.extensionUri, sessions, sessionsTree, viewState, backlog, worktreeTasks, ctx.globalState, ctx.workspaceState, usage, usageScope);
+  const board = new BoardPanel(ctx.extensionUri, sessions, sessionsTree, viewState, backlog, worktreeTasks, globalState, projectState, usage, usageScope);
   ctx.subscriptions.push(log, sessions, sessionsTree, viewState, worktreeTasks, backlog, board, usagePanel, usage, usageScope);
   const worktrees = registerWorktreesView(ctx, sessions, sessionsTree);
-  registerSessions(ctx, { sessions, sessionsTree, worktreeTasks, insights });
+  registerSessions(ctx, { sessions, sessionsTree, worktreeTasks, insights, projectState });
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
@@ -151,7 +164,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, globalState, projectState });
 }
 
 export function deactivate(): void {}

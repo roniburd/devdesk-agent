@@ -8,6 +8,9 @@ import { applyEntries } from '../core/entries';
  *   user's own choices that mean the same on every host. Key it with `hostKey` when it is about this host's things
  *   (sessions, tmux servers, paths).
  * - `context.workspaceState`: this project folder on this host. For anything that belongs to the project.
+ * - Both DevDesk Claude versions keep some keys of those two in a file of their shared storage folder instead
+ *   (`core/sharedState.ts`, `SharedMemento`), so switching versions keeps them: add a key there when the user would
+ *   miss it after switching.
  * - A `JsonFileStore` in `globalStorageUri` (this host) or `storageUri` (this project folder on this host): for state
  *   too big for a Memento, or shared with other processes.
  * Never keep a copy of shared state in a field and write it back whole: other windows change it too. Read it through
@@ -17,6 +20,15 @@ import { applyEntries } from '../core/entries';
 /** `<key>@<this host>`: a `globalState` key for state about this host's sessions, worktrees or paths. */
 export function hostKey(key: string, host = hostname()): string {
   return `${key}@${host}`;
+}
+
+/** A Memento that can change a value on what is saved now, under a lock (`SharedMemento.modify`). */
+export interface ModifiableMemento extends vscode.Memento {
+  modify(key: string, change: (saved: unknown) => unknown): Thenable<void>;
+}
+
+export function canModify(memento: vscode.Memento): memento is ModifiableMemento {
+  return typeof (memento as Partial<ModifiableMemento>).modify === 'function';
 }
 
 /** One value in a Memento, read afresh each time and validated by `parse` (which gets undefined when nothing is saved). */
@@ -43,6 +55,8 @@ export class MementoValue<T> {
 
   /** Saves `change` applied to the value saved now (by this window or another). */
   update(change: (value: T) => T): Thenable<void> {
+    // A shared file is changed on what it holds now, under its lock: another window's write a moment ago is kept.
+    if (canModify(this.memento)) return this.memento.modify(this.key, (raw) => change(this.parse(raw)));
     return this.memento.update(this.key, change(this.get()));
   }
 

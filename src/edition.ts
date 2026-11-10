@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { stepAsideMessage, V2_ID, VERSIONS_SEARCH } from './core/edition';
-import { log } from './log';
+import { VERSIONS_SEARCH } from './core/edition';
 
 /** Opens the Extensions view on the two DevDesk for Claude Code versions, to enable one and disable the other. */
 function showVersions(): Thenable<unknown> {
@@ -8,16 +7,9 @@ function showVersions(): Thenable<unknown> {
 }
 
 /**
- * True when v2 is enabled in this window, so v1 must not start (both register the same commands); says so. Otherwise
- * registers DevDesk for Claude Code: Switch Version…, which v2 registers when it runs.
+ * Registers DevDesk for Claude Code: Switch Version…. v1 runs even when v2 is enabled in this window too: v2 steps aside for it
+ * (and says so), so the two never register the same commands.
  */
-export function stepAsideForV2(ctx: vscode.ExtensionContext): boolean {
-  const message = stepAsideMessage(!!vscode.extensions.getExtension(V2_ID));
-  if (!message) {
-    ctx.subscriptions.push(vscode.commands.registerCommand('devdesk.claude.switchVersion', showVersions));
-    return false;
-  }
-  log.warn(message);
-  void vscode.window.showInformationMessage(message, 'Show Extensions').then((pick) => pick && showVersions());
-  return true;
+export function registerEdition(ctx: vscode.ExtensionContext): void {
+  ctx.subscriptions.push(vscode.commands.registerCommand('devdesk.claude.switchVersion', showVersions));
 }

@@ -1,3 +1,4 @@
+import type { SharedMemento } from './state/sharedMemento';
 import * as vscode from 'vscode';
 import type { BoardPanel } from './boardPanel';
 import { claudeTerminalSession, restoreTerminals } from './claudeSessions';
@@ -35,7 +36,17 @@ export function testApi(
     board,
     usagePanel,
     usageScope,
-  }: { sessionsTree: SessionsTree; worktrees: WorktreesView; board: BoardPanel; usagePanel: UsagePanel; usageScope: UsageScopeState },
+    globalState,
+    projectState,
+  }: {
+    sessionsTree: SessionsTree;
+    worktrees: WorktreesView;
+    board: BoardPanel;
+    usagePanel: UsagePanel;
+    usageScope: UsageScopeState;
+    globalState: SharedMemento;
+    projectState: SharedMemento;
+  },
 ) {
   const tree = worktrees.tree;
   /** How many times the usage scope changed: each time, the 📊 popup and the Claude Usage page are posted again. */
@@ -78,15 +89,17 @@ export function testApi(
     /** The Claude view's top-level rows (worktree groups, with their sessions as children). */
     claudeGroups: () => claudeRows(sessionsTree.getChildren()),
     /** This host's saved read state (`[session id, signature][]`), as the next window loads it. */
-    savedSeenEntries: () => ctx.globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? [],
+    /** The files of the state both DevDesk Claude versions share (`core/sharedState.ts`): this host's, this folder's. */
+    sharedStateFiles: () => ({ global: globalState.file, project: projectState.file }),
+    savedSeenEntries: () => globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? [],
     /** The ids of the sessions whose read state is saved for the next window. */
-    savedSeen: () => (ctx.globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? []).map(([id]) => id),
+    savedSeen: () => (globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? []).map(([id]) => id),
     /**
      * Saves a session as read the way another window of this VS Code would (`globalState` is shared by all of them),
      * on top of `stale` when given: what that window had before this one's last change reached it.
      */
     saveSeenAsOtherWindow: (id: string, signature: string, stale?: [string, string][]) =>
-      ctx.globalState.update(hostKey(SEEN_KEY), [...(stale ?? ctx.globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? []), [id, signature]]),
+      globalState.update(hostKey(SEEN_KEY), [...(stale ?? globalState.get<[string, string][]>(hostKey(SEEN_KEY)) ?? []), [id, signature]]),
     worktreeState: () => Object.fromEntries(worktrees.urgent()),
     /** Each Worktrees row (main and the worktrees) with its children's labels and descriptions. */
     worktreeRows: async () => {
@@ -114,11 +127,11 @@ export function testApi(
     /** What a new window would do with these Claude terminals (sessions on DevDesk's tmux server). */
     restoreClaudeTerminals: (sessions: string[]) => restoreTerminals(sessions.map((session) => ({ session, server: sessionsTmuxServer() }))),
     /** The tmux sessions of the Claude terminals saved for the next window to reattach, by this window and the others. */
-    savedClaudeTerminals: () => (ctx.workspaceState.get<[string, OpenTerminal][]>(REATTACH_KEY) ?? []).map(([, o]) => o.session),
+    savedClaudeTerminals: () => (projectState.get<[string, OpenTerminal][]>(REATTACH_KEY) ?? []).map(([, o]) => o.session),
     /** Saves a Claude terminal to reattach the way another window on this folder would (`workspaceState` is shared). */
     saveClaudeTerminalAsOtherWindow: (session: string) => {
       const open = { session, server: sessionsTmuxServer() };
-      return ctx.workspaceState.update(REATTACH_KEY, [...(ctx.workspaceState.get<[string, OpenTerminal][]>(REATTACH_KEY) ?? []), [reattachKey(open), open]]);
+      return projectState.update(REATTACH_KEY, [...(projectState.get<[string, OpenTerminal][]>(REATTACH_KEY) ?? []), [reattachKey(open), open]]);
     },
     /** Makes the next Worktrees load run git again. */
     refreshWorktrees: () => tree.refresh(),

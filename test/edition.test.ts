@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { stepAsideMessage } from '../src/core/edition';
+import { V1_ID, V2_ID, VERSIONS_SEARCH } from '../src/core/edition';
 
-describe('stepAsideMessage', () => {
-  it('steps aside only when v2 is enabled', () => {
-    expect(stepAsideMessage(false)).toBeUndefined();
-    expect(stepAsideMessage(true)).toMatch(/DevDesk for Claude Code \(v2\) is enabled/);
+describe('edition', () => {
+  it('finds both versions in the Extensions view', () => {
+    for (const id of [V1_ID, V2_ID]) expect(id.split('.')[1].startsWith(VERSIONS_SEARCH.split(' ')[1])).toBe(true);
   });
 });

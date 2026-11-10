@@ -9,10 +9,34 @@ const HOOK_SCRIPT_NAME = 'devdesk_hook.py';
 export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'StopFailure', 'SessionEnd'] as const;
 
 /**
+ * The hook script's version, in its second line (`# devdesk-hook-version: N`). One script serves every session on the
+ * host, and DevDesk for Claude Code v1 and v2 can both be installed there, each with its own script: a window installs or
+ * refreshes its script only when the installed one is not newer (`replacesHookScript`), so a v1 window never puts back
+ * v1's script over v2's. Bump it with every change to the script: v1 (`main`) counts in the 100s, v2 (`v2_experiment`)
+ * in the 200s, as v2's script handles every event and record v1's does.
+ */
+export const HOOK_SCRIPT_VERSION = 100;
+
+const HOOK_VERSION_LINE = /^# devdesk-hook-version: (\d+)$/m;
+
+/** The version an installed hook script says it is; 0 for scripts from before versions. */
+export function hookScriptVersion(script: string): number {
+  const m = HOOK_VERSION_LINE.exec(script);
+  return m ? Number.parseInt(m[1], 10) : 0;
+}
+
+/** Whether to write `ours` over the installed script (undefined: none installed): it differs and is not newer than ours. */
+export function replacesHookScript(installed: string | undefined, ours = HOOK_SCRIPT): boolean {
+  if (installed === undefined) return true;
+  return installed !== ours && hookScriptVersion(installed) <= hookScriptVersion(ours);
+}
+
+/**
  * Python 3.9, standard library only. Writes <state dir>/<session_id>.json with the Claude pid, tmux pane and transcript
  * path; always exits 0 and prints nothing.
  */
 export const HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
+# devdesk-hook-version: 100
 """DevDesk Agents: records Claude Code session state for the VS Code Claude Sessions panel."""
 import json
 import os
@@ -462,7 +486,8 @@ async function changeSettings(claudeDir: string, now: Date, change: (settings: S
 export function installHooksInto(claudeDir: string, now: Date, stateDir: string): Promise<HookFileResult> {
   return changeSettings(claudeDir, now, async (settings) => {
     const script = scriptFile(claudeDir);
-    await writeFileAtomic(script, HOOK_SCRIPT, true, 0o755);
+    // A newer script (another DevDesk for Claude Code version's) stays: it handles these events too.
+    if (replacesHookScript(await readFile(script, 'utf8').catch(() => undefined))) await writeFileAtomic(script, HOOK_SCRIPT, true, 0o755);
     return addHooks(settings, hookCommand(script, stateDir));
   });
 }
@@ -490,8 +515,9 @@ export async function readHooksInstalled(claudeDir: string, stateDir: string): P
 }
 
 /**
- * Rewrites an installed hook script that differs from HOOK_SCRIPT (an older DevDesk version), so upgrading the extension
- * upgrades the script without reinstalling hooks. Does nothing when the script was never installed. True if rewritten.
+ * Rewrites an installed hook script that differs from HOOK_SCRIPT and is not newer (`replacesHookScript`), so upgrading
+ * the extension upgrades the script without reinstalling hooks. Does nothing when the script was never installed, or
+ * is newer (the other DevDesk for Claude Code version's). True if rewritten.
  */
 export async function refreshHookScript(claudeDir: string): Promise<boolean> {
   const script = scriptFile(claudeDir);
@@ -501,7 +527,7 @@ export async function refreshHookScript(claudeDir: string): Promise<boolean> {
   } catch {
     return false;
   }
-  if (current === HOOK_SCRIPT) return false;
+  if (!replacesHookScript(current)) return false;
   // A unique temporary name: several windows activating at once each rewrite it.
   await writeFileAtomic(script, HOOK_SCRIPT, true, 0o755);
   return true;
