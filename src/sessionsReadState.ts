@@ -21,6 +21,7 @@ import { sessionsReadAfterMs, sessionsTmuxServer } from './config';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { hostKey, MementoEntries } from './state/mementoState';
+import { adoptForeign, FOREIGN_MARK, ownMarks, tagMark } from './core/readMarks';
 
 /**
  * `globalState` key of what the user has read of each session: `[session id, cardSignature][]`, saved per host under
@@ -74,6 +75,10 @@ export class SessionsReadState implements vscode.Disposable {
   /** The last logged set of terminals in front (`visibleCards`), so only changes are logged. */
   private lastVisible = '';
   private readonly subscriptions: vscode.Disposable[];
+  /** What this extension saved in its own Memento before the shared file: its untagged marks (`ownMarks`). */
+  private readonly ownLegacy: ReadonlyMap<string, string>;
+  /** The saved marks last read, in this version's terms. */
+  private ownSeen: { from: ReadonlyMap<string, string>; seen: ReadonlyMap<string, string> } | undefined;
 
   constructor(
     private readonly model: SessionsModel,
@@ -82,6 +87,8 @@ export class SessionsReadState implements vscode.Disposable {
   ) {
     this.saved = new MementoEntries(state, hostKey(SEEN_KEY), isString, SEEN_LIMIT);
     this.shared = new MementoEntries(state, SEEN_KEY, isString);
+    const own = (state as Partial<{ ownValue<T>(key: string): T | undefined }>).ownValue?.<unknown>(hostKey(SEEN_KEY));
+    this.ownLegacy = new Map(Array.isArray(own) ? own.filter((e): e is [string, string] => Array.isArray(e) && isString(e[0]) && isString(e[1])) : []);
     this.subscriptions = [
       vscode.window.onDidChangeActiveTerminal(() => recheck()),
       vscode.window.tabGroups.onDidChangeTabs(() => recheck()),
@@ -93,7 +100,9 @@ export class SessionsReadState implements vscode.Disposable {
 
   /** What the user has seen of each session, as saved now (by this window or another). */
   private get seen(): ReadonlyMap<string, string> {
-    return this.saved.get();
+    const from = this.saved.get();
+    if (this.ownSeen?.from !== from) this.ownSeen = { from, seen: ownMarks(from, this.ownLegacy) };
+    return this.ownSeen.seen;
   }
 
   /** Whether any window has saved the read state of this host yet. */
@@ -139,7 +148,9 @@ export class SessionsReadState implements vscode.Disposable {
    */
   isRead(card: SessionCard): boolean {
     if (this.unreadIds.has(card.id)) return false;
-    return this.seen.get(card.id) === cardSignature(card);
+    const mark = this.seen.get(card.id);
+    // Read in the other version: as it showed there (this version saves it in its terms once it lists it).
+    return mark === FOREIGN_MARK || mark === cardSignature(card);
   }
 
   /**
@@ -189,7 +200,8 @@ export class SessionsReadState implements vscode.Disposable {
 
   /** Saves these changes (a signature, or undefined for unread) on top of what is saved now. */
   private save(changes: ReadonlyMap<string, string | undefined>): void {
-    void this.saved.apply(changes).then(undefined, (err) => log.warn(`cannot save read sessions: ${(err as Error).message}`));
+    const marks = new Map([...changes].filter(([, sig]) => sig !== FOREIGN_MARK).map(([id, sig]) => [id, sig === undefined ? undefined : tagMark(sig)] as const));
+    void this.saved.apply(marks).then(undefined, (err) => log.warn(`cannot save read sessions: ${(err as Error).message}`));
   }
 
   /** Recomputes the unread sessions; true when they changed. */
@@ -203,7 +215,8 @@ export class SessionsReadState implements vscode.Disposable {
     const saved = this.seen;
     // A host's first load: what the shared key saved for the listed sessions, the others read.
     const first = this.seeded ? undefined : { shared: this.shared.get() };
-    const marked = withHandMarks(first ? firstSeen(first.shared, cards) : saved, this.handMarks, cards, looked, now);
+    // Sessions read in the other version count as read as they show now, saved in this version's terms below.
+    const marked = withHandMarks(first ? firstSeen(first.shared, cards) : adoptForeign(saved, cards), this.handMarks, cards, looked, now);
     this.handMarks = marked.marks;
     // Unlimited here: the cap applies when saving, to what is saved by then (`MementoEntries`).
     const seen = nextSeen(marked.seen, cards, looked, false, Number.POSITIVE_INFINITY);

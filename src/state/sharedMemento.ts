@@ -12,7 +12,7 @@ import { JsonFileStore } from './jsonFileStore';
 import type { ModifiableMemento } from './mementoState';
 
 /**
- * A Memento whose shared keys (`isShared`) live in a file of the storage folder both DevDesk for Claude Code versions use
+ * A Memento whose shared keys (`isShared`) live in a file of the storage folder both DevDesk Claude versions use
  * (`core/sharedState.ts`), and every other key in `base`, this extension's own `globalState` or `workspaceState`. With
  * no file (a window with no folder has no project storage) every key stays in `base`.
  *
@@ -65,6 +65,11 @@ export class SharedMemento implements ModifiableMemento, vscode.Disposable {
     } catch (err) {
       log.warn(`shared state: cannot copy the saved values of ${extensionId} into ${this.store.file}: ${(err as Error).message}`);
     }
+  }
+
+  /** What this extension saved under `key` in its own Memento (for a shared key, before the shared file). */
+  ownValue<T>(key: string): T | undefined {
+    return this.base.get<T>(key);
   }
 
   private shares(key: string): boolean {

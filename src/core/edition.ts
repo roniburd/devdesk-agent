@@ -9,5 +9,7 @@
 export const V1_ID = 'roniburd.devdesk-claude';
 /** The v2 extension. */
 export const V2_ID = 'roniburd.devdesk-claude-beta';
+/** How this version names the read marks it saves (`readMarks.ts`). */
+export const EDITION_TAG = 'v1';
 /** The Extensions view search showing both versions. */
 export const VERSIONS_SEARCH = '@installed devdesk-claude';
