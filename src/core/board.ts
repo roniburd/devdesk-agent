@@ -1,13 +1,25 @@
 import { basename } from 'node:path';
 import { DEFAULT_CHOICE, type LaunchChoice, type ModelChoice } from './composer';
 import { runningCount } from './sessionChildren';
-import type { SessionCard, SessionState } from './sessions';
+import { type SessionCard, type SessionState, waitKindOf } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
 import { teamText } from './workers';
 import { sortSessions, type SortMode } from './urgency';
 import { oneLine, truncate } from './text';
 import { HIDDEN_PARKED_MAX, IDLE_DIVIDER, searchFields, searchLane, type SearchFields } from './boardSearch';
-import { cardView, displayState, distinctions, formatAgo, shownLook, stateLook, type Settle, type StateLook } from './sessionsView';
+import {
+  cardCapabilities,
+  cardTitles,
+  cardView,
+  displayState,
+  distinctions,
+  formatAgo,
+  shownLook,
+  stateLook,
+  type CardTitleMode,
+  type ViewContext,
+} from './sessionsView';
+import { LOOKS, type StateLook } from './stateLooks';
 import { statusFromText } from './statusMerge';
 
 /** The Claude Board's swim lanes: the backlog, then one lane per kind of session state. */
@@ -21,26 +33,6 @@ export const LANES: readonly { id: LaneId; title: string }[] = [
   { id: 'review', title: 'Done / idle' },
 ];
 
-const LANE_OF_LOOK: Record<StateLook, SessionLaneId> = {
-  question: 'needs',
-  permission: 'needs',
-  plan: 'needs',
-  input: 'needs',
-  working: 'working',
-  stuck: 'working',
-  background: 'working',
-  done: 'review',
-  asked: 'review',
-  interrupted: 'review',
-  error: 'review',
-  limited: 'review',
-  crashed: 'review',
-  idle: 'review',
-  stopped: 'review',
-  parked: 'review',
-  unknown: 'review',
-};
-
 /**
  * The states (as `displayState` sorts them) of the Done / idle lane's cards under its divider, when read: ready, done
  * long ago, no status, not running or parked.
@@ -48,7 +40,7 @@ const LANE_OF_LOOK: Record<StateLook, SessionLaneId> = {
 const IDLE_STATES: ReadonlySet<SessionState> = new Set(['idle', 'unknown', 'stopped', 'parked']);
 
 export function laneForLook(look: StateLook): SessionLaneId {
-  return LANE_OF_LOOK[look];
+  return LOOKS[look].lane;
 }
 
 /** A prompt for later (the board's first lane): saved from the composer, run only when started. */
@@ -160,6 +152,9 @@ export interface BoardSession {
   worktree: string;
   look: StateLook;
   lookLabel: string;
+  /** The look's glyph and its classes (`LOOKS`). */
+  glyph: string;
+  glyphClass: string;
   ago: string;
   /** What Claude is doing: DevDesk's live status while it works, else the hook's detail (the reply, the question). */
   detail: string;
@@ -238,15 +233,12 @@ export interface BoardData {
 }
 
 export interface BoardOptions {
-  now: number;
-  idleMs: number;
-  stuckMs: number;
-  unread: ReadonlySet<string>;
+  /** The time, limits, read state and order, as the Claude view has them (so both show one order). */
+  view: ViewContext;
   /** The colors given to sessions by hand, by session id. */
   colors?: ReadonlyMap<string, string>;
   /** The session whose Claude terminal is the active terminal, if any. */
   focused?: string;
-  unreadFirst: boolean;
   /** DevDesk's tmux server (see `cardView`). */
   vscodeServer?: string;
   /** The mode new sessions start in, left off a prompt's chips. */
@@ -264,18 +256,15 @@ export interface BoardOptions {
    * with the latest prompt's title under it; `latest`, the latest prompt's title only. `latest` when undefined.
    */
   cardTitle?: CardTitleMode;
-  /** Keeps working sessions in place between re-sorts (the Claude view's, so both show one order). */
-  settle?: Settle;
   /** How sessions are ordered in each lane (`devdesk.sessions.sort`); `attention` when undefined. */
   sort?: SortMode;
-  /** With `urgency`: how long an unread finished turn sorts as recently finished. `idleMs` when undefined. */
+  /** With `urgency`: how long an unread finished turn sorts as recently finished. `view.idleMs` when undefined. */
   recentMs?: number;
   /** A worktree's checks hint (`2 checks failing`), empty when it has nothing to fix, by worktree directory. */
   checks?: (featureDir: string) => string;
 }
 
-/** What a card's title says (setting `devdesk.board.cardTitle`). */
-export type CardTitleMode = 'objective' | 'latest';
+export type { CardTitleMode };
 
 /** A model the board started a tmux session with, and when. */
 export interface Launch {
@@ -299,6 +288,8 @@ export function liveLaunches(launches: ReadonlyMap<string, Launch>, listed: Read
 
 /** The board: prompts for later newest first, and the sessions in `sort` order, each in its state's lane. */
 export function buildBoard(cards: readonly SessionCard[], backlog: readonly BacklogItem[], o: BoardOptions): BoardData {
+  const { view } = o;
+  const { now, unread } = view;
   const lanes: BoardLane[] = LANES.map((l) => ({ ...l, sessions: [], tasks: [], ...(l.id === 'review' ? { divider: IDLE_DIVIDER } : {}) }));
   const byId = new Map(lanes.map((l) => [l.id, l]));
   byId.get('backlog')!.tasks = [...backlog]
@@ -306,7 +297,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
     .map((t) => ({
       id: t.id,
       prompt: t.prompt,
-      ago: formatAgo(t.createdAt, o.now),
+      ago: formatAgo(t.createdAt, now),
       chips: choiceChips(t.choice, o.defaultMode ?? '', o.models),
       starting: !!o.starting?.has(t.id),
     }));
@@ -315,23 +306,14 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
   let parked = 0;
   let hiddenCount = 0;
   const shown: { card: SessionCard; look: StateLook; lane: BoardLane; hidden: boolean; idle: boolean }[] = [];
-  const ordered = sortSessions(cards, {
-    mode: o.sort ?? 'attention',
-    now: o.now,
-    idleMs: o.idleMs,
-    stuckMs: o.stuckMs,
-    recentMs: o.recentMs ?? o.idleMs,
-    unread: o.unread,
-    unreadFirst: o.unreadFirst,
-    settle: o.settle,
-  });
+  const ordered = sortSessions(cards, { ...view, unreadFirst: view.unreadFirst ?? false, mode: o.sort ?? 'attention', recentMs: o.recentMs ?? view.idleMs });
   for (const card of ordered) {
-    const look = stateLook(card, o.now, o.stuckMs);
-    const toReview = card.state === 'parked' && o.unread.has(card.id);
+    const look = stateLook(card, view);
+    const toReview = card.state === 'parked' && unread.has(card.id);
     const lane = byId.get(laneForLook(look))!;
     // Under the divider: read sessions that sort as idle or later (see `attentionOrder`); unread ones are to review.
     // They are moved under the cards to review below, whatever the order put between them.
-    const idle = lane.id === 'review' && !o.unread.has(card.id) && IDLE_STATES.has(displayState(card, o.now, o.idleMs));
+    const idle = lane.id === 'review' && !unread.has(card.id) && IDLE_STATES.has(displayState(card, view));
     if (card.state === 'parked' && !toReview && o.parkedLimit !== undefined && ++parked > o.parkedLimit) {
       lane.more = (lane.more ?? 0) + 1;
       if (++hiddenCount <= HIDDEN_PARKED_MAX) shown.push({ card, look, lane, hidden: true, idle });
@@ -339,18 +321,18 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
     }
     shown.push({ card, look, lane, hidden: false, idle });
   }
-  const views = shown.map(({ card }) => cardView(card, o.now, o.vscodeServer));
+  const views = shown.map(({ card }) => cardView(card, now, o.vscodeServer));
   // A name the user gave wins; otherwise DevDesk's few-word Haiku title, until there is one Claude's title or the prompt.
-  const latestTitles = shown.map(({ card }, i) => (card.insightTitle && !(card.nameByUser && card.name) ? card.insightTitle : views[i].title));
   // With `objective`, the session's objective (until Haiku has one, the latest title) over the latest title.
-  const byObjective = (card: SessionCard) => o.cardTitle === 'objective' && !!card.insightObjective && !(card.nameByUser && card.name);
-  const titles = shown.map(({ card }, i) => (byObjective(card) ? card.insightObjective! : latestTitles[i]));
+  const cardTitleSets = shown.map(({ card }) => cardTitles(card, o.cardTitle));
+  const latestTitles = cardTitleSets.map((t) => t.latest);
+  const titles = cardTitleSets.map((t) => t.objective ?? t.latest);
   // Titles are told apart among the visible cards only.
   const visible = shown.map((s, i) => [s, i] as const).filter(([s]) => !s.hidden);
   const visibleApart = distinctions(
     visible.map(([s]) => s.card),
     visible.map(([, i]) => titles[i]),
-    o.now,
+    now,
   );
   const apart: (string | undefined)[] = shown.map(() => undefined);
   visible.forEach(([, i], k) => (apart[i] = visibleApart[k]));
@@ -362,39 +344,43 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
     return i >= 0 ? { id: shown[i].card.id, title: truncate(titles[i], 40) } : { id: undefined, title: c.session };
   };
   for (const [i, { card, look, lane, hidden, idle }] of shown.entries()) {
-    const isParked = card.state === 'parked';
+    const can = cardCapabilities(card);
+    const isParked = can.parked;
+    const byObjective = cardTitleSets[i].objective !== undefined;
     const v = views[i];
     const title = apart[i] ? `${titles[i]} · ${apart[i]}` : titles[i];
     // A parked session resumes with Claude's own model choice: the one the board started it with is not shown.
     const model = card.tmuxSession && !isParked ? o.launchedModels?.get(launchKey(card.tmuxServer, card.tmuxSession)) : undefined;
     // A parked session keeps the look its last turn ended with (a green tick when done), under the Done / idle lane's divider.
-    const shown = shownLook(card, o.now, o.stuckMs);
+    const shown = shownLook(card, view);
     const coordinator = coordinatorOf(card);
     const team = teamLine(card, coordinator?.title);
     const session: BoardSession = {
       id: card.id,
       title,
-      ...(byObjective(card) && latestTitles[i] !== titles[i] ? { latest: latestTitles[i] } : {}),
+      ...(byObjective && latestTitles[i] !== titles[i] ? { latest: latestTitles[i] } : {}),
       worktree: v.worktree,
       look: shown.look,
       lookLabel: shown.label,
+      glyph: LOOKS[shown.look].glyph,
+      glyphClass: LOOKS[shown.look].glyphClass,
       ago: v.ago,
       detail: v.liveStatus || v.detail,
       insight: v.liveStatus ? '' : v.insight,
-      hoverParts: hoverOf(titles[i], card, v, look, model, o.now, byObjective(card) ? latestTitles[i] : undefined, team),
+      hoverParts: hoverOf(titles[i], card, v, look, model, now, byObjective ? latestTitles[i] : undefined, team),
       ...(lane.id === 'needs' ? { ask: askLine(card) } : {}),
       ...(lane.id === 'working' && (v.liveStatus || v.detail) ? { doing: v.liveStatus || v.detail } : {}),
       ...(card.note ? { note: card.note } : {}),
       ...(card.featureDir && o.checks?.(card.featureDir) ? { checks: o.checks(card.featureDir) } : {}),
       ...(team ? { team } : {}),
       ...(coordinator?.id ? { coordinatorId: coordinator.id } : {}),
-      unread: o.unread.has(card.id),
+      unread: unread.has(card.id),
       ...(o.colors?.get(card.id) ? { color: o.colors.get(card.id) } : {}),
       ...(o.focused === card.id ? { focused: true as const } : {}),
       running: card.children ? runningCount(card.children) : 0,
-      canOpen: !!card.tmuxSession || (isParked && !!card.cwd),
-      canFork: !!(card.sessionId && card.cwd),
-      canEnd: !!card.tmuxSession || isParked,
+      canOpen: can.canOpen,
+      canFork: can.canFork,
+      canEnd: can.canEnd,
       parked: isParked,
       ...(idle ? { idle: true as const } : {}),
       ...(model ? { model } : {}),
@@ -428,10 +414,11 @@ function teamLine(card: SessionCard, coordinator: string | undefined): string | 
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-/** What a card in the Needs you lane says Claude asks: Haiku's line for this wait, else the hook's detail. */
+/** What a card in the Needs you lane says Claude asks: Haiku's line for this wait, else the hook's detail (a question's without its `Asking:`). */
 function askLine(card: SessionCard): string {
   if (card.askSummary) return card.askSummary;
-  return truncate(oneLine(card.detail).replace(/^Asking:\s*/, ''), 160);
+  const detail = oneLine(card.detail);
+  return truncate(waitKindOf(card) === 'question' ? detail.replace(/^Asking:\s*/, '') : detail, 160);
 }
 
 const PROMPT_MAX = 600;

@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import { parseGitdirFile } from './worktrees';
 
 /**
  * Whether Claude Code will ask to trust a folder before a session starts there, as the CLI (2.1.316) decides from its
@@ -56,11 +57,7 @@ export function needsTrust(claudeJson: unknown, place: TrustPlace, env: Record<s
  * undefined when the file does not point into one (a submodule, or not a worktree).
  */
 export function repoRootFromGitFile(content: string, gitRoot: string): string | undefined {
-  const m = /^gitdir:\s*(.+?)\s*$/m.exec(content);
-  if (!m) return undefined;
-  const gitdir = posix.resolve(gitRoot, m[1]);
-  const at = gitdir.lastIndexOf('/.git/worktrees/');
-  return at > 0 ? gitdir.slice(0, at) : undefined;
+  return parseGitdirFile(content, gitRoot)?.repo;
 }
 
 /** What the box says before a session starts in a folder Claude has not trusted (`folder` as the user knows it). */

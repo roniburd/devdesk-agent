@@ -52,6 +52,7 @@ describe('mergeReason: a hook event newer than the report wins', () => {
     for (const state of ['unknown', 'stopped', 'parked'] as const) expect(mergeReason(hooked({ state }), report({ state: 'blocked' }), quiet)).toBeUndefined();
     expect(mergeReason(hooked({ updatedAt: undefined }), report({ state: 'blocked' }), quiet)).toBeUndefined();
     expect(mergeReason(hooked({ state: 'done', detail: MOVED_DETAIL }), report({ state: 'blocked', kind: 'auth' }), quiet)).toBeUndefined();
+    expect(mergeReason(hooked({ state: 'idle', detail: 'Moved on', endKind: 'moved' }), report({ state: 'blocked', kind: 'auth' }), quiet)).toBeUndefined();
   });
 });
 
@@ -130,6 +131,11 @@ describe('mergedCard', () => {
     expect(next).toMatchObject({ state: 'idle', detail: 'At the prompt', statusFrom: { reason: 'quiet', hookAt: HOOK_AT } });
     expect(next.waitKind).toBeUndefined();
     expect(next.askSummary).toBeUndefined();
+  });
+
+  it("drops the hook record's error kind with the state it described", () => {
+    const blocked = hooked({ state: 'working', errorKind: 'rate_limit' });
+    expect(mergedCard(blocked, report({ state: 'blocked', kind: 'permission' }), soon)).not.toHaveProperty('errorKind');
   });
 
   it('returns the card itself when the hooks keep it', () => {

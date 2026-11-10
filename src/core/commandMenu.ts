@@ -1,5 +1,6 @@
 import { BUILTINS, type Category } from './builtins';
 import type { CommandMatch, SlashCommand } from './slashCommands';
+import { slashWord } from './slashTrigger';
 
 /** A row of the board composer's `/` menu: what it shows, what picking it puts in the box, and what Enter does. */
 export interface CommandRow {
@@ -99,15 +100,5 @@ export function slashTrigger(
   before: string,
   unstackable: readonly string[] = UNSTACKABLE,
 ): { start: number; query: string; stacked: boolean; inline?: true } | undefined {
-  const first = /^\/([\w:.-]*)$/.exec(before);
-  if (first) return { start: 0, query: first[1], stacked: false };
-  const word = /(?:^|\s)\/([\w:.-]*)$/.exec(before);
-  if (!word) return undefined;
-  const start = before.length - word[1].length - 1;
-  const prefix = before.slice(0, start);
-  const lead = /^(?:\/[\w:.-]+[ \t]+)*/.exec(prefix)![0];
-  const leading = lead.match(/\/[\w:.-]+/g) ?? [];
-  if (leading.some((c) => unstackable.includes(c.slice(1).toLowerCase()))) return undefined;
-  const inline = lead.length < prefix.length || leading.length >= MAX_STACKED;
-  return { start, query: word[1], stacked: true, ...(inline ? { inline: true as const } : {}) };
+  return slashWord(before, unstackable, MAX_STACKED);
 }

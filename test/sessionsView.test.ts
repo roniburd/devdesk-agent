@@ -4,8 +4,10 @@ import type { SessionCard } from '../src/core/sessions';
 import {
   attentionOrder,
   badgeFor,
+  cardCapabilities,
   cardShown,
   cardSignature,
+  cardTitles,
   cardView,
   displayState,
   firstSeen,
@@ -22,10 +24,34 @@ import {
   truncate,
   unreadCards,
   withHandMarks,
+  type ViewContext,
 } from '../src/core/sessionsView';
 
 const NOW = 10_000_000;
 const card = (over: Partial<SessionCard>): SessionCard => ({ id: 's1', state: 'working', detail: 'Running Bash', attached: false, ...over });
+
+describe('cardTitles', () => {
+  it('puts a name the user gave over Haiku title, Claude name and prompt, as the view and the board both show it', () => {
+    const named = card({ name: 'Mine', nameByUser: true, insightTitle: 'Haiku', insightObjective: 'Goal', prompt: 'do it' });
+    expect(cardTitles(named, 'objective')).toEqual({ name: 'Mine', title: 'Mine', latest: 'Mine' });
+    const haiku = card({ name: 'Claude name', insightTitle: 'Haiku\ntitle', insightObjective: 'Goal', prompt: 'do it' });
+    // The view's title is on one line; the board's latest title is Haiku's as written.
+    expect(cardTitles(haiku)).toEqual({ name: 'Haiku title', title: 'Haiku title', latest: 'Haiku\ntitle' });
+    expect(cardTitles(haiku, 'objective')).toEqual({ name: 'Haiku title', title: 'Haiku title', latest: 'Haiku\ntitle', objective: 'Goal' });
+    expect(cardTitles(card({ name: 'Claude name', prompt: 'do it' }))).toEqual({ name: 'Claude name', title: 'Claude name', latest: 'Claude name' });
+    expect(cardTitles(card({ prompt: 'x'.repeat(200) })).latest).toBe(truncate('x'.repeat(200), 120));
+    expect(cardTitles(card({ cwd: '/w/pkg' }))).toEqual({ name: '', title: 'Claude in pkg', latest: 'Claude in pkg' });
+  });
+});
+
+describe('cardCapabilities', () => {
+  it('says what the view and the board can do with a session', () => {
+    expect(cardCapabilities(card({ tmuxSession: 'cc-a', sessionId: 'x', cwd: '/w' }))).toEqual({ parked: false, inTmuxSession: true, canOpen: true, canFork: true, canEnd: true });
+    expect(cardCapabilities(card({}))).toEqual({ parked: false, inTmuxSession: false, canOpen: false, canFork: false, canEnd: false });
+    expect(cardCapabilities(card({ state: 'parked', cwd: '/w' }))).toEqual({ parked: true, inTmuxSession: false, canOpen: true, canFork: false, canEnd: true });
+    expect(cardCapabilities(card({ state: 'parked' }))).toMatchObject({ canOpen: false, canEnd: true });
+  });
+});
 
 describe('formatAgo', () => {
   it('formats relative times', () => {
@@ -160,9 +186,9 @@ describe('attention', () => {
   const IDLE = 30 * 60_000;
   const STUCK = 10 * 60_000;
   it('shows a done session not updated for idleMs as idle', () => {
-    expect(displayState(card({ state: 'done', updatedAt: NOW - IDLE - 1 }), NOW, IDLE)).toBe('idle');
-    expect(displayState(card({ state: 'done', updatedAt: NOW - 1000 }), NOW, IDLE)).toBe('done');
-    expect(displayState(card({ state: 'waiting', updatedAt: 0 }), NOW, IDLE)).toBe('waiting');
+    expect(displayState(card({ state: 'done', updatedAt: NOW - IDLE - 1 }), { now: NOW, idleMs: IDLE })).toBe('idle');
+    expect(displayState(card({ state: 'done', updatedAt: NOW - 1000 }), { now: NOW, idleMs: IDLE })).toBe('done');
+    expect(displayState(card({ state: 'waiting', updatedAt: 0 }), { now: NOW, idleMs: IDLE })).toBe('waiting');
   });
 
   it('orders needs input, blocked, unread done, working, read done, idle, no status, newest first', () => {
@@ -177,7 +203,7 @@ describe('attention', () => {
       card({ id: 'waiting', state: 'waiting', updatedAt: NOW - 99 }),
       card({ id: 'nostatus', state: 'unknown' }),
     ];
-    expect(attentionOrder(cards, NOW, IDLE, new Set(['unread'])).map((c) => c.id)).toEqual([
+    expect(attentionOrder(cards, { now: NOW, idleMs: IDLE, unread: new Set(['unread']) }).map((c) => c.id)).toEqual([
       'waiting',
       'blocked',
       'unread',
@@ -199,13 +225,13 @@ describe('attention', () => {
     ];
     const unread = new Set(['working-unread', 'idle-unread']);
     // Working sessions sort as read, newest first.
-    expect(attentionOrder(cards, NOW, IDLE, unread, true).map((c) => c.id)).toEqual(['idle-unread', 'waiting-read', 'working-read', 'working-unread']);
-    expect(attentionOrder(cards, NOW, IDLE, unread).map((c) => c.id)).toEqual(['waiting-read', 'working-read', 'working-unread', 'idle-unread']);
+    expect(attentionOrder(cards, { now: NOW, idleMs: IDLE, unread, unreadFirst: true }).map((c) => c.id)).toEqual(['idle-unread', 'waiting-read', 'working-read', 'working-unread']);
+    expect(attentionOrder(cards, { now: NOW, idleMs: IDLE, unread }).map((c) => c.id)).toEqual(['waiting-read', 'working-read', 'working-unread', 'idle-unread']);
   });
 
   it('keeps working sessions in place until the re-sort interval, a newly working one first', () => {
     const settle = { order: new SettledOrder(), everyMs: 5 * 60_000 };
-    const ids = (cards: SessionCard[], now: number) => attentionOrder(cards, now, IDLE, new Set(), true, settle).map((c) => c.id);
+    const ids = (cards: SessionCard[], now: number) => attentionOrder(cards, { now, idleMs: IDLE, unread: new Set(), unreadFirst: true, settle }).map((c) => c.id);
     const waiting = card({ id: 'waiting', state: 'waiting', updatedAt: NOW - 99 });
     const w = (id: string, updatedAt: number) => card({ id, state: 'working', updatedAt });
     expect(ids([w('a', NOW - 3), w('b', NOW - 2), waiting], NOW)).toEqual(['waiting', 'b', 'a']);
@@ -222,8 +248,8 @@ describe('attention', () => {
     expect(ids([w('a', NOW + 5 * 60_000), w('c', NOW + 1), waiting], NOW + 5 * 60_000 + 20)).toEqual(['waiting', 'a', 'c']);
     // 0: always sorted.
     const live = { order: new SettledOrder(), everyMs: 0 };
-    expect(attentionOrder([w('a', 1), w('b', 2)], NOW, IDLE, new Set(), false, live).map((c) => c.id)).toEqual(['b', 'a']);
-    expect(attentionOrder([w('a', 3), w('b', 2)], NOW, IDLE, new Set(), false, live).map((c) => c.id)).toEqual(['a', 'b']);
+    expect(attentionOrder([w('a', 1), w('b', 2)], { now: NOW, idleMs: IDLE, unread: new Set(), settle: live }).map((c) => c.id)).toEqual(['b', 'a']);
+    expect(attentionOrder([w('a', 3), w('b', 2)], { now: NOW, idleMs: IDLE, unread: new Set(), settle: live }).map((c) => c.id)).toEqual(['a', 'b']);
   });
 
   it('marks a session unread when anything about it changes, until its terminal has been looked at', () => {
@@ -340,7 +366,7 @@ describe('attention', () => {
   });
 
   it('picks the icon look: kind of input, limit or error, stuck, crashed', () => {
-    const look = (over: Partial<SessionCard>) => stateLook(card({ updatedAt: NOW - 1000, ...over }), NOW, STUCK);
+    const look = (over: Partial<SessionCard>) => stateLook(card({ updatedAt: NOW - 1000, ...over }), { now: NOW, stuckMs: STUCK });
     expect(look({ state: 'waiting', detail: 'Asking: which one?' })).toBe('question');
     expect(look({ state: 'waiting', detail: 'Plan ready for your review' })).toBe('plan');
     expect(look({ state: 'waiting', detail: 'Claude needs your permission to use Bash' })).toBe('permission');
@@ -349,15 +375,16 @@ describe('attention', () => {
     expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'question' })).toBe('question');
     expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'plan' })).toBe('plan');
     expect(look({ state: 'waiting', detail: 'Asking: which one?', waitKind: 'permission' })).toBe('permission');
-    expect(look({ state: 'waiting', detail: 'Needs your permission', waitKind: 'elicitation' })).toBe('input');
-    // A record that says what it waits on wins over its detail.
-    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'question' })).toBe('question');
-    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'plan' })).toBe('plan');
-    expect(look({ state: 'waiting', detail: 'Asking: which one?', waitKind: 'permission' })).toBe('permission');
     expect(look({ state: 'waiting', detail: 'Needs your permission? no', waitKind: 'elicitation' })).toBe('input');
     expect(look({ state: 'blocked', detail: 'rate_limit: Too many requests' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'You have reached your usage limit' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'API Error: 500' })).toBe('error');
+    // A record that says what error it is: a rate limit is one whatever its detail; others still go by the detail.
+    expect(look({ state: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit' })).toBe('limited');
+    // A StopFailure error given as an object records the API's type for its kind.
+    expect(look({ state: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit_error' })).toBe('limited');
+    expect(look({ state: 'blocked', detail: 'API Error: 500', errorKind: 'server_error' })).toBe('error');
+    expect(look({ state: 'blocked', detail: 'You have reached your usage limit', errorKind: 'unknown' })).toBe('limited');
     expect(look({ state: 'working' })).toBe('working');
     expect(look({ state: 'working', updatedAt: NOW - STUCK - 1 })).toBe('stuck');
     expect(look({ state: 'stopped', crashed: true })).toBe('crashed');
@@ -365,6 +392,8 @@ describe('attention', () => {
     // A finished turn stays done however old (it only sorts lower); Esc's interrupt is done in its own colour.
     expect(look({ state: 'done', updatedAt: NOW - IDLE - 1 })).toBe('done');
     expect(look({ state: 'done', detail: 'Interrupted' })).toBe('interrupted');
+    // Said by the record (its transcript), whatever the detail; without it, only the detail tells (an older ended record).
+    expect(look({ state: 'done', detail: 'Stopped', endKind: 'interrupted' })).toBe('interrupted');
     // A reply that ends with a question is done in its own look (it stays in the review lane, not "needs you").
     expect(look({ state: 'done', detail: 'Should I implement these?', asksQuestion: true })).toBe('asked');
     expect(look({ state: 'done', asksQuestion: true, children: [{ id: 'sh', kind: 'shell', label: 'sleep', state: 'running', background: true, children: [] }] })).toBe('background');
@@ -374,11 +403,11 @@ describe('attention', () => {
 
   it('shows a done session with running background work as waiting on it, never idle, and sorts it with working ones', () => {
     const shell = (state: 'running' | 'done', background = true) => ({ id: `sh-${state}`, kind: 'shell' as const, label: 'sleep 600', state, background, children: [] });
-    const look = (over: Partial<SessionCard>) => stateLook(card({ updatedAt: NOW - 1000, ...over }), NOW, STUCK);
+    const look = (over: Partial<SessionCard>) => stateLook(card({ updatedAt: NOW - 1000, ...over }), { now: NOW, stuckMs: STUCK });
     // The turn ended (Stop: done) while a background shell it started still runs: Claude wakes when it finishes.
     expect(look({ state: 'done', children: [shell('running')] })).toBe('background');
     expect(look({ state: 'done', updatedAt: NOW - IDLE - STUCK - 1, children: [shell('running')] })).toBe('background');
-    expect(displayState(card({ state: 'done', updatedAt: NOW - IDLE - 1, children: [shell('running')] }), NOW, IDLE)).toBe('done');
+    expect(displayState(card({ state: 'done', updatedAt: NOW - IDLE - 1, children: [shell('running')] }), { now: NOW, idleMs: IDLE })).toBe('done');
     // Finished background work, or none, is an ordinary done session.
     expect(look({ state: 'done', children: [shell('done')] })).toBe('done');
     // A foreground child still marked running (an interrupted turn) is not background work Claude comes back for.
@@ -393,7 +422,7 @@ describe('attention', () => {
       card({ id: 'bg', state: 'done', updatedAt: NOW - 5000, children: [shell('running')] }),
       card({ id: 'working', state: 'working', updatedAt: NOW - 3000 }),
     ];
-    expect(attentionOrder(cards, NOW, IDLE, new Set()).map((c) => c.id)).toEqual(['working', 'bg', 'done']);
+    expect(attentionOrder(cards, { now: NOW, idleMs: IDLE, unread: new Set() }).map((c) => c.id)).toEqual(['working', 'bg', 'done']);
   });
 });
 
@@ -434,14 +463,15 @@ describe('readDecoration', () => {
 describe('shownLook', () => {
   const STUCK = 10 * 60_000;
   it('keeps the look a parked session finished with, in its label too', () => {
-    expect(shownLook(card({ state: 'parked', lastState: 'done', detail: 'All set' }), NOW, STUCK)).toEqual({ look: 'done', label: 'DONE · PARKED (NOT RUNNING)' });
-    expect(shownLook(card({ state: 'parked', lastState: 'done', asksQuestion: true }), NOW, STUCK).look).toBe('asked');
-    expect(shownLook(card({ state: 'parked', lastState: 'blocked', detail: 'rate_limit: usage limit reached' }), NOW, STUCK).look).toBe('limited');
+    expect(shownLook(card({ state: 'parked', lastState: 'done', detail: 'All set' }), { now: NOW, stuckMs: STUCK })).toEqual({ look: 'done', label: 'DONE · PARKED (NOT RUNNING)' });
+    expect(shownLook(card({ state: 'parked', lastState: 'done', asksQuestion: true }), { now: NOW, stuckMs: STUCK }).look).toBe('asked');
+    expect(shownLook(card({ state: 'parked', lastState: 'blocked', detail: 'rate_limit: usage limit reached' }), { now: NOW, stuckMs: STUCK }).look).toBe('limited');
+    expect(shownLook(card({ state: 'parked', lastState: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit_error' }), { now: NOW, stuckMs: STUCK }).look).toBe('limited');
   });
   it('shows parked when the turn never ended or it crashed, and the plain look otherwise', () => {
-    expect(shownLook(card({ state: 'parked', lastState: 'working' }), NOW, STUCK).look).toBe('parked');
-    expect(shownLook(card({ state: 'parked' }), NOW, STUCK).look).toBe('parked');
-    expect(shownLook(card({ state: 'parked', lastState: 'done', crashed: true }), NOW, STUCK).look).toBe('crashed');
-    expect(shownLook(card({ state: 'done', detail: 'Finished' }), NOW, STUCK)).toEqual({ look: 'done', label: 'DONE' });
+    expect(shownLook(card({ state: 'parked', lastState: 'working' }), { now: NOW, stuckMs: STUCK }).look).toBe('parked');
+    expect(shownLook(card({ state: 'parked' }), { now: NOW, stuckMs: STUCK }).look).toBe('parked');
+    expect(shownLook(card({ state: 'parked', lastState: 'done', crashed: true }), { now: NOW, stuckMs: STUCK }).look).toBe('crashed');
+    expect(shownLook(card({ state: 'done', detail: 'Finished' }), { now: NOW, stuckMs: STUCK })).toEqual({ look: 'done', label: 'DONE' });
   });
 });

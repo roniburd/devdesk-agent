@@ -107,6 +107,18 @@ describe('tickLoop', () => {
     loop.dispose();
   });
 
+  it('waits a full interval again after work done outside the loop', async () => {
+    const tick = vi.fn(async () => {});
+    const loop = tickLoop({ intervalMs: () => 3000, active: () => true, tick });
+    await vi.advanceTimersByTimeAsync(2000);
+    loop.postpone();
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(tick).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(tick).toHaveBeenCalledTimes(1);
+    loop.dispose();
+  });
+
   it('never ticks after dispose', async () => {
     const tick = vi.fn(async () => {});
     const loop = tickLoop({ intervalMs: () => 1_000, active: () => true, tick });

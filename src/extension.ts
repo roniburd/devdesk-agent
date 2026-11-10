@@ -46,6 +46,7 @@ import { migrateSetting } from './migrate';
 import { SessionsModel } from './sessionsModel';
 import { registerSessions } from './sessionsRegistration';
 import { SessionsTree } from './sessionsTree';
+import { SessionViewState } from './sessionViewState';
 import { testApi } from './testApi';
 import { UsagePanel } from './usagePanel';
 import { UsageScopeState } from './usageScopeState';
@@ -87,11 +88,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
     maxConcurrent: insightsMaxConcurrent,
     model: insightsModel,
     claude: insightsClaude,
+    readInsight: (id) => sessions.insight(id),
+    transcriptSize: (path) => sessions.transcriptSize(path),
   });
   const worktreeTasks = new WorktreeTaskStore(join(globalStorage, 'worktree-tasks.json'));
   void worktreeTasks.load();
-  const sessionsTree = new SessionsTree(sessions, worktreeTasks, ctx.globalState);
-  sessions.setReadCheck((card) => sessionsTree.isRead(card));
+  const viewState = new SessionViewState(sessions, ctx.globalState);
+  const sessionsTree = new SessionsTree(sessions, worktreeTasks, viewState);
+  sessions.setReadCheck((card) => viewState.isRead(card));
   // Prompts for later belong to the project folder (`storageUri`); a window with no folder uses the host-wide file,
   // which every project used before: a project folder opening takes its prompts (and those that name no project) from it.
   const hostBacklog = join(globalStorage, 'backlog.json');
@@ -115,8 +119,8 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // The project (or worktree) whose usage this window's 📊 popup and Claude Usage page show.
   const usageScope = new UsageScopeState(ctx.workspaceState);
   const usagePanel = new UsagePanel(ctx.extensionUri, usage, usageScope);
-  const board = new BoardPanel(ctx.extensionUri, sessions, sessionsTree, backlog, worktreeTasks, ctx.globalState, ctx.workspaceState, usage, usageScope);
-  ctx.subscriptions.push(log, sessions, sessionsTree, worktreeTasks, backlog, board, usagePanel, usage, usageScope);
+  const board = new BoardPanel(ctx.extensionUri, sessions, sessionsTree, viewState, backlog, worktreeTasks, ctx.globalState, ctx.workspaceState, usage, usageScope);
+  ctx.subscriptions.push(log, sessions, sessionsTree, viewState, worktreeTasks, backlog, board, usagePanel, usage, usageScope);
   const worktrees = registerWorktreesView(ctx, sessions, sessionsTree);
   registerSessions(ctx, { sessions, sessionsTree, worktreeTasks, insights });
   // The `devdesk` command Claude runs to open files and diffs here, and notes left on diff lines for Claude.
@@ -170,7 +174,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       const dir = ctx.logUri.fsPath;
       const file = join(dir, `claude-sessions-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
       await mkdir(dir, { recursive: true });
-      await writeFile(file, JSON.stringify({ tree: sessionsTree.diagnostics(), board: board.data() }, null, 2));
+      await writeFile(file, JSON.stringify({ tree: viewState.diagnostics(), board: board.data() }, null, 2));
       log.info(`Claude session diagnostics written to ${file}`);
       await vscode.window.showTextDocument(vscode.Uri.file(file), { preview: false });
       return file;

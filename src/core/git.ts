@@ -1,17 +1,13 @@
-import { execFile } from 'node:child_process';
 import { readRefs, type Refs } from './gitRefs';
+import { ExecError, execText } from './shellRun';
 
 export type Runner = (args: string[], cwd: string) => Promise<string>;
 
 /** A git runner; with `timeoutMs`, a git that has not exited by then is killed and the call rejects. */
 export const gitRunner = (timeoutMs?: number): Runner => (args, cwd) =>
-  new Promise((resolve, reject) => {
-    const opts = { cwd, maxBuffer: 64 * 1024 * 1024, ...(timeoutMs ? { timeout: timeoutMs } : {}) };
-    execFile('git', ['-c', 'core.quotePath=false', ...args], opts, (err, stdout, stderr) => {
-      if (err?.killed && timeoutMs) reject(new Error(`git ${args[0]} timed out after ${timeoutMs / 1000}s`));
-      else if (err) reject(new Error((stderr || err.message).trim()));
-      else resolve(stdout);
-    });
+  execText('git', ['-c', 'core.quotePath=false', ...args], { cwd, maxBuffer: 64 * 1024 * 1024, timeoutMs }).catch((err: unknown) => {
+    if (err instanceof ExecError && err.killed && timeoutMs) throw new Error(`git ${args[0]} timed out after ${timeoutMs / 1000}s`);
+    throw err;
   });
 
 export const execGit: Runner = gitRunner();

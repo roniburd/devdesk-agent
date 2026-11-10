@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { workspaceProvider } from './workspaceProvider';
 import { trimSlashes } from './paths';
-import { gitRootFor, workspaceRootFor } from './worktrees';
+import { findGitPlace, workspaceRootFor } from './worktrees';
 
 /**
  * Where a Claude request ran, as the board groups sessions: its project (a package workspace, a git repository's main
@@ -71,14 +71,6 @@ function deletedWorkspaceWorktree(path: string): Place | undefined {
   return undefined;
 }
 
-/** The top of the git worktree containing `dir` (where its `.git` is), else undefined. */
-function gitTop(dir: string): string | undefined {
-  for (let d = dir; ; d = dirname(d)) {
-    if (existsSync(join(d, '.git'))) return d;
-    if (dirname(d) === d) return undefined;
-  }
-}
-
 /** The place of a directory that exists (a real path). */
 function placeOfExisting(dir: string): Place {
   const ws = workspaceRootFor(dir);
@@ -86,11 +78,8 @@ function placeOfExisting(dir: string): Place {
     const prefix = `${ws}/worktrees/`;
     return { project: ws, kind: 'workspace', worktree: dir.startsWith(prefix) ? dir.slice(prefix.length).split('/')[0] : MAIN };
   }
-  const repo = gitRootFor(dir);
-  if (repo) {
-    const top = gitTop(dir);
-    return { project: repo, kind: 'git', worktree: top && top !== repo ? basename(top) : MAIN };
-  }
+  const git = findGitPlace(dir);
+  if (git) return { project: git.repo, kind: 'git', worktree: git.top !== git.repo ? basename(git.top) : MAIN };
   return { project: dir, kind: 'folder', worktree: MAIN };
 }
 

@@ -272,7 +272,14 @@ def snapshot(prev):
     if prev.get('state') not in RECORD_STATES:
         return None
     return {'state': prev['state'], 'detail': str(prev.get('detail') or ''), 'asksQuestion': prev.get('asksQuestion') is True,
-            'turnEndedAt': prev.get('turnEndedAt') if isinstance(prev.get('turnEndedAt'), int) else None}
+            'turnEndedAt': prev.get('turnEndedAt') if isinstance(prev.get('turnEndedAt'), int) else None,
+            'errorKind': kept_error_kind(prev)}
+
+
+def kept_error_kind(prev):
+    """The error kind of a record (or snapshot) whose blocked state is kept; None from an older script."""
+    kind = prev.get('errorKind')
+    return kind if isinstance(kind, str) and kind else None
 
 
 def elicitation_key(data):
@@ -351,6 +358,7 @@ def main():
             last_edit = edited
     transcript = str(data.get('transcript_path') or prev.get('transcriptPath') or '')
     asks = False
+    error_kind = None
     now = int(time.time() * 1000)
     # When the current turn started and, once it finished, ended: DevDesk's insights are matched to a turn by these.
     turn_started = prev.get('turnStartedAt') if isinstance(prev.get('turnStartedAt'), int) else None
@@ -394,6 +402,7 @@ def main():
         elif ended and base:
             # A subagent's wait was answered: back to what the session showed before it.
             state, detail, asks, turn_ended = base['state'], base['detail'], base.get('asksQuestion') is True, base.get('turnEndedAt')
+            error_kind = kept_error_kind(base)
         elif ended:
             state, detail = 'working', 'Thinking' if event == 'PostToolBatch' else tool_detail(tool, tool_input, cwd)
         elif event == 'PostToolBatch' or (agent and prev.get('state') in ('done', 'idle', 'blocked')):
@@ -426,6 +435,7 @@ def main():
             state, detail = 'waiting', waits[-1]['detail']
         elif base:
             state, detail, asks, turn_ended = base['state'], base['detail'], base.get('asksQuestion') is True, base.get('turnEndedAt')
+            error_kind = kept_error_kind(base)
         else:
             state, detail = 'working', 'Thinking'
     elif event == 'Notification':
@@ -450,6 +460,7 @@ def main():
             # Not a question for this session (a background job finished or needs input, a login succeeded): keep the state.
             state, detail = prev['state'], str(prev.get('detail') or '')
             asks = prev.get('asksQuestion') is True
+            error_kind = kept_error_kind(prev)
         else:
             state, detail = 'idle', 'Ready'
     elif event == 'Stop':
@@ -464,6 +475,9 @@ def main():
     elif event == 'StopFailure':
         # The turn ended on an error: error is its kind (rate_limit, unknown, ...), error_details the message.
         error = data.get('error') or ''
+        # Its kind alone (rate_limit, overloaded_error, unknown): the word the error starts with, or the error's type.
+        kind = re.match(r'([a-z][a-z0-9_]*)(?::|$)', first_line(error.get('type') if isinstance(error, dict) else error))
+        error_kind = kind.group(1)[:64] if kind else None
         if isinstance(error, dict):
             error = error.get('message') or error.get('type') or ''
         details = first_line(data.get('error_details'))
@@ -518,6 +532,8 @@ def main():
         'waitsBelow': waits[:-1] or None,
         'stateBeforeWait': base,
         'asksQuestion': asks if state == 'done' else None,
+        # What error ended the turn (StopFailure's kind: rate_limit, overloaded_error, unknown, ...).
+        'errorKind': error_kind if state == 'blocked' else None,
         'prompt': prompt,
         'turnStartedAt': turn_started,
         'turnEndedAt': turn_ended if state == 'done' else None,

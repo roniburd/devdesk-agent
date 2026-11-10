@@ -33,6 +33,8 @@ export const UNUSED_INDEX_MS = 30 * DAY;
 const LEFTOVER_MS = DAY;
 /** How often a window looks for unused index files. */
 const CLEANUP_INTERVAL_MS = DAY;
+/** A run that read this much saves the index at once, whatever `saveIntervalMs` says: another window would read it all again. */
+const SAVE_NOW_BYTES = 32 * 1024 * 1024;
 
 export interface HistoryIndexerOptions {
   enabled: () => boolean;
@@ -45,6 +47,11 @@ export interface HistoryIndexerOptions {
   stateDir: () => string;
   now?: () => number;
   minIntervalMs?: number;
+  /**
+   * How long what a run read may stay only in memory before the index file is written (default 0: every run that read
+   * something). It is written sooner when transcripts were dropped, when a run read a lot, and on `release` and `dispose`.
+   */
+  saveIntervalMs?: () => number;
   warn?: (message: string) => void;
   /** Where each run says what it read, how long it took and what it did to the heap (for debugging a slow or big index). */
   info?: (message: string) => void;
@@ -105,7 +112,8 @@ export function unusedHistoryFiles(files: readonly { name: string; mtimeMs: numb
 /**
  * Keeps the board's history index current: reads this workspace's Claude transcripts (only what was appended since
  * last time, in chunks, two at a time) into `<state dir>/history/<root>.json`. One window indexes at a time (a lock
- * next to the file); the others read what it wrote.
+ * next to the file); the others read what it wrote. What a run reads is used at once, but saved at most every
+ * `saveIntervalMs`: another window sees it (or reads it again itself) only once it is saved.
  */
 export class HistoryIndexer {
   private file: HistoryFile = emptyHistoryFile();
@@ -114,6 +122,10 @@ export class HistoryIndexer {
   private running: Promise<void> | undefined;
   private lastStart = -Infinity;
   private lastCleanup = -Infinity;
+  /** When this window last wrote the index file (the run's clock). */
+  private lastSave = -Infinity;
+  /** The index in memory has transcripts read since it was saved to `loadedPath`. */
+  private unsaved = false;
   private current: IndexStatus = { indexed: 0, total: 0, building: false };
   private readonly listeners = new Set<() => void>();
   private disposed = false;
@@ -147,12 +159,14 @@ export class HistoryIndexer {
   }
 
   dispose(): void {
+    this.saveUnsaved();
     this.disposed = true;
     this.listeners.clear();
   }
 
   /** Lets go of the index (the board closed: it can be about 100 MB); the next refresh loads it again. */
   release(): void {
+    this.saveUnsaved();
     this.generation++;
     this.setFile(emptyHistoryFile());
     this.loadedPath = '';
@@ -196,6 +210,7 @@ export class HistoryIndexer {
 
   private async run(now: number, s: RunSettings): Promise<void> {
     if (!s.enabled || (s.scope === 'workspace' && !s.root)) {
+      this.saveUnsaved();
       this.current = { indexed: 0, total: 0, building: false };
       if (!this.loadedPath && !Object.keys(this.file.transcripts).length) return;
       this.setFile(emptyHistoryFile());
@@ -207,6 +222,8 @@ export class HistoryIndexer {
     const generation = this.generation;
     const real = s.root ? await realpath(s.root).catch(() => undefined) : undefined;
     this.realRoot = real && real !== s.root ? real : undefined;
+    // Another index now (the scope, root or days changed): the one in memory is saved before it is replaced.
+    if (this.loadedPath !== path) this.saveUnsaved();
     await this.load(path);
     // The index holds prompts and replies: only the user reads it.
     await mkdir(dirname(dirname(path)), { recursive: true });
@@ -274,15 +291,28 @@ export class HistoryIndexer {
       const kept = Object.values(next).filter((t) => !t.outOfScope).length;
       this.current = { indexed: kept, total: kept, building: true };
       const keys = Object.keys(next);
-      if (keys.length !== Object.keys(before).length || keys.some((k) => !(k in before))) changed = true;
-      if (!changed) return;
-      const file: HistoryFile = { ...emptyHistoryFile(), transcripts: next };
+      const removed = Object.keys(before).some((k) => !(k in next));
+      if (removed || keys.some((k) => !(k in before))) changed = true;
+      if (!changed && !this.unsaved) return;
+      const file: HistoryFile = changed ? { ...emptyHistoryFile(), transcripts: next } : this.file;
+      // Saved now: no index file yet, transcripts dropped (another window would keep listing them), much read, released
+      // meanwhile (not kept in memory), or the last save was long enough ago. Else this window uses it unsaved.
+      const due =
+        this.loadedMtime < 0 || removed || readBytes >= SAVE_NOW_BYTES || generation !== this.generation || now - this.lastSave >= (this.o.saveIntervalMs?.() ?? 0);
+      if (!due) {
+        // Nothing new since the unsaved one: the same index, so its revision stays (the board keeps its docs).
+        if (changed) this.setFile(file);
+        this.unsaved = true;
+        return;
+      }
       const text = JSON.stringify(file);
       await writeFileAtomic(path, text, false, 0o600);
+      this.lastSave = now;
       this.o.info?.(`history: saved ${kept} sessions to ${path} (${MBs(Buffer.byteLength(text))}; ${this.summary(started, heapBefore, read, readBytes)})`);
       // Released meanwhile (the board closed): the next refresh loads the file again.
       if (generation !== this.generation) return;
-      this.setFile(file);
+      if (changed) this.setFile(file);
+      this.unsaved = false;
       this.loadedMtime = (await stat(path)).mtimeMs;
     } catch (err) {
       this.o.warn?.(`history: indexing failed (${this.summary(started, heapBefore, read, readBytes)}): ${(err as Error).message}`);
@@ -299,14 +329,35 @@ export class HistoryIndexer {
     return `read ${read} transcripts, ${MBs(readBytes)}, in ${((Date.now() - started) / 1000).toFixed(1)}s; heap ${MBs(heapBefore)} → ${MBs(process.memoryUsage().heapUsed)}`;
   }
 
+  /**
+   * Writes an index that has unsaved transcripts to its file, in the background, unless another window is indexing it
+   * (that one saves its own). Called before the index in memory is let go or replaced.
+   */
+  private saveUnsaved(): void {
+    if (!this.unsaved || !this.loadedPath) return;
+    const path = this.loadedPath;
+    const file = this.file;
+    this.unsaved = false;
+    void withFileLock(path, () => writeFileAtomic(path, JSON.stringify(file), false, 0o600), { waitMs: 0, staleMs: LOCK_STALE_MS })
+      .then(() => this.o.info?.(`history: saved ${path} before letting go of it`))
+      .catch((err) => {
+        if (!(err instanceof FileLockBusy)) this.o.warn?.(`history: cannot save ${path}: ${(err as Error).message}`);
+      });
+  }
+
   private async load(path: string): Promise<void> {
     const info = await stat(path).catch(() => undefined);
     if (!info) {
-      if (this.loadedPath !== path) this.setFile(emptyHistoryFile());
+      if (this.loadedPath !== path) {
+        this.setFile(emptyHistoryFile());
+        this.unsaved = false;
+      }
       this.loadedPath = path;
       return;
     }
     if (this.loadedPath === path && info.mtimeMs === this.loadedMtime) return;
+    // Another window saved the index (or this is another index): what was read here unsaved is in it or read again.
+    this.unsaved = false;
     const started = Date.now();
     this.setFile(parseHistoryFile(await readFile(path, 'utf8').catch(() => '')));
     this.o.info?.(`history: loaded ${Object.keys(this.file.transcripts).length} transcripts from ${path} (${MBs(info.size)}) in ${Date.now() - started}ms`);

@@ -94,7 +94,7 @@ describe('sortSessions', () => {
     const cards = [card('w', { state: 'working' }), card('d', { updatedAt: NOW - 2 * MIN })];
     const unread = new Set(['d']);
     const o = { ...opts({ unread }), idleMs: 30 * MIN, unreadFirst: true };
-    expect(ids(sortSessions(cards, { ...o, mode: 'attention' }))).toEqual(ids(attentionOrder(cards, NOW, 30 * MIN, unread, true)));
+    expect(ids(sortSessions(cards, { ...o, mode: 'attention' }))).toEqual(ids(attentionOrder(cards, { now: NOW, idleMs: 30 * MIN, unread, unreadFirst: true })));
     expect(ids(sortSessions(cards, { ...o, mode: 'urgency' }))).toEqual(['d', 'w']);
   });
 });
@@ -129,7 +129,8 @@ describe('urgentByWorktree', () => {
 });
 
 describe('buildBoard with urgency', () => {
-  const base = { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unreadFirst: true, sort: 'urgency' as const, recentMs: 15 * MIN };
+  const view = { now: NOW, idleMs: 30 * MIN, stuckMs: 10 * MIN, unreadFirst: true };
+  const base = { sort: 'urgency' as const, recentMs: 15 * MIN };
 
   it('orders each lane by urgency', () => {
     const cards = [
@@ -140,7 +141,7 @@ describe('buildBoard with urgency', () => {
       card('done-read', { updatedAt: NOW - MIN }),
       card('blocked', { state: 'blocked', detail: 'API error', updatedAt: NOW - 3 * MIN }),
     ];
-    const board = buildBoard(cards, [], { ...base, unread: new Set() });
+    const board = buildBoard(cards, [], { ...base, view: { ...view, unread: new Set() } });
     const lane = (id: string) => board.lanes.find((l) => l.id === id)!.sessions.map((s) => s.id);
     expect(lane('needs')).toEqual(['q-old', 'q-new']);
     expect(lane('working')).toEqual(['work', 'stuck']);
@@ -150,7 +151,7 @@ describe('buildBoard with urgency', () => {
   it('keeps every card to review above the idle divider', () => {
     // A read ready session updated recently, a read done one earlier, and an unread parked one.
     const cards = [card('ready', { state: 'idle', updatedAt: NOW - MIN }), card('done', { updatedAt: NOW - 5 * MIN }), card('parked', { state: 'parked', updatedAt: NOW - 90 * MIN })];
-    const review = buildBoard(cards, [], { ...base, unread: new Set(['parked']) }).lanes.find((l) => l.id === 'review')!.sessions;
+    const review = buildBoard(cards, [], { ...base, view: { ...view, unread: new Set(['parked']) } }).lanes.find((l) => l.id === 'review')!.sessions;
     expect(review.map((s) => [s.id, !!s.idle])).toEqual([
       ['done', false],
       ['parked', false],

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { workspaceProvider } from './workspaceProvider';
 
 export interface PackageRepo {
@@ -156,28 +156,55 @@ function gitFeatures(root: string): Feature[] {
   return [main, ...linked.sort((a, b) => a.name.localeCompare(b.name))];
 }
 
+/** What a linked worktree's `.git` file says: its own git directory and, when that is `<main>/.git/worktrees/<id>`, `<main>`. */
+export interface GitdirFile {
+  gitDir: string;
+  /** The main worktree's root; undefined when the git directory is not one of a repository's worktrees (a submodule). */
+  repo: string | undefined;
+}
+
+/** Parses the `gitdir: <path>` line of the `.git` file in `dir` (a relative path is from `dir`); undefined when there is none. */
+export function parseGitdirFile(content: string, dir: string): GitdirFile | undefined {
+  const m = /^gitdir:\s*(.+)$/m.exec(content);
+  if (!m) return undefined;
+  const gitDir = resolve(dir, m[1].trim());
+  const main = /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(gitDir);
+  return { gitDir, repo: main?.[1] };
+}
+
+/** A directory holding a `.git`: `top` is that directory, `repo` the main worktree's root (`top` unless a linked worktree). */
+export interface GitPlace {
+  top: string;
+  repo: string;
+}
+
+/** The git place `dir` is the top of, or undefined when `dir` has no readable `.git`. Does not look above `dir`. */
+export function gitPlace(dir: string): GitPlace | undefined {
+  const dotGit = join(dir, '.git');
+  try {
+    if (statSync(dotGit).isDirectory()) return { top: dir, repo: dir };
+    // A linked worktree: `.git` is a file with `gitdir: <main>/.git/worktrees/<id>`.
+    return { top: dir, repo: parseGitdirFile(readFileSync(dotGit, 'utf8'), dir)?.repo ?? dir };
+  } catch {
+    return undefined; // no .git here
+  }
+}
+
+/** The git place of the worktree containing `folder`: `gitPlace` of `folder` or the nearest directory above it that has one. */
+export function findGitPlace(folder: string): GitPlace | undefined {
+  return findUp(folder, gitPlace);
+}
+
 /**
  * The main worktree of the git repository containing `folder` (from a linked worktree, its main repository), else
  * undefined.
  */
 export function gitRootFor(folder: string): string | undefined {
-  return findUp(folder, (dir) => {
-    const dotGit = join(dir, '.git');
-    try {
-      if (statSync(dotGit).isDirectory()) return dir;
-      // A linked worktree: `.git` is a file with `gitdir: <main>/.git/worktrees/<id>`.
-      const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
-      const admin = m?.[1].trim();
-      const common = admin && /^(.*)\/\.git\/worktrees\/[^/]+$/.exec(isAbsolute(admin) ? admin : resolve(dir, admin));
-      return common ? common[1] : dir;
-    } catch {
-      return undefined; // no .git here
-    }
-  });
+  return findGitPlace(folder)?.repo;
 }
 
 /** The first `found(dir)` that is not undefined, for `folder` and then each directory above it. */
-function findUp(folder: string, found: (dir: string) => string | undefined): string | undefined {
+function findUp<T>(folder: string, found: (dir: string) => T | undefined): T | undefined {
   for (let dir = folder.replace(/\/+$/, '') || '/'; ; dir = dirname(dir)) {
     const result = found(dir);
     if (result !== undefined) return result;

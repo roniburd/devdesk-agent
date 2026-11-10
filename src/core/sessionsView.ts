@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { runningBackground, type SessionChild } from './sessionChildren';
-import { INTERRUPTED_DETAIL, type SessionCard, type SessionState, type WaitKind } from './sessions';
+import { endKindOf, hitLimit, type SessionCard, type SessionState, type WaitKind, waitKindOf } from './sessions';
+import { STATE_INFO } from './sessionStates';
+import { LOOKS, type StateLook } from './stateLooks';
 import { DEFAULT_SERVER } from './tmux';
 import { oneLine, truncate } from './text';
 
@@ -35,17 +37,6 @@ export interface CardView {
   /** Runs in a tmux pane, so the Claude view can open a terminal on it. */
   inTmux: boolean;
 }
-
-const LABELS: Record<SessionState, string> = {
-  waiting: 'NEEDS INPUT',
-  blocked: 'BLOCKED',
-  working: 'WORKING',
-  done: 'DONE',
-  idle: 'READY',
-  unknown: 'NO STATUS',
-  stopped: 'NOT RUNNING',
-  parked: 'PARKED',
-};
 
 export function formatAgo(updatedAt: number | undefined, now: number): string {
   if (updatedAt === undefined) return '';
@@ -83,14 +74,64 @@ function tmuxLabel(card: SessionCard, vscodeServer: string | undefined): string 
   return `tmux ${card.tmuxSession} (${server === DEFAULT_SERVER ? 'your tmux' : `server ${server}`})`;
 }
 
+/** What a card's title says on the Claude Board (setting `devdesk.board.cardTitle`). */
+export type CardTitleMode = 'objective' | 'latest';
+
+/** A card's titles, shared by the Claude view and the Claude Board. */
+export interface CardTitles {
+  /** A name: one the user gave (/rename), else DevDesk's few-word Haiku title, else Claude Code's own; '' without one. */
+  name: string;
+  /** The Claude view's title (not truncated): the name, else the last prompt, else a fallback that tells sessions apart. */
+  title: string;
+  /** The board's title for the latest prompt: Haiku's title (unless the user named the session), else `title` truncated. */
+  latest: string;
+  /** With `objective`, what the whole session sets out to do (Haiku's), unless the user named it: the board's title then. */
+  objective?: string;
+}
+
+/** A card's titles (see `CardTitles`); `mode` only decides `objective`. */
+export function cardTitles(card: SessionCard, mode: CardTitleMode = 'latest'): CardTitles {
+  const prompt = card.prompt ? oneLine(card.prompt) : '';
+  const given = card.name ? oneLine(card.name) : '';
+  const name = (card.nameByUser && given) || (card.insightTitle ? oneLine(card.insightTitle) : '') || given;
+  const title = name || prompt || (card.cwd ? `Claude in ${basename(card.cwd)}` : card.tmuxSession ?? 'Claude');
+  const userNamed = !!(card.nameByUser && card.name);
+  const latest = card.insightTitle && !userNamed ? card.insightTitle : truncate(title, TITLE_MAX);
+  const objective = mode === 'objective' && card.insightObjective && !userNamed ? card.insightObjective : undefined;
+  return { name, title, latest, ...(objective ? { objective } : {}) };
+}
+
+/** What can be done with a session, for the Claude view's menus (its row's context tags) and the board's buttons. */
+export interface CardCapabilities {
+  /** Not running: opening it resumes it, and End removes it from the list. */
+  parked: boolean;
+  /** It has a tmux session (DevDesk can open and end its terminal). */
+  inTmuxSession: boolean;
+  canOpen: boolean;
+  canFork: boolean;
+  canEnd: boolean;
+}
+
+export function cardCapabilities(card: SessionCard): CardCapabilities {
+  const parked = card.state === 'parked';
+  const inTmuxSession = !!card.tmuxSession;
+  return {
+    parked,
+    inTmuxSession,
+    canOpen: inTmuxSession || (parked && !!card.cwd),
+    canFork: !!(card.sessionId && card.cwd),
+    canEnd: inTmuxSession || parked,
+  };
+}
+
+const TITLE_MAX = 120;
+
 /** `vscodeServer`: the tmux server DevDesk runs its sessions on; sessions elsewhere get their server in the location. */
 export function cardView(card: SessionCard, now: number, vscodeServer?: string): CardView {
   const inTmux = !!card.tmuxPane;
   const location = [tmuxLabel(card, vscodeServer), where(card)].filter(Boolean).join(' · ');
   const prompt = card.prompt ? oneLine(card.prompt) : '';
-  const given = card.name ? oneLine(card.name) : '';
-  const name = (card.nameByUser && given) || (card.insightTitle ? oneLine(card.insightTitle) : '') || given;
-  const title = name || prompt || (card.cwd ? `Claude in ${basename(card.cwd)}` : card.tmuxSession ?? 'Claude');
+  const { name, title } = cardTitles(card);
   const ago = (at: number | undefined) => timeAgo(at, now);
   const summaryAgo = ago(card.summaryAt);
   const times = [card.startedAt !== undefined ? `Started ${ago(card.startedAt)}` : '', card.updatedAt !== undefined ? `active ${ago(card.updatedAt)}` : '']
@@ -100,13 +141,13 @@ export function cardView(card: SessionCard, now: number, vscodeServer?: string):
     id: card.id,
     worktree: card.featureName ?? 'no worktree',
     hasWorktree: !!card.featureName,
-    title: truncate(title, 120),
+    title: truncate(title, TITLE_MAX),
     prompt: name && prompt ? truncate(prompt, 300) : '',
     summary: card.summary ? `${truncate(oneLine(card.summary), 500)}${summaryAgo ? ` (${summaryAgo})` : ''}` : '',
     times: times.charAt(0).toUpperCase() + times.slice(1),
     location,
     state: card.state,
-    stateLabel: LABELS[card.state],
+    stateLabel: STATE_INFO[card.state].label,
     ago: formatAgo(card.updatedAt, now),
     detail: truncate(oneLine(card.detail), 160),
     liveStatus: card.liveStatus ? truncate(oneLine(card.liveStatus), 120) : '',
@@ -139,11 +180,11 @@ export function transitionsToWaiting(prev: readonly SessionCard[], next: readonl
   return next.filter((c) => c.state === 'waiting' && before.get(c.id) !== 'waiting').map((c) => c.id);
 }
 
-const BADGE_LEVELS: readonly { state: SessionState; one: string; many: string }[] = [
-  { state: 'waiting', one: 'needs you', many: 'need you' },
-  { state: 'blocked', one: 'blocked on an error', many: 'blocked on an error' },
-  { state: 'working', one: 'working', many: 'working' },
-];
+/** The states the badge counts, the most urgent first. */
+const BADGE_LEVELS = (Object.keys(STATE_INFO) as SessionState[])
+  .filter((state) => STATE_INFO[state].badge)
+  .sort((a, b) => STATE_INFO[a].listOrder - STATE_INFO[b].listOrder)
+  .map((state) => ({ state, ...STATE_INFO[state].badge! }));
 
 /** The activity bar badge: the count of the most urgent kind of session (needs you, then blocked, then working), or none. */
 export function badgeFor(cards: readonly SessionCard[]): { value: number; tooltip: string } | undefined {
@@ -162,13 +203,26 @@ export function waitsOnBackground(card: SessionCard): boolean {
   return card.state === 'done' && (!!card.runsInBackground || (!!card.children && runningBackground(card.children)));
 }
 
+/** What the session views go by besides the cards: the time, the idle and stuck limits, the read state and the order. */
+export interface ViewContext {
+  now: number;
+  /** A done session not updated this long sorts as idle (see `displayState`). */
+  idleMs: number;
+  /** A working session with no hook event this long looks stuck (see `stateLook`). */
+  stuckMs: number;
+  /** Sessions with something new since the user last looked at them. */
+  unread: ReadonlySet<string>;
+  /** Every unread session above every read one (see `attentionOrder`). */
+  unreadFirst?: boolean;
+  /** Keeps working sessions in place between re-sorts (see `attentionOrder`). */
+  settle?: Settle;
+}
+
 /** A done session not updated for `idleMs` sorts as idle (after working ones), unless it waits on background work; it still looks done. */
-export function displayState(card: SessionCard, now: number, idleMs: number): SessionState {
+export function displayState(card: SessionCard, { now, idleMs }: Pick<ViewContext, 'now' | 'idleMs'>): SessionState {
   const stale = card.updatedAt !== undefined && now - card.updatedAt > idleMs;
   return card.state === 'done' && stale && !waitsOnBackground(card) ? 'idle' : card.state;
 }
-
-const RANK: Record<SessionState, number> = { waiting: 0, blocked: 1, done: 4, working: 3, idle: 5, unknown: 6, stopped: 7, parked: 8 };
 
 /**
  * The order of working sessions, kept between re-sorts: their `updatedAt` changes with every hook event, so sorting
@@ -213,19 +267,13 @@ export interface Settle {
  * Working sessions (and done ones waiting on background work) sort as read, so they don't jump each time they show
  * something new; with `settle` they also keep their order between its re-sorts.
  */
-export function attentionOrder(
-  cards: readonly SessionCard[],
-  now: number,
-  idleMs: number,
-  unread: ReadonlySet<string>,
-  unreadFirst = false,
-  settle?: Settle,
-): SessionCard[] {
-  const working = (c: SessionCard): boolean => waitsOnBackground(c) || displayState(c, now, idleMs) === 'working';
+export function attentionOrder(cards: readonly SessionCard[], v: Pick<ViewContext, 'now' | 'idleMs' | 'unread' | 'unreadFirst' | 'settle'>): SessionCard[] {
+  const { now, unread, unreadFirst = false, settle } = v;
+  const working = (c: SessionCard): boolean => waitsOnBackground(c) || displayState(c, v) === 'working';
   const rank = (c: SessionCard): number => {
-    if (working(c)) return unreadFirst ? 10 + RANK.working : RANK.working * 2 + 1;
-    const state = displayState(c, now, idleMs);
-    const r = state === 'done' && unread.has(c.id) ? 2 : RANK[state];
+    if (working(c)) return unreadFirst ? 10 + STATE_INFO.working.attentionRank : STATE_INFO.working.attentionRank * 2 + 1;
+    const state = displayState(c, v);
+    const r = state === 'done' && unread.has(c.id) ? 2 : STATE_INFO[state].attentionRank;
     const u = unread.has(c.id) ? 0 : 1;
     return unreadFirst ? u * 10 + r : r * 2 + u;
   };
@@ -391,45 +439,21 @@ export function unreadCards(seen: ReadonlyMap<string, string>, cards: readonly S
   return new Set(cards.filter((c) => seen.get(c.id) !== cardSignature(c)).map((c) => c.id));
 }
 
-/** A finer state for icons and labels: which kind of input, an error or a usage limit, stuck or crashed. */
-export type StateLook =
-  | 'question'
-  | 'permission'
-  | 'plan'
-  | 'input'
-  | 'limited'
-  | 'error'
-  | 'working'
-  | 'stuck'
-  | 'background'
-  | 'done'
-  | 'asked'
-  | 'interrupted'
-  | 'idle'
-  | 'unknown'
-  | 'crashed'
-  | 'stopped'
-  | 'parked';
+export type { StateLook } from './stateLooks';
 
 const WAIT_LOOKS: Record<WaitKind, StateLook> = { question: 'question', plan: 'plan', permission: 'permission', elicitation: 'input' };
-
-const LIMIT_RE = /\b(rate|usage)[ _-]?limit|limit (reached|exceeded)|\blimited\b/i;
 
 /**
  * `stuckMs`: a working session with no hook event for this long looks stuck. A finished turn looks done (or interrupted,
  * when Esc ended it) however long ago it ended; `idleMs` only changes where it sorts (see `displayState`).
  */
-export function stateLook(card: SessionCard, now: number, stuckMs: number): StateLook {
+export function stateLook(card: SessionCard, { now, stuckMs }: Pick<ViewContext, 'now' | 'stuckMs'>): StateLook {
   const state = card.state;
   switch (state) {
     case 'waiting':
-      if (card.waitKind) return WAIT_LOOKS[card.waitKind];
-      // A record from an older hook script says what it waits on only in its detail.
-      if (card.detail.startsWith('Asking:')) return 'question';
-      if (card.detail.startsWith('Plan ready')) return 'plan';
-      return /permission/i.test(card.detail) ? 'permission' : 'input';
+      return WAIT_LOOKS[waitKindOf(card)];
     case 'blocked':
-      return LIMIT_RE.test(card.detail) ? 'limited' : 'error';
+      return hitLimit(card) ? 'limited' : 'error';
     case 'working':
       return card.updatedAt !== undefined && now - card.updatedAt > stuckMs ? 'stuck' : 'working';
     case 'stopped':
@@ -438,7 +462,7 @@ export function stateLook(card: SessionCard, now: number, stuckMs: number): Stat
       return card.crashed ? 'crashed' : 'parked';
     case 'done':
       if (waitsOnBackground(card)) return 'background';
-      if (card.detail === INTERRUPTED_DETAIL) return 'interrupted';
+      if (endKindOf(card) === 'interrupted') return 'interrupted';
       return card.asksQuestion ? 'asked' : 'done';
     default:
       return state;
@@ -449,38 +473,17 @@ export function stateLook(card: SessionCard, now: number, stuckMs: number): Stat
  * How a parked session's last turn ended (done, asked you, interrupted, blocked, usage limit), so its row keeps that
  * icon and colour once it stops running; undefined for other sessions, a crashed one, or a turn that never ended.
  */
-function finishedLook(card: SessionCard, now: number, stuckMs: number): StateLook | undefined {
+function finishedLook(card: SessionCard, v: Pick<ViewContext, 'now' | 'stuckMs'>): StateLook | undefined {
   if (card.state !== 'parked' || card.crashed || (card.lastState !== 'done' && card.lastState !== 'blocked')) return undefined;
-  return stateLook({ ...card, state: card.lastState, children: undefined }, now, stuckMs);
+  return stateLook({ ...card, state: card.lastState, children: undefined }, v);
 }
 
 /** The look a row is drawn with (its finished look when parked), and its label (`DONE · PARKED (NOT RUNNING)`). */
-export function shownLook(card: SessionCard, now: number, stuckMs: number): { look: StateLook; label: string } {
-  const look = stateLook(card, now, stuckMs);
-  const finished = finishedLook(card, now, stuckMs);
-  return finished ? { look: finished, label: `${LOOK_LABELS[finished]} · ${LOOK_LABELS[look]}` } : { look, label: LOOK_LABELS[look] };
+export function shownLook(card: SessionCard, v: Pick<ViewContext, 'now' | 'stuckMs'>): { look: StateLook; label: string } {
+  const look = stateLook(card, v);
+  const finished = finishedLook(card, v);
+  return finished ? { look: finished, label: `${LOOKS[finished].label} · ${LOOKS[look].label}` } : { look, label: LOOKS[look].label };
 }
-
-/** Codicon and theme colour per look, for tree rows; each look has its own shape, so colour is never the only cue. */
-export const LOOK_ICONS: Record<StateLook, { icon: string; color?: string }> = {
-  question: { icon: 'question', color: 'charts.yellow' },
-  permission: { icon: 'shield', color: 'charts.yellow' },
-  plan: { icon: 'checklist', color: 'charts.yellow' },
-  input: { icon: 'bell-dot', color: 'charts.yellow' },
-  limited: { icon: 'clock', color: 'charts.orange' },
-  error: { icon: 'error', color: 'charts.red' },
-  working: { icon: 'loading~spin', color: 'charts.blue' },
-  stuck: { icon: 'watch', color: 'charts.orange' },
-  background: { icon: 'sync~spin', color: 'charts.blue' },
-  done: { icon: 'check', color: 'charts.green' },
-  asked: { icon: 'comment-discussion', color: 'charts.green' },
-  interrupted: { icon: 'debug-stop', color: 'charts.purple' },
-  idle: { icon: 'circle-outline', color: 'disabledForeground' },
-  unknown: { icon: 'circle-large-outline' },
-  crashed: { icon: 'debug-disconnect', color: 'charts.red' },
-  stopped: { icon: 'circle-slash', color: 'disabledForeground' },
-  parked: { icon: 'debug-pause', color: 'disabledForeground' },
-};
 
 /**
  * How a session row marks its read state, as a file decoration (tree labels cannot be bold): with `dimRead` read titles
@@ -490,48 +493,6 @@ export function readDecoration(unread: boolean, opts: { dimRead: boolean; badge:
   if (unread) return opts.badge ? { badge: '\u25CF', tooltip: 'Unread' } : undefined;
   return opts.dimRead ? { color: 'descriptionForeground', tooltip: 'Read' } : undefined;
 }
-
-/** Tooltip and screen reader text per look. */
-const LOOK_LABELS: Record<StateLook, string> = {
-  question: 'QUESTION FOR YOU',
-  permission: 'NEEDS PERMISSION',
-  plan: 'PLAN TO REVIEW',
-  input: 'NEEDS INPUT',
-  limited: 'USAGE LIMIT',
-  error: 'BLOCKED',
-  working: 'WORKING',
-  stuck: 'NO PROGRESS (STUCK?)',
-  background: 'WAITING ON BACKGROUND WORK',
-  done: 'DONE',
-  asked: 'DONE (ASKED YOU)',
-  interrupted: 'DONE (INTERRUPTED)',
-  idle: 'READY',
-  unknown: 'NO STATUS',
-  crashed: 'CRASHED',
-  stopped: 'NOT RUNNING',
-  parked: 'PARKED (NOT RUNNING)',
-};
-
-/** Short state text for a Worktrees row. */
-export const LOOK_TEXT: Record<StateLook, string> = {
-  question: '? question',
-  permission: '? needs permission',
-  plan: '? plan to review',
-  input: '? needs input',
-  limited: '◷ usage limit',
-  error: '✕ blocked',
-  working: '⟳ working',
-  stuck: '⟳ stuck?',
-  background: '⟳ background',
-  done: '✓ done',
-  asked: '✓ asked you',
-  interrupted: '■ interrupted',
-  idle: '○ ready',
-  unknown: '● claude',
-  crashed: '✕ crashed',
-  stopped: '○ not running',
-  parked: '⏸ parked',
-};
 
 /**
  * Splits a worktree's sessions (in attention order, so parked ones last, newest first) into those listed and the

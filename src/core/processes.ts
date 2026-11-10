@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
 import { basename } from 'node:path';
+import { execText } from './shellRun';
 
 /** Parent → children and pid → command name, from `ps -A -o pid=,ppid=,comm=`. */
 export interface ProcessTable {
@@ -25,11 +25,7 @@ export function parseProcessTable(out: string): ProcessTable {
 
 /** The process table, or undefined when `ps` fails. */
 export function listProcesses(): Promise<ProcessTable | undefined> {
-  return new Promise((resolve) => {
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,comm='], { maxBuffer: 16 * 1024 * 1024, timeout: 15_000 }, (err, stdout) =>
-      resolve(err ? undefined : parseProcessTable(stdout)),
-    );
-  });
+  return execText('ps', ['-A', '-o', 'pid=,ppid=,comm='], { maxBuffer: 16 * 1024 * 1024, timeoutMs: 15_000 }).then(parseProcessTable, () => undefined);
 }
 
 /** `pid` or the first descendant (a few levels down, past wrapper shells) that satisfies `match`; undefined when none does. */

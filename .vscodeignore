@@ -11,3 +11,5 @@ vitest.config.ts
 Config
 vsix/**
 docs/**
+tsconfig.webview.json
+media/*.js

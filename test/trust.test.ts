@@ -63,6 +63,17 @@ describe('repoRootFromGitFile', () => {
     expect(repoRootFromGitFile('gitdir: /w/repo/.git/modules/sub\n', '/w/repo/sub')).toBeUndefined();
     expect(repoRootFromGitFile('nonsense', '/w/x')).toBeUndefined();
   });
+
+  it('finds the main repository under nested folders, from the last .git/worktrees', () => {
+    expect(repoRootFromGitFile('gitdir: /a/b/c/repo/.git/worktrees/fix\r\n', '/x')).toBe('/a/b/c/repo');
+    expect(repoRootFromGitFile('gitdir: /w/old/.git/worktrees/x/repo/.git/worktrees/fix\n', '/x')).toBe('/w/old/.git/worktrees/x/repo');
+    expect(repoRootFromGitFile('gitdir: /w/repo/.git/worktrees/fix/\n', '/x')).toBe('/w/repo');
+  });
+
+  it('is undefined when the git directory is below a worktree id, or at the top', () => {
+    expect(repoRootFromGitFile('gitdir: /w/repo/.git/worktrees/fix/modules/sub\n', '/x')).toBeUndefined();
+    expect(repoRootFromGitFile('gitdir: /.git/worktrees/fix\n', '/x')).toBeUndefined();
+  });
 });
 
 describe('trustNotice', () => {

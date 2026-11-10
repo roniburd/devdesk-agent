@@ -13,8 +13,7 @@ import { commandLine, commandParts, FIELD_SEP, pastedText, isShellCommand, paneT
 import { boardPasteSettleMs, programStatusDir, sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
-import { openSessionCard } from '../sessionsCommands';
-import type { SessionsTree } from '../sessionsTree';
+import { openSessionCard, type SessionRowSelector } from '../sessionsCommands';
 
 /**
  * The running sessions as the board's prompt box reaches them (`composer.sessions`): which one a command goes to, whether
@@ -24,7 +23,7 @@ import type { SessionsTree } from '../sessionsTree';
 export class BoardSessions {
   constructor(
     private readonly model: SessionsModel,
-    private readonly tree: SessionsTree,
+    private readonly tree: SessionRowSelector,
   ) {}
 
   /** Sessions a command can go to (main and the worktrees), those in `preferDir` first. */

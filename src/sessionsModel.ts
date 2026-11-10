@@ -3,7 +3,7 @@ import { mkdir, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import * as vscode from 'vscode';
 import { findDescendant, listProcesses } from './core/processes';
-import { endedDir, listableEnded, readEndedRecords, removeEndedRecord, writeEndedRecord } from './core/ended';
+import { EndedRecords, endedDir, listableEnded, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
 import { cardsWithProgramStatus, programStatusDirIn, readProgramStatuses } from './core/programStatus';
 import { cardsWithNotes, notesDirIn, readNotes, staleNotes } from './core/devdeskCli';
@@ -11,11 +11,13 @@ import { cardsWithWorkers, readMailboxes, workersDirIn } from './core/workers';
 import { ChildrenReader, runningBackground } from './core/sessionChildren';
 import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
 import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
+import { STATE_INFO } from './core/sessionStates';
 import { transitionsToWaiting } from './core/sessionsView';
 import { DEFAULT_SERVER, killSessionArgs, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
 import { discoverFeatures, type Feature } from './core/worktrees';
-import { applyInsight } from './core/insights';
+import { freshInsights, type Insight, withInsight, withInsights } from './core/insights';
 import { type PendingTurn, withPendingTurns, withRecords } from './core/livePatches';
+import { type TickLoop, tickLoop } from './core/tickLoop';
 import { insightsDir, readInsight } from './insightsWorker';
 import { log, noteLatency, stepTimer, track } from './log';
 
@@ -39,8 +41,7 @@ async function removeDead(dir: string, record: HookRecord): Promise<void> {
   try {
     const now = parseHookRecord(await readFile(path, 'utf8'));
     if (!now || now.pid !== record.pid || (now.pid !== undefined && processAlive(now.pid))) return;
-    const midTurn = now.state === 'working' || now.state === 'waiting' || now.state === 'blocked';
-    await writeEndedRecord(endedDir(dir), now, midTurn ? 'crashed' : 'exited').catch((err) =>
+    await writeEndedRecord(endedDir(dir), now, STATE_INFO[now.state].midTurn ? 'crashed' : 'exited').catch((err) =>
       log.warn(`cannot keep ended session ${now.sessionId}: ${(err as Error).message}`),
     );
     await unlink(path);
@@ -85,7 +86,10 @@ export interface SessionsModelOptions {
 
 /** Current Claude session cards. Runs (watch + poll) only while someone has acquired it. */
 export class SessionsModel implements vscode.Disposable {
+  /** The cards shown: the last refresh's (`base`) with the live patches and insights applied (`commit`). */
   private cards: SessionCard[] = [];
+  /** The last refresh's cards, before the hook records read since, the insights and the pending turns. */
+  private base: SessionCard[] = [];
   private loaded = false;
   /** Stopped sessions that crashed. */
   private crashed = new Set<string>();
@@ -93,7 +97,7 @@ export class SessionsModel implements vscode.Disposable {
   private generation = 0;
   private watcher: FSWatcher | undefined;
   private insightsWatcher: FSWatcher | undefined;
-  private poll: NodeJS.Timeout | undefined;
+  private poll: TickLoop | undefined;
   private debounce: NodeJS.Timeout | undefined;
   private running = false;
   private rerun = false;
@@ -105,6 +109,18 @@ export class SessionsModel implements vscode.Disposable {
    */
   private records = new Map<string, { record: HookRecord; read: number }>();
   private recordReads = 0;
+  /**
+   * The pid of each session's record as the last refresh read it, by session id: a record read as its file changed
+   * that matches one only patches its card (`readRecord`); any other starts a full refresh at once.
+   */
+  private knownPids = new Map<string, number | undefined>();
+  /**
+   * Insight files read, by session id; kept only while the insights folder is watched, and dropped when the watcher
+   * says the file changed.
+   */
+  private readonly insightFiles = new Map<string, Promise<Insight | undefined>>();
+  /** The insights of the last refresh's cards, kept current by the insights watcher (`withInsights`). */
+  private shownInsights = new Map<string, Insight | undefined>();
   /** Sessions the board started on a prompt, shown as working until Claude reports the turn (`withPendingTurns`). */
   private pendingTurns: PendingTurn[] = [];
   private lastKey: string | undefined;
@@ -118,6 +134,8 @@ export class SessionsModel implements vscode.Disposable {
   private isRead: (card: SessionCard) => boolean = () => false;
   /** Transcripts of sessions the view did not list, read before parking them (`withChildren`). */
   private readonly parkChildrenReader = new ChildrenReader();
+  /** Ended records, parsed once each; their transcripts checked again at the park check's pace. */
+  private readonly endedRecords = new EndedRecords();
   /** How each record's transcript ends, re-read only when the transcript changed. */
   private readonly transcriptEnds = new TranscriptEnds();
   /**
@@ -227,13 +245,19 @@ export class SessionsModel implements vscode.Disposable {
 
   private start(): void {
     void this.startWatcher(this.generation);
-    this.poll = setInterval(() => void this.refresh(), this.o.pollMs());
+    // Each poll comes a full interval after the last refresh, whatever started that one.
+    this.poll = tickLoop({
+      intervalMs: () => this.o.pollMs(),
+      active: () => true,
+      tick: () => this.refresh(),
+      onProblem: (message) => log.warn(`sessions poll: ${message}`),
+    });
     void this.refresh();
   }
 
   private stop(): void {
     this.generation++;
-    if (this.poll) clearInterval(this.poll);
+    this.poll?.dispose();
     if (this.debounce) clearTimeout(this.debounce);
     this.watcher?.close();
     this.insightsWatcher?.close();
@@ -241,6 +265,9 @@ export class SessionsModel implements vscode.Disposable {
     this.loaded = false;
     this.lastKey = undefined;
     this.records.clear();
+    this.knownPids.clear();
+    // Nothing watches the insights folder now to say when a file changes.
+    this.insightFiles.clear();
     this.features = undefined;
   }
 
@@ -263,7 +290,6 @@ export class SessionsModel implements vscode.Disposable {
 
   /** Names, recaps and start times from Claude Code's own session registry and transcripts. */
   private async addInfo(cards: SessionCard[], registry: readonly RegistryEntry[]): Promise<void> {
-    const useInsights = this.o.insights();
     await Promise.all(
       cards.map(async (card) => {
         const own = card.sessionId || card.pid !== undefined ? registryFor(registry, card.sessionId, card.pid) : undefined;
@@ -281,10 +307,68 @@ export class SessionsModel implements vscode.Disposable {
         }
         const startedAt = entry?.startedAt ?? meta?.startedAt;
         if (startedAt !== undefined) card.startedAt = startedAt;
-        if (useInsights && card.sessionId) applyInsight(card, await readInsight(this.o.stateDir(), card.sessionId));
       }),
     );
     this.metaReader.prune();
+  }
+
+  /**
+   * The insight of session `sessionId`: read from its file, or as read before while the insights folder is watched
+   * (which drops it when the file changes). The insights worker reads through this too.
+   */
+  insight(sessionId: string): Promise<Insight | undefined> {
+    const cached = this.insightFiles.get(sessionId);
+    if (cached) return cached;
+    const read = readInsight(this.o.stateDir(), sessionId);
+    if (this.insightsWatcher) this.insightFiles.set(sessionId, read);
+    return read;
+  }
+
+  /** The transcript's size at the last refresh's look at it (the records' transcripts), if it had one. */
+  transcriptSize(path: string): number | undefined {
+    return this.transcriptEnds.sizeOf(path);
+  }
+
+  /**
+   * The insights of `cards`' sessions, by session id, each with the read it came from (none when insights are off),
+   * and the insight files of other sessions forgotten. A file that changed while it was read is read again.
+   */
+  private async readInsights(cards: readonly SessionCard[]): Promise<Map<string, { insight: Insight | undefined; read: Promise<Insight | undefined> }>> {
+    const shown = new Set(cards.map((c) => c.sessionId).filter((id): id is string => !!id));
+    for (const id of this.insightFiles.keys()) if (!shown.has(id)) this.insightFiles.delete(id);
+    const ids = [...shown];
+    if (!this.o.insights()) return new Map();
+    for (let attempt = 0; ; attempt++) {
+      const reads = ids.map((id) => this.insight(id));
+      const insights = await Promise.all(reads);
+      const settled = !this.insightsWatcher || ids.every((id, i) => this.insightFiles.get(id) === reads[i]);
+      if (settled || attempt >= 2) return new Map(ids.map((id, i) => [id, { insight: insights[i], read: reads[i] }]));
+    }
+  }
+
+  /** The insights watcher saw file `name` change: shows that session's insight again, without a full refresh. */
+  private insightChanged(name: string | undefined, generation: number): void {
+    if (!name) {
+      this.insightFiles.clear();
+      this.schedule();
+      return;
+    }
+    if (!name.endsWith('.json')) return;
+    const id = name.slice(0, -'.json'.length);
+    this.insightFiles.delete(id);
+    this.showInsight(id, generation);
+  }
+
+  /** Reads session `id`'s insight file (or takes the read under way) and shows it, if its card shows insights. */
+  private showInsight(id: string, generation: number): void {
+    if (!this.shownInsights.has(id) || !this.o.insights()) return;
+    const read = this.insight(id);
+    void read.then((insight) => {
+      // A newer change of the file, a refresh that read it since, or a stop: theirs stands.
+      if (generation !== this.generation || (this.insightsWatcher && this.insightFiles.get(id) !== read) || !this.shownInsights.has(id)) return;
+      this.shownInsights.set(id, insight);
+      this.publish();
+    });
   }
 
   /**
@@ -298,7 +382,7 @@ export class SessionsModel implements vscode.Disposable {
     await Promise.all(
       cards.map(async (card) => {
         if (!card.transcriptPath) return;
-        const live = card.pid !== undefined && card.state !== 'stopped' && card.state !== 'parked' && processAlive(card.pid);
+        const live = card.pid !== undefined && STATE_INFO[card.state].live && processAlive(card.pid);
         // Nothing to list, nor anything that can still run.
         if (shown === undefined && !live) return;
         const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live, since: card.sessionStartedAt });
@@ -343,15 +427,13 @@ export class SessionsModel implements vscode.Disposable {
     this.watcher = await this.watchDir(dir, generation, (name) => {
       // The hook writes a `.tmp` file, then renames it over the state file: only the rename matters.
       if (name?.endsWith('.tmp')) return;
-      this.schedule();
-      // A session's state file: its card changes now, before the refresh.
+      // A session's state file: its card changes now; a full refresh follows only when the record needs one.
       if (name?.endsWith('.json')) void this.readRecord(join(dir, name), generation);
+      else this.schedule();
     });
     if (generation !== this.generation) return;
     // New insights show without waiting for the poll (else on the next poll).
-    this.insightsWatcher = await this.watchDir(insightsDir(dir), generation, (name) => {
-      if (!name || name.endsWith('.json')) this.schedule();
-    });
+    this.insightsWatcher = await this.watchDir(insightsDir(dir), generation, (name) => this.insightChanged(name, generation));
   }
 
   /**
@@ -367,7 +449,10 @@ export class SessionsModel implements vscode.Disposable {
         log.warn(`watcher for ${dir} failed; continuing with polling only`);
         watcher.close();
         if (this.watcher === watcher) this.watcher = undefined;
-        if (this.insightsWatcher === watcher) this.insightsWatcher = undefined;
+        if (this.insightsWatcher === watcher) {
+          this.insightsWatcher = undefined;
+          this.insightFiles.clear();
+        }
       });
       return watcher;
     } catch (err) {
@@ -376,10 +461,16 @@ export class SessionsModel implements vscode.Disposable {
     }
   }
 
-  /** Shows what the hook record at `path` says on its session's card at once (the refresh that follows confirms it). */
+  /**
+   * Shows what the hook record at `path` says on its session's card at once. A session the last refresh read with the
+   * same pid needs nothing more: the next poll confirms the patch. A new session, a new Claude process under a known
+   * id, or a record removed or unreadable is refreshed now.
+   */
   private async readRecord(path: string, generation: number): Promise<void> {
     const record = parseHookRecord(await readFile(path, 'utf8').catch(() => ''));
-    if (!record || generation !== this.generation) return;
+    if (generation !== this.generation) return;
+    if (!record || !this.knownPids.has(record.sessionId) || this.knownPids.get(record.sessionId) !== record.pid) this.schedule();
+    if (!record) return;
     // Reads of one file can finish out of order: keep the newest record.
     const known = this.records.get(record.sessionId);
     if (known && known.record.updatedAt >= record.updatedAt) return;
@@ -396,18 +487,20 @@ export class SessionsModel implements vscode.Disposable {
     this.publish();
   }
 
-  /** Applies the hook records read since the last refresh and the pending turns to the current cards, and tells listeners. */
+  /** Applies the hook records read since the last refresh, the insights and the pending turns again, and tells listeners. */
   private publish(): void {
     if (!this.loaded || this.users === 0) return;
-    this.commit(this.cards, Date.now());
+    this.commit(Date.now());
   }
 
   /**
-   * Makes `cards`, with the hook records read since the last refresh and the pending turns applied, the current cards,
-   * and tells listeners: what changed, then which sessions started waiting (none on the first load).
+   * Makes the last refresh's cards, with the hook records read since, the insights and the pending turns applied, the
+   * current cards, and tells listeners: what changed, then which sessions started waiting (none on the first load).
+   * Insights go on before the pending turns, which show a session the board started as working on its new prompt.
    */
-  private commit(cards: SessionCard[], now: number): void {
-    const seeded = withPendingTurns(withRecords(cards, this.readRecords()), this.pendingTurns, now);
+  private commit(now: number): void {
+    const patched = withInsights(withRecords(this.base, this.readRecords()), this.shownInsights);
+    const seeded = withPendingTurns(patched, this.pendingTurns, now);
     this.pendingTurns = seeded.pending;
     const next = seeded.cards;
     if (next === this.cards) return;
@@ -460,7 +553,7 @@ export class SessionsModel implements vscode.Disposable {
       const [paneLists, records, ended, procs, registry, statuses, notes, mailboxes] = await Promise.all([
         Promise.all(listing),
         readHookRecords(dir, this.transcriptEnds),
-        readEndedRecords(endedDir(dir)),
+        this.endedRecords.read(endedDir(dir)),
         listProcesses(),
         registryDir ? readRegistry(registryDir) : Promise.resolve([]),
         // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without
@@ -489,7 +582,7 @@ export class SessionsModel implements vscode.Disposable {
       if (generation !== this.generation) return;
       steps.mark('forks');
       const split = splitRecords(records, panes, processAlive);
-      const { listed, stale } = listableEnded(ended, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])));
+      const { listed, stale } = listableEnded(ended.records, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])), ended.exists);
       const all = cardsWithWorkers(
         cardsWithNotes(
           cardsWithProgramStatus(buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed), statuses, {
@@ -506,21 +599,35 @@ export class SessionsModel implements vscode.Disposable {
       const next = this.o.workspaceOnly() ? cardsInScope(all, await this.scopeDirs(), features) : all;
       if (generation !== this.generation) return;
       steps.mark('cards');
-      await Promise.all([this.addChildren(next), this.addInfo(next, registry)]);
+      const [, , insightReads] = await Promise.all([this.addChildren(next), this.addInfo(next, registry), this.readInsights(next)]);
       steps.mark('transcripts');
       if (generation !== this.generation) return;
+      // An insight file that changed after this refresh read it: the watcher shows the newer one (or is reading it).
+      const { insights, changed } = this.insightsWatcher
+        ? freshInsights(insightReads, this.insightFiles, this.shownInsights)
+        : { insights: new Map([...insightReads].map(([id, r]) => [id, r.insight])), changed: [] };
       for (const r of split.dead) void removeDead(dir, r);
       // Running again (resumed by an older hook script, which leaves the ended record), or nothing left to resume.
       for (const r of stale) void removeEndedRecord(endedDir(dir), r.sessionId);
       // Notes of panes that are gone, on the servers just listed.
       const listedPanes = new Map(listing.map((_, i) => [i === 0 ? server : DEFAULT_SERVER, paneLists[i].map((p) => p.paneId)] as const));
       for (const name of staleNotes(notes.keys(), listedPanes)) void unlink(join(notesDirIn(dir), name)).catch(() => undefined);
-      // Every session, also those of other workspaces: a window that lists them may not be open.
-      void this.park(all, records, server);
+      // Every session, also those of other workspaces: a window that lists them may not be open. The listed ones as
+      // their insights show them (whether Claude asks you something).
+      const inView = new Set(next);
+      void this.park(
+        all.map((c) => (inView.has(c) && c.sessionId ? withInsight(c, insights.get(c.sessionId)) : c)),
+        records,
+        server,
+      );
       // What changed since the state files were read, and the sessions just started: as `publish` showed them.
       const now = Date.now();
       for (const [id, r] of this.records) if (r.read <= reads) this.records.delete(id);
-      this.commit(next, now);
+      this.knownPids = new Map(records.map((r) => [r.sessionId, r.pid]));
+      this.base = next;
+      this.shownInsights = insights;
+      this.commit(now);
+      for (const id of changed) this.showInsight(id, generation);
       steps.mark('listeners');
       noteLatency('sessions refresh', steps.total());
       if (steps.total() >= SLOW_REFRESH_MS) log.debug(`sessions refresh: ${steps.total()}ms (${steps.describe()}), ${this.cards.length} sessions`);
@@ -529,6 +636,7 @@ export class SessionsModel implements vscode.Disposable {
     } finally {
       done();
       this.running = false;
+      this.poll?.postpone();
       if (this.rerun) {
         this.rerun = false;
         if (this.users > 0) void this.refresh();

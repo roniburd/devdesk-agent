@@ -8,6 +8,7 @@ import { featureDirs, type Feature } from './worktrees';
 import { isWithin, trimSlashes } from './paths';
 import type { EndedRecord, EndReason } from './ended';
 import type { RegistryEntry } from './sessionInfo';
+import { isRecordState, STATE_INFO } from './sessionStates';
 
 /**
  * What a waiting session waits on, from the hook record: a question (AskUserQuestion), a plan to review (ExitPlanMode),
@@ -15,6 +16,13 @@ import type { RegistryEntry } from './sessionInfo';
  */
 export type WaitKind = 'question' | 'plan' | 'permission' | 'elicitation';
 const WAIT_KINDS: ReadonlySet<string> = new Set(['question', 'plan', 'permission', 'elicitation']);
+
+/**
+ * How a turn ended when its transcript, not a hook, says so (see `withTranscriptEnd`): Esc interrupted it, or the
+ * conversation went on in a background job.
+ */
+export type EndKind = 'interrupted' | 'moved';
+const END_KINDS: ReadonlySet<string> = new Set(['interrupted', 'moved']);
 
 /** `blocked`: the turn ended on an error (StopFailure). */
 export type RecordState = 'working' | 'waiting' | 'done' | 'idle' | 'blocked';
@@ -41,6 +49,16 @@ export interface HookRecord {
   detail: string;
   /** What a waiting session waits on (the record's `wait.kind`); missing from older hook scripts, whose detail tells. */
   waitKind?: WaitKind;
+  /**
+   * What error ended a blocked turn (StopFailure's kind: `rate_limit`, `overloaded_error`, `unknown`, ...); missing from
+   * older hook scripts, whose detail tells.
+   */
+  errorKind?: string;
+  /**
+   * How the turn ended, when the transcript says so (`withTranscriptEnd`); kept in ended records. Ended records kept
+   * before this field say it only in their detail (`INTERRUPTED_DETAIL`, `MOVED_DETAIL`).
+   */
+  endKind?: EndKind;
   prompt?: string;
   updatedAt: number;
   /** A finished turn (`done`) whose reply ends with a question; missing from older hook scripts. */
@@ -71,8 +89,12 @@ export interface SessionCard {
   transcriptPath?: string;
   state: SessionState;
   detail: string;
-  /** What a waiting session waits on, when its hook record says (see `HookRecord.waitKind`). */
+  /** What a waiting session waits on, when its hook record says (see `HookRecord.waitKind`; read it with `waitKindOf`). */
   waitKind?: WaitKind;
+  /** What error ended a blocked turn, when its hook record says (see `HookRecord.errorKind`; read it with `hitLimit`). */
+  errorKind?: string;
+  /** How the turn ended, when its transcript says (see `HookRecord.endKind`; read it with `endKindOf`). */
+  endKind?: EndKind;
   prompt?: string;
   updatedAt?: number;
   attached: boolean;
@@ -130,8 +152,6 @@ export interface SessionCard {
 export const NO_HOOKS_DETAIL = 'Install Claude status hooks to see what Claude is doing';
 export const NOT_RUNNING_DETAIL = 'Claude is not running in this session';
 
-const RECORD_STATES: ReadonlySet<string> = new Set(['working', 'waiting', 'done', 'idle', 'blocked']);
-
 /**
  * A "prompt" Claude Code submitted itself, not the user: a background task's result (`<task-notification>`), a system
  * reminder, or a subagent's hand-back or another session's message (`<agent-message from="…">`, which the transcript
@@ -150,7 +170,7 @@ export function parseHookRecord(text: string): HookRecord | undefined {
   if (typeof r.sessionId !== 'string' || !r.sessionId) return undefined;
   if (r.tmuxSession !== null && typeof r.tmuxSession !== 'string') return undefined;
   if (typeof r.cwd !== 'string' || typeof r.event !== 'string' || typeof r.detail !== 'string') return undefined;
-  if (typeof r.state !== 'string' || !RECORD_STATES.has(r.state)) return undefined;
+  if (typeof r.state !== 'string' || !isRecordState(r.state)) return undefined;
   if (!isFiniteNumber(r.updatedAt)) return undefined;
   if (!optionalString(r.tmuxPane) || !optionalString(r.tmuxServer) || !optionalString(r.transcriptPath) || !optionalString(r.prompt)) return undefined;
   if (!optionalString(r.lastEditPath)) return undefined;
@@ -172,6 +192,8 @@ export function parseHookRecord(text: string): HookRecord | undefined {
   if (r.asksQuestion === true) record.asksQuestion = true;
   const wait = r.wait as { kind?: unknown } | null | undefined;
   if (r.state === 'waiting' && typeof wait?.kind === 'string' && WAIT_KINDS.has(wait.kind)) record.waitKind = wait.kind as WaitKind;
+  if (r.state === 'blocked' && typeof r.errorKind === 'string' && r.errorKind) record.errorKind = r.errorKind;
+  if (typeof r.endKind === 'string' && END_KINDS.has(r.endKind)) record.endKind = r.endKind as EndKind;
   if (isFiniteNumber(r.turnStartedAt)) record.turnStartedAt = r.turnStartedAt;
   if (isFiniteNumber(r.turnEndedAt)) record.turnEndedAt = r.turnEndedAt;
   if (isFiniteNumber(r.sessionStartedAt)) record.sessionStartedAt = r.sessionStartedAt;
@@ -180,6 +202,41 @@ export function parseHookRecord(text: string): HookRecord | undefined {
 
 export const MOVED_DETAIL = 'Conversation continued in a background job';
 export const INTERRUPTED_DETAIL = 'Interrupted';
+
+/** How a card's turn ended (`endKind`); for an ended record kept before that field, what its detail says. */
+export function endKindOf(card: Pick<SessionCard, 'endKind' | 'detail'>): EndKind | undefined {
+  if (card.endKind) return card.endKind;
+  return card.detail === INTERRUPTED_DETAIL ? 'interrupted' : card.detail === MOVED_DETAIL ? 'moved' : undefined;
+}
+
+/** What a waiting card waits on (`waitKind`); for a record from an older hook script, what its detail says. */
+export function waitKindOf(card: Pick<SessionCard, 'waitKind' | 'detail'>): WaitKind {
+  if (card.waitKind) return card.waitKind;
+  if (card.detail.startsWith('Asking:')) return 'question';
+  if (card.detail.startsWith('Plan ready')) return 'plan';
+  // Anything else needs input, as an MCP server's form does.
+  return /permission/i.test(card.detail) ? 'permission' : 'elicitation';
+}
+
+const LIMIT_RE = /\b(rate|usage)[ _-]?limit|limit (reached|exceeded)|\blimited\b/i;
+
+/**
+ * A blocked card stopped at a rate or usage limit: its error kind says `rate_limit` (or the API's `rate_limit_error`, the
+ * type of a StopFailure error given as an object); otherwise (an older hook script, Claude's own report, or a limit
+ * Claude Code reports under another kind) its detail mentions a limit.
+ */
+export function hitLimit(card: Pick<SessionCard, 'errorKind' | 'detail'>): boolean {
+  return /^rate_limit(_error)?$/.test(card.errorKind ?? '') || LIMIT_RE.test(card.detail);
+}
+
+/** `card` without its wait, error and end kinds: they describe its record's state, not one something else sets. */
+export function withoutStateKinds(card: SessionCard): SessionCard {
+  const next = { ...card };
+  delete next.waitKind;
+  delete next.errorKind;
+  delete next.endKind;
+  return next;
+}
 
 /**
  * How a transcript ends when no hook reports it: `moved` when the conversation was backgrounded into a job (Claude
@@ -226,11 +283,22 @@ export class TranscriptEnds {
     return read;
   }
 
+  /** The transcript's size when last read, if it was. */
+  sizeOf(path: string): number | undefined {
+    return this.known.get(path)?.size;
+  }
+
   /** Forgets transcripts not read since the last call. */
   prune(): void {
     for (const path of this.known.keys()) if (!this.seen.has(path)) this.known.delete(path);
     this.seen = new Set();
   }
+}
+
+/** `record` without its wait and error kinds, which no longer describe a state its transcript replaced. */
+function withoutKinds(record: HookRecord): HookRecord {
+  const { waitKind: _wait, errorKind: _error, ...rest } = record;
+  return rest;
 }
 
 /**
@@ -241,10 +309,10 @@ async function withTranscriptEnd(record: HookRecord, ends: TranscriptEnds): Prom
   if (!record.transcriptPath) return record;
   const read = await ends.read(record.transcriptPath);
   if (!read) return record;
-  if (read.end === 'moved') return { ...record, state: 'idle', detail: MOVED_DETAIL };
+  if (read.end === 'moved') return { ...withoutKinds(record), state: 'idle', detail: MOVED_DETAIL, endKind: 'moved' };
   if (read.end === 'interrupted' && (record.state === 'working' || record.state === 'waiting') && read.mtimeMs >= record.updatedAt) {
     // A finished turn like any other (the board's done lane), shown in its own colour.
-    return { ...record, state: 'done', detail: INTERRUPTED_DETAIL };
+    return { ...withoutKinds(record), state: 'done', detail: INTERRUPTED_DETAIL, endKind: 'interrupted' };
   }
   return record;
 }
@@ -349,10 +417,7 @@ const paneRunsClaude = (p: TmuxPane) => p.claude ?? isClaudeCommand(p.command);
 const paneBusy = (p: TmuxPane) => paneRunsClaude(p) || !isShellCommand(p.command);
 
 /** SessionEnd deletes a session's record, so a dead process with a record that was still in a turn crashed or was killed. */
-const diedMidTurn = (r: HookRecord, p: TmuxPane) =>
-  (r.state === 'working' || r.state === 'waiting' || r.state === 'blocked') && inSession(p, r);
-
-const ORDER: Record<SessionState, number> = { waiting: 0, blocked: 1, working: 2, done: 3, idle: 4, unknown: 5, stopped: 6, parked: 7 };
+const diedMidTurn = (r: HookRecord, p: TmuxPane) => STATE_INFO[r.state].midTurn && inSession(p, r);
 
 /**
  * The cards of sessions working in this workspace: whose cwd is inside one of `dirs` (the workspace root, as opened and
@@ -437,7 +502,7 @@ export function buildSessionCards(
       transcriptPath: r.transcriptPath ?? undefined,
       state: r.state,
       detail: r.detail,
-      ...(r.waitKind ? { waitKind: r.waitKind } : {}),
+      ...stateKinds(r),
       prompt: r.prompt,
       updatedAt: r.updatedAt,
       attached: pane?.attached ?? false,
@@ -502,8 +567,17 @@ export function buildSessionCards(
   for (const r of endedLeft) cards.push(parkedCard(r, featureForSession(features, r.cwd, r.lastEditPath)));
 
   return cards.sort(
-    (a, b) => ORDER[a.state] - ORDER[b.state] || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.id.localeCompare(b.id),
+    (a, b) => STATE_INFO[a.state].listOrder - STATE_INFO[b.state].listOrder || (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.id.localeCompare(b.id),
   );
+}
+
+/** The record's wait, error and end kinds, for its card. */
+export function stateKinds(r: HookRecord): Pick<SessionCard, 'waitKind' | 'errorKind' | 'endKind'> {
+  return {
+    ...(r.waitKind ? { waitKind: r.waitKind } : {}),
+    ...(r.errorKind ? { errorKind: r.errorKind } : {}),
+    ...(r.endKind ? { endKind: r.endKind } : {}),
+  };
 }
 
 function turnTimes(r: HookRecord): Pick<SessionCard, 'turnStartedAt' | 'turnEndedAt'> {
@@ -529,6 +603,9 @@ function parkedCard(r: EndedRecord, feature: Feature | undefined): SessionCard {
     attached: false,
     endReason: r.endReason,
     lastState: r.state,
+    // How its last turn ended, for the look it keeps (see `finishedLook`); a parked session waits on nothing.
+    ...(r.errorKind ? { errorKind: r.errorKind } : {}),
+    ...(r.endKind ? { endKind: r.endKind } : {}),
     endedAt: r.endedAt,
     ...(r.tmuxSession ? { formerTmuxSession: r.tmuxSession, formerTmuxServer: r.tmuxServer ?? DEFAULT_SERVER } : {}),
     ...(r.asksQuestion ? { asksQuestion: true } : {}),
@@ -551,7 +628,7 @@ export function runningCopy(
   alive: (pid: number) => boolean = processAlive,
 ): SessionCard | 'elsewhere' | undefined {
   const pids = new Set(registry.filter((e) => e.sessionId === sessionId && alive(e.pid)).map((e) => e.pid));
-  const running = (c: SessionCard) => c.state !== 'parked' && c.state !== 'stopped' && !!c.tmuxSession;
+  const running = (c: SessionCard) => STATE_INFO[c.state].live && !!c.tmuxSession;
   const card =
     cards.find((c) => running(c) && c.sessionId === sessionId) ?? cards.find((c) => running(c) && c.pid !== undefined && pids.has(c.pid));
   return card ?? (pids.size ? 'elsewhere' : undefined);

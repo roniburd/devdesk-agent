@@ -32,7 +32,7 @@ function memento() {
   };
 }
 
-const composer = (state: ReturnType<typeof memento>) => new BoardComposer({ featureList: [] } as unknown as Ctor[0], {} as Ctor[1], {} as Ctor[2], state as unknown as Ctor[3]);
+const composer = (state: ReturnType<typeof memento>) => new BoardComposer({ featureList: [] } as unknown as Ctor[0], {} as Ctor[1], {} as Ctor[2], {} as Ctor[3], state as unknown as Ctor[4]);
 
 describe('BoardComposer: models typed with /model', () => {
   it('are still offered, and allowed, after a window reload', () => {

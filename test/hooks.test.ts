@@ -423,17 +423,25 @@ describe('hook script', () => {
   it('records a turn that ended on an error as blocked', async () => {
     send('UserPromptSubmit', { prompt: 'deploy' });
     send('StopFailure', { error: 'rate_limit: too many requests\nretry later' });
-    expect(await record()).toMatchObject({ state: 'blocked', detail: 'rate_limit: too many requests', prompt: 'deploy' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'rate_limit: too many requests', errorKind: 'rate_limit', prompt: 'deploy' });
     send('StopFailure', { error: { type: 'overloaded_error' } });
-    expect(await record()).toMatchObject({ state: 'blocked', detail: 'overloaded_error' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'overloaded_error', errorKind: 'overloaded_error' });
+    send('StopFailure', { error: { type: 'rate_limit_error', message: 'Too many requests' } });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit_error' });
     send('StopFailure', { error: 'rate_limit', error_details: 'Too many requests\nTry later' });
-    expect(await record()).toMatchObject({ state: 'blocked', detail: 'rate_limit: Too many requests' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'rate_limit: Too many requests', errorKind: 'rate_limit' });
     send('StopFailure', { error: 'unknown', error_details: 'socket hang up' });
-    expect(await record()).toMatchObject({ state: 'blocked', detail: 'socket hang up' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'socket hang up', errorKind: 'unknown' });
     send('StopFailure');
-    expect(await record()).toMatchObject({ state: 'blocked', detail: 'Stopped by an error' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'Stopped by an error', errorKind: null });
+    send('StopFailure', { error: 'Something went wrong' });
+    expect(await record()).toMatchObject({ state: 'blocked', detail: 'Something went wrong', errorKind: null });
+    send('StopFailure', { error: 'rate_limit', error_details: 'Too many requests' });
+    // A notification that is not for this session keeps the state, and what error it is.
     send('Notification', { message: 'Login successful', notification_type: 'auth_success' });
-    expect(await record()).toMatchObject({ state: 'blocked' });
+    expect(await record()).toMatchObject({ state: 'blocked', errorKind: 'rate_limit' });
+    send('UserPromptSubmit', { prompt: 'again' });
+    expect(await record()).toMatchObject({ state: 'working', errorKind: null });
   });
 
   it('records the tmux pane Claude runs in', async () => {

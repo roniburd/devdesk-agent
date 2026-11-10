@@ -35,7 +35,7 @@ async function leftArrow(tree: SessionsTree): Promise<void> {
   const terminal = terminalInFront();
   if (!terminal) return;
   const target = claudeTerminalSession(terminal);
-  const card = tree.focusedCard(terminal);
+  const card = tree.state.focusedCard(terminal);
   let empty = false;
   if (target) {
     try {

@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { parseGitdirFile } from './worktrees';
 
 /** A repository's refs read from its files, without running git. Undefined values: not found, or not readable this way. */
 export interface Refs {
@@ -18,9 +19,8 @@ async function gitDirs(repo: string): Promise<{ gitDir: string; commonDir: strin
   const dotGit = join(repo, '.git');
   try {
     if ((await stat(dotGit)).isDirectory()) return { gitDir: dotGit, commonDir: dotGit };
-    const m = /^gitdir:\s*(.+)$/m.exec(await readFile(dotGit, 'utf8'));
-    if (!m) return undefined;
-    const gitDir = resolve(repo, m[1].trim());
+    const gitDir = parseGitdirFile(await readFile(dotGit, 'utf8'), repo)?.gitDir;
+    if (!gitDir) return undefined;
     const common = await readFile(join(gitDir, 'commondir'), 'utf8').then(
       (c) => resolve(gitDir, c.trim()),
       () => gitDir,

@@ -14,6 +14,15 @@ import { log, noteLatency, stepTimer } from './log';
 import type { SessionsModel } from './sessionsModel';
 import type { SessionNode, SessionsTree } from './sessionsTree';
 
+/** What starting and opening sessions needs of the Claude view (`SessionsTree`): the model, and selecting a session's row. */
+export interface SessionRowSelector {
+  readonly model: SessionsModel;
+  /** Reveals and selects a card's row. */
+  select(card: SessionCard): void;
+  /** Selects the session's row once the model lists it (it was just started). */
+  selectWhenListed(session: string): void;
+}
+
 async function runningSessions(): Promise<string[]> {
   return (await listSessions(sessionsTmux())).map((s) => s.name);
 }
@@ -35,7 +44,7 @@ function cardLabel(card: SessionCard): string {
  */
 export async function startNumbered(
   model: SessionsModel,
-  tree: SessionsTree,
+  tree: SessionRowSelector,
   base: string,
   dir: string,
   command?: string,
@@ -54,7 +63,7 @@ export async function startNumbered(
 }
 
 /** The worktree's own session (`cc-<feature>`): its terminal, starting Claude there if it is not running. */
-export function openFeatureSession(model: SessionsModel, tree: SessionsTree, feature: Feature): void {
+export function openFeatureSession(model: SessionsModel, tree: SessionRowSelector, feature: Feature): void {
   const session = sessionName(feature);
   tree.selectWhenListed(session);
   void startClaude(session, feature.dir);
@@ -65,7 +74,7 @@ export function openFeatureSession(model: SessionsModel, tree: SessionsTree, fea
  * + : another Claude in main (the workspace root), in the first free `cc-main[-<n>]`; no folder to pick. Runs in
  * the default mode (`devdesk.sessions.defaultMode`) unless `mode` is given (New Session with Mode…).
  */
-export async function newSession(model: SessionsModel, tree: SessionsTree, mode = sessionsDefaultMode()): Promise<void> {
+export async function newSession(model: SessionsModel, tree: SessionRowSelector, mode = sessionsDefaultMode()): Promise<void> {
   const root = workspaceRoot();
   if (!root) {
     void vscode.window.showInformationMessage('Open a folder to start a Claude session.');
@@ -79,7 +88,7 @@ export async function newSession(model: SessionsModel, tree: SessionsTree, mode 
  * new tmux session named after that folder's worktree, in the default mode unless `mode` is given. The original
  * session is untouched.
  */
-export async function forkSession(model: SessionsModel, tree: SessionsTree, card: SessionCard, mode = sessionsDefaultMode()): Promise<void> {
+export async function forkSession(model: SessionsModel, tree: SessionRowSelector, card: SessionCard, mode = sessionsDefaultMode()): Promise<void> {
   if (!isSessionId(card.sessionId) || !card.cwd) {
     void vscode.window.showInformationMessage('This session has no Claude status record yet, so it cannot be forked.');
     return;
@@ -137,7 +146,7 @@ export async function pickLaunchMode(state: vscode.Memento, title: string): Prom
  * Resumes a parked session (`claude --resume <id>`, same session id) and opens its terminal: in its tmux pane when
  * Claude exited to a shell there, else in a new tmux session named after its worktree.
  */
-async function resumeSession(model: SessionsModel, tree: SessionsTree, card: SessionCard): Promise<void> {
+async function resumeSession(model: SessionsModel, tree: SessionRowSelector, card: SessionCard): Promise<void> {
   if (!isSessionId(card.sessionId) || !card.cwd) {
     void vscode.window.showInformationMessage('DevDesk does not know which conversation this session had, so it cannot resume it.');
     return;
@@ -166,7 +175,7 @@ const resuming = new Set<string>();
 /** How long a resume counts as in flight after it started Claude: until a refresh lists the session running. */
 const RESUME_SETTLE_MS = 5_000;
 
-async function resumeOnce(model: SessionsModel, tree: SessionsTree, card: SessionCard, sessionId: string, cwd: string): Promise<void> {
+async function resumeOnce(model: SessionsModel, tree: SessionRowSelector, card: SessionCard, sessionId: string, cwd: string): Promise<void> {
   // The card may predate a resume from another window, or a copy started some other way: open that one instead.
   const registry = await readRegistry(claudeSessionsDir()).catch(() => []);
   let copy = runningCopy(model.current, registry, sessionId);
@@ -209,13 +218,13 @@ async function resumeOnce(model: SessionsModel, tree: SessionsTree, card: Sessio
 }
 
 /** Opens (or focuses) the session's Claude terminal in the editor area and selects its row; resumes a parked session. */
-export async function openSessionCard(tree: SessionsTree, card: SessionCard): Promise<void> {
+export async function openSessionCard(tree: SessionRowSelector, card: SessionCard): Promise<void> {
   if (card.state === 'parked') return resumeSession(tree.model, tree, card);
   return openTerminal(tree, card);
 }
 
 /** Shows the session's terminal (attaching one to its tmux session if none is open) and selects its row. */
-async function openTerminal(tree: SessionsTree, card: SessionCard): Promise<void> {
+async function openTerminal(tree: SessionRowSelector, card: SessionCard): Promise<void> {
   const steps = stepTimer();
   tree.select(card);
   steps.mark('select row');
@@ -263,7 +272,7 @@ export async function killSession(model: SessionsModel, card: SessionCard): Prom
 
 /** Opens the most urgent session needing input. */
 export async function openNextWaiting(tree: SessionsTree): Promise<void> {
-  const card = tree.cards.find((c) => c.state === 'waiting');
+  const card = tree.state.cards.find((c) => c.state === 'waiting');
   if (card) await openSessionCard(tree, card);
   else void vscode.window.showInformationMessage('No Claude session needs input.');
 }

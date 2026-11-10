@@ -1,5 +1,5 @@
 import type { BlockedKind, ProgramState, ProgramStatus } from './programStatus';
-import { MOVED_DETAIL, type SessionCard, type SessionState, type WaitKind } from './sessions';
+import { endKindOf, type SessionCard, type SessionState, type WaitKind, withoutStateKinds } from './sessions';
 
 /**
  * How Claude's own report (OSC 7501, through the Program Status relay) and the hook record share a card. Hooks say
@@ -34,7 +34,7 @@ const REPORT_PHASES: Record<ProgramState, Phase> = { working: 'working', blocked
 /** Which rule lets `status` replace the hooked `card`'s state, or undefined when the hook record keeps it. */
 export function mergeReason(card: SessionCard, status: ProgramStatus, o: MergeOptions): StatusFrom['reason'] | undefined {
   const hook = HOOK_PHASES[card.state];
-  if (!hook || card.updatedAt === undefined || card.detail === MOVED_DETAIL) return undefined;
+  if (!hook || card.updatedAt === undefined || endKindOf(card) === 'moved') return undefined;
   // A hook event newer than the report wins.
   if (status.at <= card.updatedAt) return undefined;
   const reported = REPORT_PHASES[status.state];
@@ -58,8 +58,7 @@ const KIND_WAITS: Record<BlockedKind, WaitKind> = { permission: 'permission', qu
  * you); done or idle at the prompt; blocked (an error). Claude's message is the detail.
  */
 export function reportedCard(card: SessionCard, status: ProgramStatus): SessionCard {
-  const base: SessionCard = { ...card, updatedAt: status.at };
-  delete base.waitKind;
+  const base: SessionCard = { ...withoutStateKinds(card), updatedAt: status.at };
   switch (status.state) {
     case 'working':
       return { ...base, state: 'working', detail: status.msg ?? 'Working' };

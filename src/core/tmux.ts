@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { shellQuote } from './shell';
+import { execText } from './shellRun';
 
 export type TmuxRunner = (args: string[]) => Promise<string>;
 
@@ -17,16 +17,14 @@ const TMUX_TIMEOUT_MS = 15_000;
 const execTmuxWith =
   (bin = 'tmux'): TmuxRunner =>
   (args) =>
-    new Promise((resolve, reject) => {
-      execFile(bin, args, { timeout: TMUX_TIMEOUT_MS }, (err, stdout, stderr) => {
-        if (err) reject(new Error((stderr || err.message).trim()));
-        else resolve(stdout);
-      });
-    });
+    execText(bin, args, { timeoutMs: TMUX_TIMEOUT_MS });
 
 /** False when the tmux binary `bin` cannot be run (not installed, or not on PATH). */
 export function tmuxInstalled(bin = 'tmux'): Promise<boolean> {
-  return new Promise((resolve) => execFile(bin, ['-V'], (err) => resolve(!err)));
+  return execText(bin, ['-V']).then(
+    () => true,
+    () => false,
+  );
 }
 
 /** The tmux server tmux uses without `-L`. */

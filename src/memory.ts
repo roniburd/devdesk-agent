@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { freemem, totalmem } from 'node:os';
 import { meminfoFreePercent, memorystatusFreePercent } from './core/park';
+import { execText } from './core/shellRun';
 
 /**
  * Percent of this machine's memory still available to programs: `MemAvailable` on Linux, the memory pressure level on
@@ -12,9 +12,7 @@ export async function freeMemoryPercent(): Promise<number | undefined> {
   try {
     if (process.platform === 'linux') return meminfoFreePercent(await readFile('/proc/meminfo', 'utf8'));
     if (process.platform === 'darwin') {
-      const out = await new Promise<string>((resolve, reject) =>
-        execFile('/usr/sbin/sysctl', ['-n', 'kern.memorystatus_level'], { timeout: 5_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout))),
-      );
+      const out = await execText('/usr/sbin/sysctl', ['-n', 'kern.memorystatus_level'], { timeoutMs: 5_000 });
       return memorystatusFreePercent(out);
     }
     const total = totalmem();

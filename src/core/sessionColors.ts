@@ -4,15 +4,17 @@ export interface SessionColor {
   label: string;
   /** The theme color its label is drawn in. */
   themeColor: string;
+  /** The square before its name in the Color submenu. */
+  square: string;
 }
 
 export const SESSION_COLORS: readonly SessionColor[] = [
-  { id: 'red', label: 'Red', themeColor: 'charts.red' },
-  { id: 'orange', label: 'Orange', themeColor: 'charts.orange' },
-  { id: 'yellow', label: 'Yellow', themeColor: 'charts.yellow' },
-  { id: 'green', label: 'Green', themeColor: 'charts.green' },
-  { id: 'blue', label: 'Blue', themeColor: 'charts.blue' },
-  { id: 'purple', label: 'Purple', themeColor: 'charts.purple' },
+  { id: 'red', label: 'Red', themeColor: 'charts.red', square: '🟥' },
+  { id: 'orange', label: 'Orange', themeColor: 'charts.orange', square: '🟧' },
+  { id: 'yellow', label: 'Yellow', themeColor: 'charts.yellow', square: '🟨' },
+  { id: 'green', label: 'Green', themeColor: 'charts.green', square: '🟩' },
+  { id: 'blue', label: 'Blue', themeColor: 'charts.blue', square: '🟦' },
+  { id: 'purple', label: 'Purple', themeColor: 'charts.purple', square: '🟪' },
 ];
 
 /** How many session colors are kept (the oldest set are dropped first). */

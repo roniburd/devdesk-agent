@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DayUsage, PlaceDay } from '../src/core/usageHistory';
 import { DEVDESK, type Place, UNKNOWN } from '../src/core/usagePlace';
-import { ALL_SCOPE, parseScope, resolveScope, scopeChoices, scopedPage, scopedPopover, scopeDays } from '../src/core/usageScope';
+import { ALL_SCOPE, narrowScope, parseScope, type ProjectChoice, resolveScope, scopeChoices, scopedPage, scopedPopover, scopeDays, scopeSelects } from '../src/core/usageScope';
 
 const t = (total: number, requests = 1) => ({ total, cached: 0, requests });
 const place = (project: string, worktree: string, total: number, session: string, kind: PlaceDay['kind'] = 'git'): PlaceDay => ({
@@ -118,5 +118,56 @@ describe('scopes', () => {
       ['main', 71],
       ['feat-a', 29],
     ]);
+  });
+});
+
+describe('the scope selects', () => {
+  const choice = (project: string, label: string, worktrees: string[], kindLabel = 'git'): ProjectChoice => ({
+    project,
+    kind: 'git',
+    kindLabel,
+    label,
+    title: project,
+    total: 1,
+    totalText: '1',
+    worktrees: worktrees.map((worktree) => ({ worktree, total: 1, totalText: '1' })),
+  });
+  const ws = choice('/w/ws', 'ws', ['main', 'feat-a'], 'Acme');
+  const other = choice('/x/other', 'other', ['main']);
+  const unknown = choice(UNKNOWN, 'Unknown project', ['main']);
+  const texts = (o: { options: { text: string }[] } | undefined) => o?.options.map((x) => x.text);
+
+  it("lists this window's project first, then All projects and the others, the special ones without a kind", () => {
+    const s = scopeSelects(ALL_SCOPE, '/w/ws', [ws, other, unknown]);
+    expect(texts(s.project)).toEqual(['ws (this window) · Acme', 'All projects', 'other · git', 'Unknown project']);
+    expect(s.project.value).toBe(s.project.options[1].value);
+    expect(s.project.options.map((o) => o.scope)).toEqual([{ kind: 'project', project: '/w/ws' }, ALL_SCOPE, { kind: 'project', project: '/x/other' }, { kind: 'project', project: UNKNOWN }]);
+    expect(s.worktree).toBeUndefined();
+    // Not this window's: All projects first.
+    expect(texts(scopeSelects(ALL_SCOPE, undefined, [ws, other]).project)).toEqual(['All projects', 'ws · Acme', 'other · git']);
+  });
+
+  it("offers the chosen project's worktrees when it has more than one, or one is chosen", () => {
+    const s = scopeSelects({ kind: 'project', project: '/w/ws' }, '/w/ws', [ws, other]);
+    expect(s.project.value).toBe('/w/ws');
+    expect(texts(s.worktree)).toEqual(['All worktrees', 'main', 'feat-a']);
+    expect(s.worktree!.value).toBe('');
+    expect(s.worktree!.options.map((o) => o.scope)).toEqual([
+      { kind: 'project', project: '/w/ws' },
+      { kind: 'project', project: '/w/ws', worktree: 'main' },
+      { kind: 'project', project: '/w/ws', worktree: 'feat-a' },
+    ]);
+    expect(scopeSelects({ kind: 'project', project: '/x/other' }, '/w/ws', [ws, other]).worktree).toBeUndefined();
+    const one = scopeSelects({ kind: 'project', project: '/x/other', worktree: 'gone' }, '/w/ws', [ws, other]);
+    expect(texts(one.worktree)).toEqual(['All worktrees', 'main', 'gone']);
+    expect(one.worktree!.value).toBe('gone');
+  });
+
+  it('narrows from a breakdown row to its project or worktree, except for DevDesk, the other projects, or under a worktree', () => {
+    expect(narrowScope({ project: '/w/ws' }, ALL_SCOPE)).toEqual({ kind: 'project', project: '/w/ws' });
+    expect(narrowScope({ project: '/w/ws', worktree: 'feat-a' }, { kind: 'project', project: '/w/ws' })).toEqual({ kind: 'project', project: '/w/ws', worktree: 'feat-a' });
+    expect(narrowScope({ project: DEVDESK }, ALL_SCOPE)).toBeUndefined();
+    expect(narrowScope({ project: '*' }, ALL_SCOPE)).toBeUndefined();
+    expect(narrowScope({ project: '/w/ws', worktree: 'main' }, { kind: 'project', project: '/w/ws', worktree: 'main' })).toBeUndefined();
   });
 });

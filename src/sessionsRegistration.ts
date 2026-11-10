@@ -137,13 +137,13 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     registerTimedCommand('devdesk.sessions.turnChanges', onSelectedCard((c) => showTurnChanges(turnContent, c))),
     registerTimedCommand('devdesk.sessions.kill', onCard((c) => killSession(sessions, c))),
     registerTimedCommand('devdesk.sessions.remove', onCard((c) => removeParked(sessions, c))),
-    registerTimedCommand('devdesk.sessions.markRead', onCards((c) => sessionsTree.setRead(c.id, true))),
-    registerTimedCommand('devdesk.sessions.markUnread', onCards((c) => sessionsTree.setRead(c.id, false))),
+    registerTimedCommand('devdesk.sessions.markRead', onCards((c) => sessionsTree.state.setRead(c.id, true))),
+    registerTimedCommand('devdesk.sessions.markUnread', onCards((c) => sessionsTree.state.setRead(c.id, false))),
     // The Color submenu of a session row's and a board card's right-click menu: one command per color, and No Color.
     // The current color's row (`<color>.current`, titled with a ✓) gives the same color.
     ...[...SESSION_COLORS.map((c) => c.id), undefined].flatMap((color) =>
       (color ? [colorCommand(color), `${colorCommand(color)}.current`] : [colorCommand(color)]).map((command) =>
-        registerTimedCommand(command, (arg: unknown, selected: unknown) => sessionsTree.setColor(cardsOf(sessions, sessionsTree, arg, selected).map((c) => c.id), color)),
+        registerTimedCommand(command, (arg: unknown, selected: unknown) => sessionsTree.state.setColor(cardsOf(sessions, sessionsTree, arg, selected).map((c) => c.id), color)),
       ),
     ),
     registerTimedCommand('devdesk.sessions.nextWaiting', () => openNextWaiting(sessionsTree)),

@@ -1,12 +1,9 @@
-import { INTERRUPTED_DETAIL, type SessionCard } from './sessions';
+import { endKindOf, type SessionCard } from './sessions';
 import { attentionOrder, waitsOnBackground, type Settle } from './sessionsView';
 
 /** How the Claude view and the Claude Board order sessions (setting `devdesk.sessions.sort`). */
-export type SortMode = 'urgency' | 'attention';
-
-export function isSortMode(v: unknown): v is SortMode {
-  return v === 'urgency' || v === 'attention';
-}
+export const SORT_MODES = ['urgency', 'attention'] as const;
+export type SortMode = (typeof SORT_MODES)[number];
 
 /**
  * Urgency ranks, most urgent first: needs you, recently finished, working, stuck, the rest (read or older done, ready,
@@ -46,7 +43,7 @@ export function urgencyRank(c: SessionCard, o: UrgencyOptions): UrgencyRank {
     case 'done': {
       if (waitsOnBackground(c)) return 2;
       const recent = c.updatedAt !== undefined && o.now - c.updatedAt <= o.recentMs;
-      return recent && o.unread.has(c.id) && c.detail !== INTERRUPTED_DETAIL ? 1 : 4;
+      return recent && o.unread.has(c.id) && endKindOf(c) !== 'interrupted' ? 1 : 4;
     }
     case 'stopped':
       return 5;
@@ -96,7 +93,7 @@ export interface SortOptions extends UrgencyOptions {
 
 /** The sessions in the order `mode` names: `urgency` (`urgencyOrder`) or `attention` (`attentionOrder`). */
 export function sortSessions(cards: readonly SessionCard[], o: SortOptions): SessionCard[] {
-  return o.mode === 'urgency' ? urgencyOrder(cards, o, o.settle) : attentionOrder(cards, o.now, o.idleMs, o.unread, o.unreadFirst, o.settle);
+  return o.mode === 'urgency' ? urgencyOrder(cards, o, o.settle) : attentionOrder(cards, o);
 }
 
 /**

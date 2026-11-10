@@ -1,79 +1,52 @@
-import { existsSync } from 'node:fs';
 import * as vscode from 'vscode';
-import { BoardSearch } from './boardSearch';
-import { HISTORY_SETTINGS, type HistoryAnswer, historyAnswer, historyCard, historyWorktree, sameIdSet, splitSearchMatches, withStatus } from './core/boardHistory';
-import { searchSessions } from './core/boardSearch';
-import { launchCwd } from './core/historyIndex';
-import {
-  buildDocs,
-  type HistoryDoc,
-  type HistoryHit,
-  HISTORY_CANDIDATES_MAX,
-  searchCandidates,
-  historyDigest,
-} from './core/historySearch';
 import { RedrawLog } from './core/boardRedraws';
-import { besideBoardWidth, buildBoard, type BoardData, legacyPrompt } from './core/board';
+import { type BacklogItem, besideBoardWidth, buildBoard, type BoardData, legacyPrompt } from './core/board';
 import { missingWorktree, parseCompose } from './core/composer';
 import type { SessionCard } from './core/sessions';
-import type { Feature } from './core/worktrees';
 import { truncate } from './core/sessionsView';
 import { type ScopedPopover, scopedPopover, type UsageScope } from './core/usageScope';
 import type { UsageScopeState } from './usageScopeState';
 import type { UsageService } from './usageService';
 import { planLimits } from './planLimits';
 import type { BacklogStore } from './backlogStore';
+import { BoardHistory } from './board/history';
 import { BOARD_TITLE, boardHtml } from './board/html';
-import { type BoardMessage, type HostMessage, type PanelMessage, parseBoardMessage } from './board/messages';
+import { type BoardMessage, type BoardPost, type HostMessage, type PanelMessage, parseBoardMessage } from './board/messages';
 import { PanelUi } from './board/panelUi';
 import { BoardProjectState } from './board/projectState';
 import type { BoardUi, SubmitOutcome } from './board/types';
-import { BoardComposer, type ComposerInfo, NO_FOLDER, type StartHow } from './boardComposer';
+import { BoardComposer, NO_FOLDER, type StartHow } from './boardComposer';
 import {
   boardCardLine, boardCardTitle,
   boardLaneWidth,
   boardOpenWhenEmpty,
   boardOpenWithSidebar,
   boardPromptPlacement,
-  boardSearchCommand,
-  boardSearchHistory,
-  boardSearchHistoryDays,
-  boardSearchHistoryDir,
-  boardSearchHistoryMaxSessions,
-  boardSearchHistoryScope,
-  boardSearchModel,
-  boardSearchTimeoutMs,
-  insightsClaude,
   openSettings,
   setGlobalSetting,
   boardSessionsBeside,
   sessionsDefaultMode,
   sessionsDimRead,
   sessionsFinishedSessions,
-  sessionsIdleMs,
-  sessionsStateDir,
-  sessionsStuckMs,
   sessionsTmuxServer,
   sessionsUnreadBadge,
   sessionsRecentlyFinishedMs,
   sessionsSort,
-  sessionsUnreadFirst,
   workspaceRoot,
 } from './config';
 import { isClaudeTerminalTab, liveCardTerminal } from './claudeSessions';
-import { HistoryIndexer, type IndexStatus } from './historyIndexer';
-import { log, noteLatency, track } from './log';
+import { log, noteLatency } from './log';
 import { savePastedImage } from './pastedImages';
 import type { SessionsModel } from './sessionsModel';
 import { forkSession, killSession, openSessionCard } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
+import type { SessionViewState } from './sessionViewState';
 import type { WorktreeTaskStore } from './worktreeSessions';
+import { webviewOptions } from './webviewPage';
 
 const BOARD_VIEW_TYPE = 'devdesk.board';
 /** Model, tree and backlog changes often come together: post the board once for them. */
 const POST_DELAY_MS = 50;
-/** How often the history index looks for new transcripts while the board is visible. */
-const HISTORY_REFRESH_MS = 60_000;
 
 /** A prompt for later leaves the lane once what it ran is done: a session started, a command sent or run (the box empties). */
 const ranOutcome = (outcome: SubmitOutcome) => outcome.clear && !outcome.error;
@@ -126,42 +99,18 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   private readonly subscriptions: vscode.Disposable[];
   /** The Claude view has been shown in this window (`sidebarShown`). */
   private sidebarSeen = false;
-  private readonly search = new BoardSearch({
-    model: boardSearchModel,
-    command: boardSearchCommand,
-    claude: insightsClaude,
-    timeoutMs: boardSearchTimeoutMs,
-  });
-  /** The last ✨ search answer posted (for tests). */
-  lastSearchResult: Extract<PanelMessage, { type: 'searchResult' }> | undefined;
-  /** Past sessions (Claude's transcripts) for the search box's history results and ✨. */
-  private readonly history = new HistoryIndexer({
-    enabled: boardSearchHistory,
-    scope: boardSearchHistoryScope,
-    days: boardSearchHistoryDays,
-    maxSessions: boardSearchHistoryMaxSessions,
-    root: workspaceRoot,
-    projectsDir: boardSearchHistoryDir,
-    stateDir: sessionsStateDir,
-    warn: (m) => log.warn(m),
-    info: (m) => log.info(m),
-    track,
-  });
-  /** The history's docs and what they were built from (the index's revision): rebuilt only when one of those changed (about 250 ms per 1 000). */
-  private historyDocs: { docs: HistoryDoc[]; revision: number; features: readonly Feature[]; root?: string; realRoot?: string; scope: 'workspace' | 'all' } | undefined;
-  /** The last `historyQuery`, answered again (same `seq`) when the index changes. */
-  private historyQuery: { query: string; seq: number } | undefined;
-  /** The board's session ids the history results last left out: a session joining or leaving the board answers again. */
-  private historyExcluded: Set<string> | undefined;
-  /** The last history results posted (for tests). */
-  lastHistoryResults: HistoryAnswer | undefined;
-  /** The docs the last history results were searched in (undefined: none were built). */
-  private historyAnswered: HistoryDoc[] | undefined;
+  /** Past sessions (Claude's transcripts): the search box's history results, the ✨ search, Resume and Fork. */
+  private readonly history: BoardHistory;
+  /** How many times a webview loaded the board (said `ready`), for tests. */
+  private webviewLoads = 0;
+  /** How many times the board was told to put the keyboard in its prompt box (`enter`), for tests. */
+  private promptEnters = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly model: SessionsModel,
     private readonly tree: SessionsTree,
+    private readonly viewState: SessionViewState,
     private readonly backlog: BacklogStore,
     tasks: WorktreeTaskStore,
     globalState: vscode.Memento,
@@ -170,12 +119,21 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     private readonly usageScope: UsageScopeState,
   ) {
     this.hold = this.model.holder();
-    this.composer = new BoardComposer(model, tree, tasks, globalState);
+    this.composer = new BoardComposer(model, tree, viewState, tasks, globalState);
     this.kept = new BoardProjectState(workspaceState);
     // A session the box starts with its terminal open, or one a command opens (D), opens beside the board.
     this.composer.beforeOpen = () => this.roomFor(undefined);
     this.composer.sessions.beforeOpen = (card) => this.roomFor(card);
     this.ui = new PanelUi((m) => this.postHost(m));
+    this.history = new BoardHistory({
+      model,
+      tree,
+      isOpen: () => !!this.panel,
+      post: (m) => this.postToWebview(m),
+      notice: (notice) => this.ui.notice(notice),
+      roomFor: (card) => this.roomFor(card),
+      board: () => this.data(),
+    });
     this.subscriptions = [
       this.composer,
       // The CLI listed its models (or a model was typed): the pill offers them.
@@ -205,33 +163,14 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           // The Claude CLI (or its arguments) may be another one now: ask it again for its `/` list.
           this.composer.clearCommands();
         }
-        // Only with the board open (opening it refreshes), and only for what changes the index, not the ✨ model.
-        if (this.panel && HISTORY_SETTINGS.some((key) => e.affectsConfiguration(key))) {
-          void this.refreshHistory(true);
-          // Now, not when a run in flight ends: history turned off empties the lane, a new scope filters it.
-          this.answerHistory();
-        }
         if (!e.affectsConfiguration('devdesk.board')) return;
         this.schedulePost();
         this.openIfEmpty();
       }),
       { dispose: () => clearTimeout(this.postTimer) },
-      { dispose: () => this.search.cancel() },
       this.history,
-      // New entries: the search box's results again; progress while it indexes: only the progress, unless the docs changed.
-      this.history.onDidChange(() => this.answerHistory(this.history.status().building)),
     ];
   }
-
-  /** The board's tab is open (for tests). */
-  get isOpen(): boolean {
-    return !!this.panel;
-  }
-
-  /** How many times a webview loaded the board (said `ready`), for tests. */
-  webviewLoads = 0;
-  /** How many times the board was told to put the keyboard in its prompt box (`enter`), for tests. */
-  promptEnters = 0;
 
   /** Opens the board in the active editor group, or reveals it. */
   open(preserveFocus = false): void {
@@ -277,11 +216,6 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     if (!this.panel) this.open();
   }
 
-  /** Makes the next showing of the Claude view count as the first (for tests). */
-  forgetSidebarShown(): void {
-    this.sidebarSeen = false;
-  }
-
   /** Restores the board after a window reload. */
   async deserializeWebviewPanel(panel: vscode.WebviewPanel): Promise<void> {
     if (this.panel) {
@@ -298,7 +232,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * desktop), then wait for its `ready` and the board, before anything shows.
    */
   private options(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
-    return { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')] };
+    return webviewOptions(this.extensionUri, { retainContextWhenHidden: true });
   }
 
   private attach(panel: vscode.WebviewPanel): void {
@@ -306,24 +240,15 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     panel.title = BOARD_TITLE;
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'board.svg');
     panel.webview.html = boardHtml(panel.webview, this.extensionUri, boardPromptPlacement());
-    this.refreshHistory();
-    const historyTimer = setInterval(() => {
-      if (this.panel?.visible) this.refreshHistory();
-    }, HISTORY_REFRESH_MS);
     this.panelSubscriptions = [
-      { dispose: () => clearInterval(historyTimer) },
+      this.history.opened(() => !!this.panel?.visible),
       panel.webview.onDidReceiveMessage((m) => void this.handle(m)),
       panel.onDidChangeViewState(() => this.syncAcquire()),
       panel.onDidDispose(() => {
         for (const d of this.panelSubscriptions) d.dispose();
         this.panelSubscriptions = [];
         this.panel = undefined;
-        this.search.cancel();
-        this.historyQuery = undefined;
-        this.historyExcluded = undefined;
-        // The index and its docs can be about 100 MB: a board opened again loads them again.
         this.history.release();
-        this.historyDocs = this.historyAnswered = undefined;
         // A board opened again starts with an empty box.
         this.ui.dismissed();
         this.syncAcquire();
@@ -349,26 +274,21 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
 
   /** Tabs or the active terminal changed: posts again only when another session's Claude terminal is in front now. */
   private frontMayHaveChanged(): void {
-    if (this.tree.frontCard()?.id !== this.postedFocused) this.schedulePost();
+    if (this.viewState.frontCard()?.id !== this.postedFocused) this.schedulePost();
   }
 
   /** The board as the webview shows it (`focused`: the session whose Claude terminal is in front). */
-  data(focused = this.tree.frontCard()?.id): BoardData {
+  data(focused = this.viewState.frontCard()?.id): BoardData {
     return buildBoard(this.model.current, this.backlog.all(), {
-      now: Date.now(),
-      idleMs: sessionsIdleMs(),
-      stuckMs: sessionsStuckMs(),
-      unread: this.tree.unreadIds,
-      colors: this.tree.sessionColors,
+      view: this.viewState.viewContext(),
+      colors: this.viewState.sessionColors,
       focused,
-      unreadFirst: sessionsUnreadFirst(),
       vscodeServer: sessionsTmuxServer(),
       defaultMode: sessionsDefaultMode().name,
       starting: this.starting,
       models: this.composer.modelRows(),
       launchedModels: this.composer.launchedModels(this.model.current),
       parkedLimit: sessionsFinishedSessions(),
-      settle: this.tree.settle,
       sort: sessionsSort(),
       recentMs: sessionsRecentlyFinishedMs(),
       cardTitle: boardCardTitle(),
@@ -382,47 +302,50 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.subscriptions.push(checks.onDidChange(() => this.schedulePost()));
   }
 
-  /** The composer's choices (for tests). */
-  async composerInfo(): Promise<ComposerInfo> {
-    await this.model.loadFeatures();
-    return this.composer.info();
-  }
-
-  /** What the prompt box keeps for this project folder (for tests). */
-  keptState() {
-    return this.kept.restore();
-  }
-
-  /** Forgets what the prompt box keeps for this project folder (for tests). */
-  forgetKept(): Promise<void> {
-    return this.kept.forget();
-  }
-
-  /** The file the prompts for later are kept in (for tests). */
-  get backlogFile(): string {
-    return this.backlog.file;
-  }
-
-  /** Handles a message as if the webview sent it (for tests). */
-  receive(raw: unknown): Promise<void> {
-    return this.handle(raw);
-  }
-
-  /** The prompt box messages posted since the last call, and the shown notice's actions (for tests). */
-  takeUiMessages(): { messages: HostMessage[]; actions: { id: string; label: string }[] } {
-    return { messages: this.ui.takeRecorded(), actions: this.ui.actionIds };
-  }
-
-  /** What `text` submitted from the box would be (for tests). */
-  async classify(text: string, where = 'main') {
-    await this.model.loadFeatures();
-    return this.composer.classify(text, where);
-  }
-
-  /** What the `/` menu (or with `kind: '@'`, the file menu) offers for `query` (for tests). */
-  async complete(query: string, options: { where?: string; stacked?: boolean; kind?: '/' | '@' } = {}) {
-    await this.model.loadFeatures();
-    return this.composer.complete(options.kind ?? '/', query, options.where ?? 'main', { stacked: options.stacked });
+  /** What the e2e tests look at and drive (spread into `testApi`, under these names). */
+  testHooks() {
+    return {
+      /** Whether the Claude Board's tab is open, and what it shows. */
+      boardOpen: () => !!this.panel,
+      /** How many times the board's webview loaded (a hidden board keeps its webview, so showing it again loads none). */
+      boardWebviewLoads: () => this.webviewLoads,
+      /** How many times the board was told to focus its prompt box. */
+      boardPromptEnters: () => this.promptEnters,
+      /** The next showing of the Claude view opens the board again (`devdesk.board.openWithSidebar`). */
+      boardForgetSidebarShown: () => {
+        this.sidebarSeen = false;
+      },
+      boardData: () => this.data(),
+      ...this.history.testHooks(),
+      /** The board composer's choices, and a message as if its webview sent it. */
+      boardComposer: async () => {
+        await this.model.loadFeatures();
+        return this.composer.info();
+      },
+      boardMessage: (m: unknown) => this.handle(m),
+      /** What the board's prompt box keeps for this project folder (as posted to a webview that loads), and the file of its prompts for later. */
+      boardKept: () => this.kept.restore(),
+      boardBacklogFile: () => this.backlog.file,
+      boardForgetKept: () => this.kept.forget(),
+      /**
+       * The prompt box messages (notice, setChoice, openPicker, clearBox, composed) posted since the last call and the
+       * shown notice's action ids (click one with `boardMessage({ type: 'noticeAction', id })`), and what a submitted text
+       * is classified as.
+       */
+      boardUi: (): { messages: HostMessage[]; actions: { id: string; label: string }[] } => ({ messages: this.ui.takeRecorded(), actions: this.ui.actionIds }),
+      boardClassify: async (text: string, where = 'main') => {
+        await this.model.loadFeatures();
+        return this.composer.classify(text, where);
+      },
+      /** The `/` menu's rows for a query (`stacked`: after other commands; `kind: '@'`: the file menu's). */
+      boardComplete: async (query: string, options: { where?: string; stacked?: boolean; kind?: '/' | '@' } = {}) => {
+        await this.model.loadFeatures();
+        return this.composer.complete(options.kind ?? '/', query, options.where ?? 'main', { stacked: options.stacked });
+      },
+      boardMakeRoomBeside: () => this.makeRoomBeside(),
+      /** What the board's 📊 popover shows, for the window's scope or `scope`. */
+      boardUsage: (scope?: UsageScope) => this.usage(scope),
+    };
   }
 
   private postToWebview(m: PanelMessage): void {
@@ -439,11 +362,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   private post(): void {
     if (!this.panel) return;
     // A session resumed or forked from the history is on the board now: it leaves the history results.
-    if (this.historyQuery && !sameIdSet(this.historyExcluded, this.boardSessionIds())) this.answerHistory();
+    this.history.boardChanged();
     const start = Date.now();
     const readStyle = { dimRead: sessionsDimRead(), badge: sessionsUnreadBadge() };
-    const focused = this.tree.frontCard()?.id;
-    const message = { type: 'board', loaded: this.model.isLoaded, board: this.data(focused), composer: this.composer.info(), readStyle, cardLine: boardCardLine() };
+    const focused = this.viewState.frontCard()?.id;
+    const message: BoardPost = { type: 'board', loaded: this.model.isLoaded, board: this.data(focused), composer: this.composer.info(), readStyle, cardLine: boardCardLine() };
     const text = JSON.stringify(message);
     if (text === this.lastPosted) return;
     this.lastPosted = text;
@@ -451,7 +374,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.postedAt = Date.now();
     log.debug(`board: built in ${this.postedAt - start}ms, ${Math.round(text.length / 1024)}KB`);
     noteLatency('board build', this.postedAt - start);
-    void this.panel.webview.postMessage({ ...message, postedAt: this.postedAt });
+    this.postToWebview({ ...message, postedAt: this.postedAt });
   }
 
   private postEnter(): void {
@@ -538,31 +461,25 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           return;
         }
         case 'open':
-        case 'fork':
-        case 'end': {
-          const card = this.model.find(m.id);
-          if (!card) return;
-          if (m.type === 'open') {
+          return await this.withCard(m.id, async (card) => {
             await this.roomFor(card);
             await openSessionCard(this.tree, card);
-          }
-          else if (m.type === 'fork') await forkSession(this.model, this.tree, card);
-          else await killSession(this.model, card);
-          return;
-        }
+          });
+        case 'fork':
+          return await this.withCard(m.id, (card) => forkSession(this.model, this.tree, card));
+        case 'end':
+          return await this.withCard(m.id, (card) => killSession(this.model, card));
         case 'start':
         case 'plan':
         case 'spec':
-        case 'draft':
-        case 'edit':
-        case 'delete': {
-          const item = this.backlog.find(m.id);
-          if (!item || this.starting.has(item.id)) return;
-          if (m.type === 'edit') this.postFocus({ text: item.prompt, choice: item.choice ?? {}, editing: item.id });
-          else if (m.type === 'delete') await this.remove(item.id, item.prompt);
-          else await this.start(item.id, m.type);
-          return;
+        case 'draft': {
+          const how = m.type;
+          return await this.withPrompt(m.id, (item) => this.start(item.id, how));
         }
+        case 'edit':
+          return await this.withPrompt(m.id, (item) => this.postFocus({ text: item.prompt, choice: item.choice ?? {}, editing: item.id }));
+        case 'delete':
+          return await this.withPrompt(m.id, (item) => this.remove(item.id, item.prompt));
         case 'compose':
           return await this.compose(m.raw, m.replaces);
         case 'complete': {
@@ -589,23 +506,15 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         case 'forgetTypedModels':
           return this.composer.forgetCustomModels();
         case 'search':
-          return await this.runSearch(m.query);
+          return await this.history.runSearch(m.query);
         case 'cancelSearch':
-          return this.search.cancel();
+          return this.history.cancelSearch();
         case 'historyQuery':
-          // The box was cleared: no query to answer again.
-          if (!m.query) {
-            this.historyQuery = undefined;
-            return;
-          }
-          this.historyQuery = { query: m.query, seq: m.seq };
-          // At most once a minute; what it finds answers the query again.
-          this.refreshHistory();
-          return this.answerHistory();
+          return this.history.setQuery(m.query, m.seq);
         case 'resumeHistory':
-          return await this.resumeHistory(m.id);
+          return await this.history.resume(m.id);
         case 'forkHistory':
-          return await this.forkHistory(m.id, !!m.inMain);
+          return await this.history.fork(m.id, !!m.inMain);
         case 'copyHistoryId':
           await vscode.env.clipboard.writeText(m.id);
           return this.ui.notice({ text: `Copied the session id ${m.id}`, tone: 'info' });
@@ -614,6 +523,18 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       log.warn(`board action ${m.type} failed: ${(err as Error).message}`);
       void vscode.window.showErrorMessage(`Claude Board: ${(err as Error).message}`);
     }
+  }
+
+  /** Runs `fn` on the board's card `id`, if it is still there. */
+  private async withCard(id: string, fn: (card: SessionCard) => Promise<unknown>): Promise<void> {
+    const card = this.model.find(id);
+    if (card) await fn(card);
+  }
+
+  /** Runs `fn` on prompt for later `id`, if it is still there and not being started. */
+  private async withPrompt(id: string, fn: (item: BacklogItem) => unknown): Promise<void> {
+    const item = this.backlog.find(id);
+    if (item && !this.starting.has(item.id)) await fn(item);
   }
 
   /**
@@ -739,7 +660,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * full board (every lane `devdesk.board.laneWidth` wide) on the left, the rest for the terminal on the right, which
    * becomes the active group so the terminal opens there. Later ones open where it is.
    */
-  async makeRoomBeside(): Promise<boolean> {
+  private async makeRoomBeside(): Promise<boolean> {
     const groups = vscode.window.tabGroups.all;
     if (!this.panel?.visible || groups.length !== 1 || groups[0].tabs.some(isClaudeTerminalTab)) return false;
     const board = besideBoardWidth(this.width, boardSessionsBeside(), boardLaneWidth());
@@ -760,150 +681,9 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * The 📊 popover for the window's usage scope (or `scope`, for the tests), with the projects to choose from: tokens
    * used today, this week and in the last 30 days, by Claude sessions and (for all projects) by DevDesk's insights.
    */
-  async usage(scope?: UsageScope): Promise<ScopedPopover> {
+  private async usage(scope?: UsageScope): Promise<ScopedPopover> {
     const { days, today } = await this.usageService.snapshot();
     return scopedPopover(days, today, scope ?? this.usageScope.get(), this.usageScope.windowPlace());
-  }
-
-  /**
-   * The ✨ search: the board's sessions (hidden parked ones too) and, with history on, the past sessions most like the
-   * query to the model; posts its answer unless superseded.
-   */
-  private async runSearch(query: string): Promise<void> {
-    let outcome: Awaited<ReturnType<typeof this.search.search>>;
-    let hits: HistoryHit[] = [];
-    try {
-      const docs = boardSearchHistory() ? this.docs() : [];
-      const { past, board } = docs.length ? searchCandidates(docs, query, { now: Date.now(), limit: HISTORY_CANDIDATES_MAX, onBoard: this.boardSessionIds() }) : { past: [], board: new Map<string, string>() };
-      hits = past.map((c) => c.hit);
-      const extra = past.map((c) => historyDigest(c.hit, c.doc));
-      // Where the board's sessions have the query's words in their whole transcripts, by card id.
-      const cardId = this.cardIdOf();
-      const found = new Map([...board].map(([id, text]) => [cardId(id), text]));
-      outcome = await this.search.search(query, searchSessions(this.data(), this.model.current), extra, found);
-    } catch (err) {
-      // Never leave the webview's spinner on.
-      log.warn(`board search failed: ${(err as Error).message}`);
-      outcome = { error: (err as Error).message };
-    }
-    if (!outcome) return;
-    // A candidate resumed while the model answered is on the board now: it is a board match, not a past session.
-    const answer = 'error' in outcome ? outcome : { ...outcome, ...splitSearchMatches(outcome.matches, hits, this.boardSessionIds()) };
-    const message: Extract<PanelMessage, { type: 'searchResult' }> = { type: 'searchResult', query, ...answer };
-    this.lastSearchResult = message;
-    this.postToWebview(message);
-  }
-
-  /** Looks for new transcripts (at most once a minute unless `force`); a failure is logged, never thrown. */
-  private refreshHistory(force = false): Promise<void> {
-    return this.history.refresh(force).catch((err: Error) => log.warn(`board history: cannot index the transcripts: ${err.message}`));
-  }
-
-  /** Indexes the transcripts now (for tests). */
-  forceHistoryRefresh(): Promise<void> {
-    return this.refreshHistory(true);
-  }
-
-  /** How far the history index is (for tests). */
-  historyStatus(): IndexStatus {
-    return this.history.status();
-  }
-
-  /** The id of the board card of a session on the board, by its session id. */
-  private cardIdOf(): (sessionId: string) => string {
-    const byId = new Map(this.model.current.filter((c) => c.sessionId).map((c) => [c.sessionId!, c.id]));
-    return (id) => byId.get(id) ?? id;
-  }
-
-  /** The sessions on the board: history results leave them out. */
-  private boardSessionIds(): Set<string> {
-    return new Set(this.model.current.map((c) => c.sessionId).filter((id): id is string => !!id));
-  }
-
-  /** The history's searchable docs, built again only when the index's entries, the worktrees, the root or the scope changed. */
-  private docs(): HistoryDoc[] {
-    const revision = this.history.revision;
-    const features = this.model.featureList;
-    const root = workspaceRoot();
-    const realRoot = this.history.realRoot;
-    const scope = boardSearchHistoryScope();
-    const c = this.historyDocs;
-    if (c && c.revision === revision && c.features === features && c.root === root && c.realRoot === realRoot && c.scope === scope) return c.docs;
-    const worktreeOf = (cwd: string | undefined) => historyWorktree(features, cwd);
-    const docs = buildDocs(this.history.transcripts(), { root, realRoot, scope, worktreeOf });
-    this.historyDocs = { docs, revision, features, root, realRoot, scope };
-    return docs;
-  }
-
-  /**
-   * Answers the last `historyQuery` (with its `seq`) from the index as it is now. `progress`: the index reported its
-   * progress, so when the docs and the board's sessions are the ones last searched, only the progress is posted again.
-   */
-  private answerHistory(progress = false): void {
-    const q = this.historyQuery;
-    if (!q || !this.panel) return;
-    const exclude = this.boardSessionIds();
-    const prev = this.lastHistoryResults;
-    const status = this.history.status();
-    let message: HistoryAnswer;
-    if (progress && prev && prev.seq === q.seq && prev.query === q.query && !prev.off && boardSearchHistory() && sameIdSet(this.historyExcluded, exclude) && this.historyAnswered && this.historyAnswered === this.docs()) {
-      message = withStatus(prev, status);
-    } else {
-      this.historyAnswered = undefined;
-      const docs = () => (this.historyAnswered = this.docs());
-      const cardId = this.cardIdOf();
-      message = historyAnswer(q, { on: boardSearchHistory(), status, docs, now: Date.now(), exclude, cardId, warn: (m) => log.warn(m) });
-    }
-    this.historyExcluded = exclude;
-    this.lastHistoryResults = message;
-    this.postToWebview(message);
-  }
-
-  private historyDoc(id: string): HistoryDoc | undefined {
-    return this.docs().find((d) => d.id === id);
-  }
-
-  /** Its folder is gone: offer to fork the past session in the workspace root instead. */
-  private folderGone(id: string): void {
-    this.ui.notice({
-      text: 'Its folder is gone: fork it in main?',
-      tone: 'warning',
-      actions: [
-        { label: 'Fork in main', run: () => this.forkHistory(id, true) },
-        { label: 'Cancel', run: () => undefined },
-      ],
-    });
-  }
-
-  /** The past session's transcript was deleted since it was indexed: Claude could not resume it, so say so instead. */
-  private transcriptGone(doc: HistoryDoc): boolean {
-    if (existsSync(doc.path)) return false;
-    this.ui.notice({ text: 'Its transcript is gone (deleted, or cleaned up by Claude Code), so it cannot be resumed or forked.', tone: 'warning' });
-    // Indexed again, the result goes.
-    void this.refreshHistory(true);
-    return true;
-  }
-
-  /** A history result's Resume: the past session as a parked card, resumed in its folder like one on the board. */
-  private async resumeHistory(id: string): Promise<void> {
-    const doc = this.historyDoc(id);
-    if (!doc || this.transcriptGone(doc)) return;
-    const cwd = launchCwd(doc.entry);
-    if (!cwd || !existsSync(cwd)) return this.folderGone(id);
-    const card = historyCard(doc, cwd, this.model.featureList);
-    await this.roomFor(card);
-    await openSessionCard(this.tree, card);
-  }
-
-  /** A history result's Fork: a new session from the past one, in its folder, or (`inMain`) in the workspace root. */
-  private async forkHistory(id: string, inMain: boolean): Promise<void> {
-    const doc = this.historyDoc(id);
-    if (!doc || this.transcriptGone(doc)) return;
-    const cwd = inMain ? workspaceRoot() : launchCwd(doc.entry);
-    // No folder open (history scope `all`): there is no main to fork in.
-    if (inMain && !cwd) return this.ui.notice({ text: 'No workspace folder is open, so there is no main to fork it in.', tone: 'warning' });
-    if (!inMain && (!cwd || !existsSync(cwd))) return this.folderGone(id);
-    await forkSession(this.model, this.tree, historyCard(doc, cwd, this.model.featureList));
   }
 
   dispose(): void {

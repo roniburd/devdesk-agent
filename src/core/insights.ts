@@ -73,27 +73,58 @@ export function parseInsight(raw: string): Insight | undefined {
 }
 
 /**
- * Puts what an insight says about the card's current turn on the card: the status only while that turn works, the
- * waiting-for-you answer (over the hook's `?` heuristic) only for the finished turn it read, what Claude asks only
- * while that same wait lasts, the summary and title always.
+ * `card` with what an insight says about its current turn: the status only while that turn works, the waiting-for-you
+ * answer (over the hook's `?` heuristic) only for the finished turn it read, what Claude asks only while that same wait
+ * lasts, the summary and title always. `card` itself without an insight. Each answer is keyed by the turn (or wait) it
+ * is about, so applying it last, over the newest hook record, needs no undoing when the turn moves on.
  */
-export function applyInsight(card: SessionCard, insight: Insight | undefined): void {
-  if (!insight) return;
+export function withInsight(card: SessionCard, insight: Insight | undefined): SessionCard {
+  if (!insight) return card;
+  const next: SessionCard = { ...card };
   if (card.state === 'working' && insight.status && insight.statusFor !== undefined && insight.statusFor === card.turnStartedAt) {
-    card.liveStatus = insight.status;
+    next.liveStatus = insight.status;
   }
   const finished = card.state === 'done' || (card.state === 'parked' && card.lastState === 'done');
   if (finished && insight.waitingForUser !== undefined && insight.doneFor !== undefined && insight.doneFor === turnEnd(card)) {
-    if (insight.waitingForUser) card.asksQuestion = true;
-    else delete card.asksQuestion;
+    if (insight.waitingForUser) next.asksQuestion = true;
+    else delete next.asksQuestion;
   }
   if (insight.summary) {
-    card.insightSummary = insight.summary;
-    if (insight.summaryAt !== undefined) card.insightSummaryAt = insight.summaryAt;
+    next.insightSummary = insight.summary;
+    if (insight.summaryAt !== undefined) next.insightSummaryAt = insight.summaryAt;
   }
-  if (insight.title) card.insightTitle = insight.title;
-  if (insight.objective) card.insightObjective = insight.objective;
-  if (card.state === 'waiting' && insight.ask && insight.askFor !== undefined && insight.askFor === card.updatedAt) card.askSummary = insight.ask;
+  if (insight.title) next.insightTitle = insight.title;
+  if (insight.objective) next.insightObjective = insight.objective;
+  if (card.state === 'waiting' && insight.ask && insight.askFor !== undefined && insight.askFor === card.updatedAt) next.askSummary = insight.ask;
+  return next;
+}
+
+/** `cards` with each session's insight in `insights` (by session id) applied; the same array when there are none. */
+export function withInsights(cards: SessionCard[], insights: ReadonlyMap<string, Insight | undefined>): SessionCard[] {
+  if (!insights.size) return cards;
+  return cards.map((c) => (c.sessionId ? withInsight(c, insights.get(c.sessionId)) : c));
+}
+
+/**
+ * The insights a refresh shows, from those it read (`read`, by session id, each with the read it came from) and the
+ * reads cached now (`current`): a session whose file changed after the refresh read it keeps what `shown` has (the
+ * watcher's newer one, or what it showed before), and is listed in `changed` so its file is shown again once read.
+ */
+export function freshInsights<R>(
+  read: ReadonlyMap<string, { insight: Insight | undefined; read: R }>,
+  current: ReadonlyMap<string, R>,
+  shown: ReadonlyMap<string, Insight | undefined>,
+): { insights: Map<string, Insight | undefined>; changed: string[] } {
+  const insights = new Map<string, Insight | undefined>();
+  const changed: string[] = [];
+  for (const [id, r] of read) {
+    if (current.get(id) === r.read) insights.set(id, r.insight);
+    else {
+      changed.push(id);
+      insights.set(id, shown.has(id) ? shown.get(id) : r.insight);
+    }
+  }
+  return { insights, changed };
 }
 
 /**

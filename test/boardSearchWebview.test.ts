@@ -1,18 +1,17 @@
-// The Claude Board's search box (media/board.js in jsdom, the page's markup from src/board/html.ts).
+// The Claude Board's search box (media/board.js bundled, in jsdom, the page's markup from src/board/html.ts).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { matchesQuery, parseQuery, searchFields } from '../src/core/boardSearch';
+import { narrowScope, scopeSelects } from '../src/core/usageScope';
 import { projectFolder } from './boardProjectFolder';
+import { webviewBody } from './webviewBody';
+import { webviewScript } from './webviewScript';
 
 const ROOT = join(__dirname, '..');
 
-function boardHtml(): string {
-  const src = readFileSync(join(ROOT, 'src/board/html.ts'), 'utf8');
-  const body = /<body[^>]*>([\s\S]*?)<script/.exec(src)![1];
-  return `<!DOCTYPE html><html><body>${body.replace(/\$\{[^}]*\}/g, '')}</body></html>`;
-}
+const boardHtml = () => webviewBody('src/board/html.ts');
 
 type S = Record<string, unknown>;
 const session = (id: string, title: string, o: { worktree?: string; lane?: string; look?: string; state?: string; texts?: string[] } = {}): S => ({
@@ -67,7 +66,7 @@ async function board(lanes: ReturnType<typeof LANES>, saved?: Record<string, unk
       folder.answer(m, (answer) => win.postMessage(answer, '*'));
     },
   });
-  win.eval(readFileSync(join(ROOT, 'media/board.js'), 'utf8'));
+  win.eval(webviewScript('board'));
   const settle = () => new Promise((r) => setTimeout(r, 20));
   const host = async (m: Record<string, unknown>) => {
     win.postMessage(m, '*');
@@ -189,7 +188,7 @@ describe('board search box: as you type', () => {
     expect(body()).toEqual(['p', '-- Idle / stopped', 'o']);
   });
 
-  it('agrees with the core matcher', async () => {
+  it('filters with the core matcher (src/core/boardQuery.ts, bundled in)', async () => {
     const all = [auth, parser, old];
     const b = await board(LANES({ needs: [auth], review: [parser], idle: [old] }));
     for (const q of ['auth', 'wt:feat', 'is:needs', 'is:parked auth', 'café', 'fix(auth', 'wt:', '"x"', 'refactor parser']) {
@@ -261,6 +260,13 @@ describe('board search box: as you type', () => {
 describe('board 📊 popup: scope', () => {
   const zeroT = { total: 0, cached: 0, requests: 0, totalText: '0', cachedText: '0' };
   const day = (places: unknown[]) => ({ key: 'k', label: 'Today', short: 'Today', sessions: zeroT, devdesk: { ...zeroT, failed: 0 }, models: [], top: [], places });
+  type Loose = { scope: never; windowProject: string; choices: never; today: { places: { project: string; worktree?: string }[] } };
+  /** The popover as `scopedPopover` sends it: with its selects, and the scope each breakdown row narrows to. */
+  const scoped = (u: Loose) => ({
+    ...u,
+    selects: scopeSelects(u.scope, u.windowProject, u.choices),
+    today: { ...u.today, places: u.today.places.map((p) => ({ ...p, ...(narrowScope(p, u.scope) ? { narrow: narrowScope(p, u.scope) } : {}) })) },
+  });
 
   it('the 📊 popup picks a project and a worktree, and narrows from a breakdown row', async () => {
     const b = await board(LANES({ needs: [auth] }));
@@ -286,7 +292,7 @@ describe('board 📊 popup: scope', () => {
         { project: '/w/ws', kind: 'workspace', worktree: 'feat-a', label: 'feat-a', title: '/w/ws · feat-a', share: 100, ...zeroT },
       ]),
     };
-    await b.host({ type: 'usage', usage });
+    await b.host({ type: 'usage', usage: scoped(usage as never) });
     const [project, worktree] = [...pop.querySelectorAll('select')] as HTMLSelectElement[];
     expect([...project.options].map((o) => o.textContent)).toEqual(['ws (this window) · Acme', 'All projects', 'other · Acme']);
     expect([...worktree.options].map((o) => o.textContent)).toEqual(['All worktrees', 'main', 'feat-a']);
@@ -311,14 +317,14 @@ describe('board 📊 popup: scope', () => {
     const usage = {
       scope: { kind: 'all' },
       windowProject: '/w/ws',
-      choices: [{ project: '/w/ws', kind: 'git', label: 'ws', title: '/w/ws', total: 1, totalText: '1', worktrees: [{ worktree: 'main', total: 1, totalText: '1' }] }],
+      choices: [{ project: '/w/ws', kind: 'git', kindLabel: 'git', label: 'ws', title: '/w/ws', total: 1, totalText: '1', worktrees: [{ worktree: 'main', total: 1, totalText: '1' }] }],
       periods: [{ label: 'Today', sessions: zeroT, devdesk: { ...zeroT, failed: 0 } }],
       today: day([
         { project: '/w/ws', kind: 'git', label: 'ws', title: '/w/ws', share: 60, ...zeroT },
         { project: '(DevDesk)', kind: 'folder', label: 'DevDesk insights', title: 'DevDesk', share: 40, ...zeroT },
       ]),
     };
-    await b.host({ type: 'usage', usage });
+    await b.host({ type: 'usage', usage: scoped(usage as never) });
     expect(pop.textContent).toContain('Today by project');
     expect(pop.textContent).toContain('DevDesk insights (Haiku)');
     const selects = pop.querySelectorAll('select');
@@ -331,7 +337,7 @@ describe('board 📊 popup: scope', () => {
     (rows[0] as HTMLElement).click();
     expect(b.posted.slice(before)).toEqual([{ type: 'usageScope', scope: { kind: 'project', project: '/w/ws' } }]);
     selects[0].focus();
-    await b.host({ type: 'usage', usage });
+    await b.host({ type: 'usage', usage: scoped(usage as never) });
     const again = pop.querySelector('select')!;
     expect(again).not.toBe(selects[0]);
     expect(b.win.document.activeElement).toBe(again);
@@ -341,10 +347,10 @@ describe('board 📊 popup: scope', () => {
     const b = await board(LANES({ needs: [auth] }));
     const pop = b.win.document.getElementById('stats-pop')!;
     b.win.document.getElementById('stats')!.click();
-    const ws = { project: '/w/ws', kind: 'git', label: 'ws', title: '/w/ws', total: 1, totalText: '1', worktrees: [{ worktree: 'main', total: 1, totalText: '1' }] };
+    const ws = { project: '/w/ws', kind: 'git', kindLabel: 'git', label: 'ws', title: '/w/ws', total: 1, totalText: '1', worktrees: [{ worktree: 'main', total: 1, totalText: '1' }] };
     const base = { windowProject: '/w/ws', choices: [ws], periods: [{ label: 'Today', sessions: zeroT, devdesk: { ...zeroT, failed: 0 } }] };
     const all = { ...base, scope: { kind: 'all' }, today: day([{ project: '/w/ws', kind: 'git', label: 'ws', title: '/w/ws', share: 100, ...zeroT }]) };
-    await b.host({ type: 'usage', usage: all });
+    await b.host({ type: 'usage', usage: scoped(all as never) });
     const row = pop.querySelector('.stats-place') as HTMLElement;
     expect(row.getAttribute('role')).toBe('button');
     expect(row.getAttribute('aria-label')).toBe('Show ws: 0 total, 0 cached, 100%');
@@ -352,7 +358,7 @@ describe('board 📊 popup: scope', () => {
     row.dispatchEvent(new b.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(b.posted).toContainEqual({ type: 'usageScope', scope: { kind: 'project', project: '/w/ws' } });
     const one = { ...base, scope: { kind: 'project', project: '/w/ws', worktree: 'main' }, today: day([]) };
-    await b.host({ type: 'usage', usage: one });
+    await b.host({ type: 'usage', usage: scoped(one as never) });
     expect(b.win.document.activeElement).toBe(pop.querySelector('select[aria-label="Project"]'));
     const wt = pop.querySelector('select[aria-label="Worktree"]') as HTMLSelectElement;
     expect([...wt.options].map((o) => o.textContent)).toEqual(['All worktrees', 'main']);
@@ -361,7 +367,7 @@ describe('board 📊 popup: scope', () => {
     wt.value = '';
     wt.dispatchEvent(new b.win.Event('change'));
     expect(b.posted).toContainEqual({ type: 'usageScope', scope: { kind: 'project', project: '/w/ws' } });
-    await b.host({ type: 'usage', usage: { ...one, scope: { kind: 'project', project: '/w/ws' } } });
+    await b.host({ type: 'usage', usage: scoped({ ...one, scope: { kind: 'project', project: '/w/ws' } } as never) });
     expect(pop.querySelector('select[aria-label="Worktree"]')).toBeNull();
     expect(b.win.document.activeElement).toBe(pop.querySelector('select[aria-label="Project"]'));
   });

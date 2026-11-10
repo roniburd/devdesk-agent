@@ -81,12 +81,14 @@ describe('parseHookRecord', () => {
     expect(parseHookRecord(JSON.stringify({ ...waiting, wait: null }))).not.toHaveProperty('waitKind');
     expect(parseHookRecord(JSON.stringify({ ...waiting, state: 'working' }))).not.toHaveProperty('waitKind');
   });
-  it('reads what a waiting record waits on, and ignores it otherwise', () => {
-    const waiting = { ...rec({ state: 'waiting', detail: 'Asking: which?' }), wait: { kind: 'question', toolUseId: 'toolu_1' } };
-    expect(parseHookRecord(JSON.stringify(waiting))?.waitKind).toBe('question');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: { kind: 'other' } }))).not.toHaveProperty('waitKind');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: null }))).not.toHaveProperty('waitKind');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, state: 'working' }))).not.toHaveProperty('waitKind');
+  it("reads a blocked record's error kind and how a turn ended, and ignores them otherwise", () => {
+    const blocked = { ...rec({ state: 'blocked', detail: 'rate_limit: Too many requests' }), errorKind: 'rate_limit' };
+    expect(parseHookRecord(JSON.stringify(blocked))?.errorKind).toBe('rate_limit');
+    expect(parseHookRecord(JSON.stringify({ ...blocked, errorKind: null }))).not.toHaveProperty('errorKind');
+    expect(parseHookRecord(JSON.stringify({ ...blocked, state: 'done' }))).not.toHaveProperty('errorKind');
+    const ended = { ...rec({ state: 'done', detail: 'Interrupted' }), endKind: 'interrupted' };
+    expect(parseHookRecord(JSON.stringify(ended))?.endKind).toBe('interrupted');
+    expect(parseHookRecord(JSON.stringify({ ...ended, endKind: 'other' }))).not.toHaveProperty('endKind');
   });
   it('rejects broken or incomplete records', () => {
     expect(parseHookRecord('{"sessionId":')).toBeUndefined();
@@ -130,9 +132,11 @@ describe('readHookRecords', () => {
     await writeFile(join(dir, 's4.json'), JSON.stringify(rec({ sessionId: 's4', transcriptPath: stopped, state: 'done', detail: 'Fixed', updatedAt: 1000 })));
     await writeFile(join(dir, 's5.json'), JSON.stringify(rec({ sessionId: 's5', transcriptPath: join(dir, 'gone.jsonl'), state: 'waiting' })));
     const byId = Object.fromEntries((await readHookRecords(dir)).map((r) => [r.sessionId, r]));
-    expect(byId.s1).toMatchObject({ state: 'idle', detail: MOVED_DETAIL });
-    expect(byId.s2).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL });
+    expect(byId.s1).toMatchObject({ state: 'idle', detail: MOVED_DETAIL, endKind: 'moved' });
+    expect(byId.s1).not.toHaveProperty('waitKind');
+    expect(byId.s2).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL, endKind: 'interrupted' });
     expect(byId.s3).toMatchObject({ state: 'working', detail: 'Running Bash' });
+    expect(byId.s3).not.toHaveProperty('endKind');
     expect(byId.s4).toMatchObject({ state: 'done', detail: 'Fixed' });
     expect(byId.s5).toMatchObject({ state: 'waiting', detail: 'Running Bash' });
   });

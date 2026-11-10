@@ -7,7 +7,7 @@ import { parseModels } from './core/composer';
 import { EXTENSION_ID } from './core/edition';
 import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
-import { isSortMode, type SortMode } from './core/urgency';
+import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { claudeConfigFilePath } from './core/trust';
@@ -34,11 +34,37 @@ export function openSettings(query: string): Thenable<unknown> {
 
 const expandHome = (p: string | undefined) => p?.trim().replace(/^~(?=\/|$)/, homedir());
 
-/** A number setting: `fallback` when unset or not a number, rounded down when `integer`, then clamped to `[min, max]`. */
-function numberSetting(key: string, fallback: number, min: number, max = Infinity, integer = false): number {
+/**
+ * A number setting: `fallback` when unset or not a number, rounded down when `integer` (to the nearest with `'round'`),
+ * then clamped to `[min, max]`; with `below: 'fallback'`, a value under `min` gives `fallback` instead of `min`.
+ */
+function numberSetting(key: string, fallback: number, min: number, max = Infinity, integer: boolean | 'round' = false, below: 'clamp' | 'fallback' = 'clamp'): number {
   const value = cfg().get<number>(key, fallback);
-  const n = Number.isFinite(value) ? (integer ? Math.floor(value) : value) : fallback;
+  if (!Number.isFinite(value)) return Math.min(max, Math.max(min, fallback));
+  const n = integer === 'round' ? Math.round(value) : integer ? Math.floor(value) : value;
+  if (below === 'fallback' && n < min) return fallback;
   return Math.min(max, Math.max(min, n));
+}
+
+/** A boolean setting, `fallback` when unset. */
+function bool(key: string, fallback: boolean): boolean {
+  return cfg().get<boolean>(key, fallback);
+}
+
+/** A string setting that must be one of `values`; anything else (or unset) is `fallback`. */
+function oneOf<T extends string>(key: string, values: readonly T[], fallback: T): T {
+  const value = cfg().get<string>(key);
+  return (values as readonly (string | undefined)[]).includes(value) ? (value as T) : fallback;
+}
+
+/** A string setting, trimmed; `''` when unset. */
+function text(key: string): string {
+  return cfg().get<string>(key)?.trim() ?? '';
+}
+
+/** A path setting with a leading `~` expanded; empty or unset: `fallback()`. */
+function pathSetting(key: string, fallback: () => string): string {
+  return expandHome(cfg().get<string>(key)) || fallback();
 }
 
 /** A path's workspace root: the package workspace containing it, else the git repository's main worktree. */
@@ -98,12 +124,12 @@ export function worktreesIdleReloadMs(): number {
 
 /** Pause the Worktrees view's refresh while the VS Code window is in the background (setting `devdesk.worktrees.pauseWhenUnfocused`). */
 export function worktreesPauseWhenUnfocused(): boolean {
-  return cfg().get<boolean>('worktrees.pauseWhenUnfocused', true);
+  return bool('worktrees.pauseWhenUnfocused', true);
 }
 
 /** Where devdesk_hook.py writes session state (setting `devdesk.sessions.stateDir`). */
 export function sessionsStateDir(): string {
-  return expandHome(cfg().get<string>('sessions.stateDir')) || join(homedir(), '.claude', 'devdesk', 'state');
+  return pathSetting('sessions.stateDir', () => join(homedir(), '.claude', 'devdesk', 'state'));
 }
 
 /** Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
@@ -121,7 +147,7 @@ export function claudeProjectsDir(): string {
  * Empty means `sessions` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
  */
 export function claudeSessionsDir(): string {
-  return expandHome(cfg().get<string>('sessions.claudeSessionsDir')) || join(claudeConfigDir(), 'sessions');
+  return pathSetting('sessions.claudeSessionsDir', () => join(claudeConfigDir(), 'sessions'));
 }
 
 /**
@@ -129,22 +155,22 @@ export function claudeSessionsDir(): string {
  * `devdesk.sessions.claudeJobsDir`). Empty means `jobs` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
  */
 export function claudeJobsDir(): string {
-  return expandHome(cfg().get<string>('sessions.claudeJobsDir')) || join(claudeConfigDir(), 'jobs');
+  return pathSetting('sessions.claudeJobsDir', () => join(claudeConfigDir(), 'jobs'));
 }
 
 /** List packages without changes in the Worktrees view (setting `devdesk.worktrees.showCleanPackages`). */
 export function worktreesShowCleanPackages(): boolean {
-  return cfg().get<boolean>('worktrees.showCleanPackages', false);
+  return bool('worktrees.showCleanPackages', false);
 }
 
 /** Each worktree row of the Worktrees view lists its Claude sessions above its packages (setting `devdesk.worktrees.showSessions`). */
 export function worktreesShowSessions(): boolean {
-  return cfg().get<boolean>('worktrees.showSessions', true);
+  return bool('worktrees.showSessions', true);
 }
 
 /** Load every worktree's changes in the background while the Worktrees view is visible (`devdesk.worktrees.prefetch`). */
 export function worktreesPrefetch(): boolean {
-  return cfg().get<boolean>('worktrees.prefetch', true);
+  return bool('worktrees.prefetch', true);
 }
 
 /**
@@ -167,7 +193,7 @@ export function sessionsPollMs(): number {
 
 /** Notify when a Claude session starts waiting for input (setting `devdesk.sessions.notifyWhenWaiting`). */
 export function sessionsNotifyWhenWaiting(): boolean {
-  return cfg().get<boolean>('sessions.notifyWhenWaiting', true);
+  return bool('sessions.notifyWhenWaiting', true);
 }
 
 /**
@@ -181,7 +207,7 @@ export function sessionsTmuxServer(): string {
 
 /** The tmux binary DevDesk runs (setting `devdesk.sessions.tmuxPath`); empty means `tmux` on PATH. */
 export function sessionsTmuxPath(): string {
-  return expandHome(cfg().get<string>('sessions.tmuxPath')) || 'tmux';
+  return pathSetting('sessions.tmuxPath', () => 'tmux');
 }
 
 /**
@@ -214,7 +240,7 @@ export function sessionsTmuxOptions(): [string, string][] {
 
 /** Shell command that installs tmux (setting `devdesk.sessions.tmuxInstallCommand`); empty: Homebrew on macOS, else yum. */
 export function sessionsTmuxInstallCommand(): string {
-  return cfg().get<string>('sessions.tmuxInstallCommand')?.trim() || defaultTmuxInstallCommand(process.platform);
+  return text('sessions.tmuxInstallCommand') || defaultTmuxInstallCommand(process.platform);
 }
 
 /**
@@ -235,7 +261,7 @@ export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = session
  * file per pane (setting `devdesk.sessions.programStatus`).
  */
 export function sessionsProgramStatus(): boolean {
-  return cfg().get<boolean>('sessions.programStatus', true);
+  return bool('sessions.programStatus', true);
 }
 
 /**
@@ -299,8 +325,7 @@ export function sessionsResortWorkingMs(): number {
 
 /** How the Claude view and the Claude Board order sessions (setting `devdesk.sessions.sort`): `urgency` or `attention`. */
 export function sessionsSort(): SortMode {
-  const v = cfg().get<string>('sessions.sort');
-  return isSortMode(v) ? v : 'urgency';
+  return oneOf('sessions.sort', SORT_MODES, 'urgency');
 }
 
 /**
@@ -313,22 +338,22 @@ export function sessionsRecentlyFinishedMs(): number {
 
 /** Unread sessions sort above every read one (setting `devdesk.sessions.unreadFirst`); else only within their state. */
 export function sessionsUnreadFirst(): boolean {
-  return cfg().get<boolean>('sessions.unreadFirst', true);
+  return bool('sessions.unreadFirst', true);
 }
 
 /** The Claude view nests sessions under their worktree; off, it lists every session in one list (setting `devdesk.sessions.groupByWorktree`). */
 export function sessionsGroupByWorktree(): boolean {
-  return cfg().get<boolean>('sessions.groupByWorktree', false);
+  return bool('sessions.groupByWorktree', false);
 }
 
 /** Read session titles are greyed in the Claude view (setting `devdesk.sessions.dimRead`). */
 export function sessionsDimRead(): boolean {
-  return cfg().get<boolean>('sessions.dimRead', true);
+  return bool('sessions.dimRead', true);
 }
 
 /** Unread sessions get a dot badge in the Claude view (setting `devdesk.sessions.unreadBadge`). */
 export function sessionsUnreadBadge(): boolean {
-  return cfg().get<boolean>('sessions.unreadBadge', true);
+  return bool('sessions.unreadBadge', true);
 }
 
 /** A working session with no hook event for this long shows as stuck (setting `devdesk.sessions.stuckMinutes`, at least 1). */
@@ -341,12 +366,12 @@ export function sessionsStuckMs(): number {
  * (setting `devdesk.sessions.leftArrowOpensSidebar`).
  */
 export function sessionsLeftArrowOpensSidebar(): boolean {
-  return cfg().get<boolean>('sessions.leftArrowOpensSidebar', true);
+  return bool('sessions.leftArrowOpensSidebar', true);
 }
 
 /** Reopen the Claude terminals that were open, attached to their tmux sessions, in a new window (setting `devdesk.sessions.restoreTerminals`). */
 export function sessionsRestoreTerminals(): boolean {
-  return cfg().get<boolean>('sessions.restoreTerminals', true);
+  return bool('sessions.restoreTerminals', true);
 }
 
 /** How many characters of a session's title its terminal's tab shows; 0: the session's name only (setting `devdesk.sessions.tabTitleLength`). */
@@ -361,12 +386,12 @@ export function sessionsClaudeEnv(): Record<string, string> {
 
 /** Show the "needs you" status bar item (setting `devdesk.sessions.statusBar`). */
 export function sessionsStatusBar(): boolean {
-  return cfg().get<boolean>('sessions.statusBar', true);
+  return bool('sessions.statusBar', true);
 }
 
 /** List subagents, background shells and workflows under each session (setting `devdesk.sessions.showChildren`). */
 export function sessionsShowChildren(): boolean {
-  return cfg().get<boolean>('sessions.showChildren', false);
+  return bool('sessions.showChildren', false);
 }
 
 /** Finished children listed per level, older ones folded into one row (setting `devdesk.sessions.finishedChildren`, at least 0). */
@@ -414,12 +439,12 @@ export function sessionsParkBelowFreePercent(): number {
 
 /** List only the sessions working in the open workspace (setting `devdesk.sessions.scope`, `workspace` by default). */
 export function sessionsWorkspaceOnly(): boolean {
-  return cfg().get<string>('sessions.scope', 'workspace') !== 'all';
+  return oneOf('sessions.scope', ['workspace', 'all'], 'workspace') !== 'all';
 }
 
 /** Which Claude sessions the Claude view lists (setting `devdesk.sessions.show`): those on the DevDesk tmux server, or all. */
 export function sessionsShowAll(): boolean {
-  return cfg().get<string>('sessions.show') === 'all';
+  return oneOf('sessions.show', ['vscode', 'all'], 'vscode') === 'all';
 }
 
 /**
@@ -437,12 +462,12 @@ export function featureDiscovery(): { claudeWorktrees: boolean } {
 
 /** Shell command that creates a package workspace worktree named `$DEVDESK_WORKTREE` (setting `devdesk.worktrees.createCommand`). */
 export function sessionsWorktreeCreateCommand(): string {
-  return cfg().get<string>('worktrees.createCommand')?.trim() || (workspaceProvider?.defaultCreateCommand ?? '');
+  return text('worktrees.createCommand') || (workspaceProvider?.defaultCreateCommand ?? '');
 }
 
 /** Shell command that deletes a package workspace worktree named `$DEVDESK_WORKTREE` (setting `devdesk.worktrees.deleteCommand`). */
 export function worktreesDeleteCommand(): string {
-  return cfg().get<string>('worktrees.deleteCommand')?.trim() || (workspaceProvider?.defaultDeleteCommand ?? '');
+  return text('worktrees.deleteCommand') || (workspaceProvider?.defaultDeleteCommand ?? '');
 }
 
 /** Clean Up Worktrees' settings (`devdesk.worktrees.cleanup*`): idle days, base branches (empty: each package's mainline), whether it deletes a git worktree's branch, and how many candidates make it suggest a cleanup (0: never). */
@@ -463,12 +488,12 @@ export function sessionsWorktreeStartPrompt(): string {
 
 /** Open the Claude Board when the editor area has no tabs (setting `devdesk.board.openWhenEmpty`). */
 export function boardOpenWhenEmpty(): boolean {
-  return cfg().get<boolean>('board.openWhenEmpty', true);
+  return bool('board.openWhenEmpty', true);
 }
 
 /** Open the Claude Board the first time the sidebar shows in a window (setting `devdesk.board.openWithSidebar`). */
 export function boardOpenWithSidebar(): boolean {
-  return cfg().get<boolean>('board.openWithSidebar', true);
+  return bool('board.openWithSidebar', true);
 }
 
 /**
@@ -481,24 +506,22 @@ export function boardModels(): string[] {
 
 /** Where the Claude Board's prompt box sits: in its own square under the lanes (`bottom`, the default) or above them (setting `devdesk.board.promptPlacement`). */
 export function boardPromptPlacement(): 'bottom' | 'top' {
-  return cfg().get<string>('board.promptPlacement') === 'top' ? 'top' : 'bottom';
+  return oneOf('board.promptPlacement', ['bottom', 'top'], 'bottom');
 }
 
 /** After the composer starts a session: stay on the board (`board`, the default) or open its terminal (setting `devdesk.board.afterStart`). */
 export function boardOpensSession(): boolean {
-  return cfg().get<string>('board.afterStart') === 'session';
+  return oneOf('board.afterStart', ['board', 'session'], 'board') === 'session';
 }
 
 /** Whether a session opened from the Claude Board opens beside it (setting `devdesk.board.sessionsBeside`, `auto` by default). */
 export function boardSessionsBeside(): BesideMode {
-  const v = cfg().get<string>('board.sessionsBeside');
-  return v === 'always' || v === 'never' ? v : 'auto';
+  return oneOf<BesideMode>('board.sessionsBeside', ['auto', 'always', 'never'], 'auto');
 }
 
 /** Each lane's width (CSS px) when a session opens beside the board (setting `devdesk.board.laneWidth`; at least 180). */
 export function boardLaneWidth(): number {
-  const v = cfg().get<number>('board.laneWidth', DEFAULT_LANE_WIDTH);
-  return typeof v === 'number' && Number.isFinite(v) ? Math.max(MIN_LANE_WIDTH, Math.round(v)) : DEFAULT_LANE_WIDTH;
+  return numberSetting('board.laneWidth', DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH, Infinity, 'round');
 }
 
 /** Default of `devdesk.board.pasteSettleMs`. */
@@ -509,13 +532,12 @@ export const DEFAULT_PASTE_SETTLE_MS = 500;
  * (setting `devdesk.board.pasteSettleMs`; 0 or more, and 1 ms more per 4 KB pasted: `pasteSubmitDelayMs`).
  */
 export function boardPasteSettleMs(): number {
-  const v = cfg().get<number>('board.pasteSettleMs', DEFAULT_PASTE_SETTLE_MS);
-  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.round(v)) : DEFAULT_PASTE_SETTLE_MS;
+  return numberSetting('board.pasteSettleMs', DEFAULT_PASTE_SETTLE_MS, 0, Infinity, 'round');
 }
 
 /** Working and Needs you cards show one line on what Claude is doing or asks (setting `devdesk.board.cardLine`, on by default; the board's ☰ button toggles it). */
 export function boardCardLine(): boolean {
-  return cfg().get<boolean>('board.cardLine', true);
+  return bool('board.cardLine', true);
 }
 
 /**
@@ -523,17 +545,17 @@ export function boardCardLine(): boolean {
  * whole session sets out to do, with the latest step in small text under it; `latest`, the latest prompt's title.
  */
 export function boardCardTitle(): CardTitleMode {
-  return cfg().get<string>('board.cardTitle', 'objective') === 'latest' ? 'latest' : 'objective';
+  return oneOf<CardTitleMode>('board.cardTitle', ['objective', 'latest'], 'objective');
 }
 
 /** What **Spec** puts before a prompt for later (setting `devdesk.board.specPrompt`); empty: derived (see `specPrefix`). */
 export function boardSpecPrompt(): string {
-  return cfg().get<string>('board.specPrompt')?.trim() ?? '';
+  return text('board.specPrompt');
 }
 
 /** Where images pasted into the Claude Board's prompt box are saved (setting `devdesk.board.pastedImagesDir`). */
 export function boardPastedImagesDir(): string {
-  return expandHome(cfg().get<string>('board.pastedImagesDir')) || join(homedir(), '.claude', 'devdesk', 'pasted-images');
+  return pathSetting('board.pastedImagesDir', () => join(homedir(), '.claude', 'devdesk', 'pasted-images'));
 }
 
 /**
@@ -541,7 +563,7 @@ export function boardPastedImagesDir(): string {
  * `devdesk.board.claudeConfigFile`); empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.
  */
 export function boardClaudeConfigFile(): string {
-  return expandHome(cfg().get<string>('board.claudeConfigFile')) || claudeConfigFilePath(process.env, homedir());
+  return pathSetting('board.claudeConfigFile', () => claudeConfigFilePath(process.env, homedir()));
 }
 
 /** Extension host memory diagnostics (`devdesk.diagnostics.*`). */
@@ -563,28 +585,27 @@ export interface DiagnosticsConfig {
   latencyOutlierMinMs: number;
 }
 
-const nonNegative = (value: number | undefined, fallback: number) =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+/** A number setting at least 0: `fallback` when unset, not a number, or negative. */
+const nonNegative = (key: string, fallback: number) => numberSetting(key, fallback, 0, Infinity, false, 'fallback');
 
 /** The `devdesk.diagnostics.*` settings. */
 export function diagnosticsConfig(): DiagnosticsConfig {
-  const c = cfg();
   return {
-    dir: expandHome(c.get<string>('diagnostics.dir')) || join(homedir(), '.cache', 'devdesk', 'diagnostics'),
-    heapSnapshotNearLimit: c.get<boolean>('diagnostics.heapSnapshotNearLimit', true),
-    keepDays: nonNegative(c.get<number>('diagnostics.keepDays'), 3),
-    heapWarnMB: nonNegative(c.get<number>('diagnostics.heapWarnMB'), 1500),
-    heapGrowthWarnMB: nonNegative(c.get<number>('diagnostics.heapGrowthWarnMB'), 300),
-    debugLog: c.get<boolean>('diagnostics.debugLog', false),
-    slowOperationSeconds: nonNegative(c.get<number>('diagnostics.slowOperationSeconds'), 60),
-    latencyOutlierFactor: nonNegative(c.get<number>('diagnostics.latencyOutlierFactor'), 3),
-    latencyOutlierMinMs: nonNegative(c.get<number>('diagnostics.latencyOutlierMinMs'), 50),
+    dir: pathSetting('diagnostics.dir', () => join(homedir(), '.cache', 'devdesk', 'diagnostics')),
+    heapSnapshotNearLimit: bool('diagnostics.heapSnapshotNearLimit', true),
+    keepDays: nonNegative('diagnostics.keepDays', 3),
+    heapWarnMB: nonNegative('diagnostics.heapWarnMB', 1500),
+    heapGrowthWarnMB: nonNegative('diagnostics.heapGrowthWarnMB', 300),
+    debugLog: bool('diagnostics.debugLog', false),
+    slowOperationSeconds: nonNegative('diagnostics.slowOperationSeconds', 60),
+    latencyOutlierFactor: nonNegative('diagnostics.latencyOutlierFactor', 3),
+    latencyOutlierMinMs: nonNegative('diagnostics.latencyOutlierMinMs', 50),
   };
 }
 
 /** DevDesk's Haiku insights on session cards (setting `devdesk.insights.enabled`). */
 export function insightsEnabled(): boolean {
-  return cfg().get<boolean>('insights.enabled', true);
+  return bool('insights.enabled', true);
 }
 
 /** A working session's status is refreshed at most this often (setting `devdesk.insights.refreshSeconds`, at least 10). */
@@ -599,7 +620,7 @@ export function insightsMaxConcurrent(): number {
 
 /** The model insight calls use (setting `devdesk.insights.model`; empty: `haiku`). */
 export function insightsModel(): string {
-  return cfg().get<string>('insights.model')?.trim() || 'haiku';
+  return text('insights.model') || 'haiku';
 }
 
 /**
@@ -607,27 +628,27 @@ export function insightsModel(): string {
  * sessions run (`devdesk.sessions.claudePath`, else the toolbox Claude), without `devdesk.sessions.claudeArgs`.
  */
 export function insightsClaude(): string {
-  return expandHome(cfg().get<string>('insights.claudePath')) || claudeBinary() || DEFAULT_CLAUDE_PATH;
+  return pathSetting('insights.claudePath', () => claudeBinary() || DEFAULT_CLAUDE_PATH);
 }
 
 /** The model the board's ✨ search asks (setting `devdesk.boardSearch.model`; empty: `haiku`). */
 export function boardSearchModel(): string {
-  return cfg().get<string>('boardSearch.model')?.trim() || 'haiku';
+  return text('boardSearch.model') || 'haiku';
 }
 
 /** A program or script (with arguments) that answers the board's ✨ search instead of `claude -p` (setting `devdesk.boardSearch.command`); empty: none. */
 export function boardSearchCommand(): string {
-  return expandHome(cfg().get<string>('boardSearch.command')) ?? '';
+  return pathSetting('boardSearch.command', () => '');
 }
 
 /** Whether the board's search also looks through past sessions (setting `devdesk.boardSearch.history`). */
 export function boardSearchHistory(): boolean {
-  return cfg().get<boolean>('boardSearch.history', true);
+  return bool('boardSearch.history', true);
 }
 
 /** Which past sessions: this workspace's, or every folder's (setting `devdesk.boardSearch.historyScope`). */
 export function boardSearchHistoryScope(): 'workspace' | 'all' {
-  return cfg().get<string>('boardSearch.historyScope') === 'all' ? 'all' : 'workspace';
+  return oneOf('boardSearch.historyScope', ['workspace', 'all'], 'workspace');
 }
 
 /** Transcripts not changed for this many days are not searched (setting `devdesk.boardSearch.historyDays`, 1-3650). */
@@ -642,7 +663,7 @@ export function boardSearchHistoryMaxSessions(): number {
 
 /** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in Claude's config directory). */
 export function boardSearchHistoryDir(): string {
-  return expandHome(cfg().get<string>('boardSearch.historyDir')) || claudeProjectsDir();
+  return pathSetting('boardSearch.historyDir', () => claudeProjectsDir());
 }
 
 /** How long a ✨ search may take (setting `devdesk.boardSearch.timeoutSeconds`, 5–300). */
@@ -662,17 +683,25 @@ export function usageHistoryMaxBytes(): number {
 
 /** What the 📊 popup and the Claude Usage page show until a project is chosen in them (setting `devdesk.usage.defaultScope`). */
 export function usageDefaultScope(): 'project' | 'all' {
-  return cfg().get<string>('usage.defaultScope') === 'all' ? 'all' : 'project';
+  return oneOf('usage.defaultScope', ['project', 'all'], 'project');
+}
+
+/**
+ * How long the board's history index may keep what it read only in memory before saving it, in ms (setting
+ * `devdesk.boardSearch.historySaveMinutes`, 0-60; 0: after every run that read something).
+ */
+export function boardSearchHistorySaveMs(): number {
+  return numberSetting('boardSearch.historySaveMinutes', 5, 0, 60) * 60_000;
 }
 
 /** Whether this window takes requests from the `devdesk` command Claude runs (setting `devdesk.cli.enabled`). */
 export function cliEnabled(): boolean {
-  return cfg().get<boolean>('cli.enabled', true);
+  return bool('cli.enabled', true);
 }
 
 /** Whether the 📊 popup shows Claude's plan limits, or offers DevDesk's status line to record them (setting `devdesk.usage.planLimits`). */
 export function usagePlanLimits(): boolean {
-  return cfg().get<boolean>('usage.planLimits', true);
+  return bool('usage.planLimits', true);
 }
 
 /** The checks and review comments of worktrees' pull requests (settings `devdesk.checks.*`). */
@@ -691,12 +720,12 @@ export interface ChecksConfig {
 
 export function checksConfig(): ChecksConfig {
   return {
-    enabled: cfg().get<boolean>('checks.enabled', true),
+    enabled: bool('checks.enabled', true),
     refreshMs: numberSetting('checks.refreshMinutes', 5, 0) * 60_000,
     maxBackoffMs: numberSetting('checks.maxBackoffMinutes', 60, 1) * 60_000,
     timeoutMs: numberSetting('checks.timeoutSeconds', 30, 1) * 1000,
-    gh: expandHome(cfg().get<string>('checks.ghPath')) || 'gh',
-    reviewComments: cfg().get<boolean>('checks.reviewComments', true),
+    gh: pathSetting('checks.ghPath', () => 'gh'),
+    reviewComments: bool('checks.reviewComments', true),
     logLines: numberSetting('checks.logLines', 40, 0, 500, true),
     maxLogs: numberSetting('checks.maxLogs', 3, 0, 20, true),
   };
@@ -711,7 +740,7 @@ export function checksConfig(): ChecksConfig {
 export function workersConfig(): { maxConcurrent: number; nudge: boolean; escalationMs: number } {
   return {
     maxConcurrent: numberSetting('workers.maxConcurrent', 4, 1, 32, true),
-    nudge: cfg().get<boolean>('workers.nudge', true),
+    nudge: bool('workers.nudge', true),
     escalationMs: numberSetting('workers.escalationMinutes', 3, 0, 24 * 60) * 60_000,
   };
 }

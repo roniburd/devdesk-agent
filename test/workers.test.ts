@@ -197,7 +197,7 @@ describe('the board', () => {
     expect(out[2].team).toBeUndefined();
     expect(cardsWithWorkers(cards, new Map())).toBe(cards);
 
-    const board = buildBoard(out, [], { now: 0, unread: new Set(), idleMs: 1, stuckMs: 1e9 } as never);
+    const board = buildBoard(out, [], { view: { now: 0, unread: new Set(), idleMs: 1, stuckMs: 1e9 } });
     const sessions = board.lanes.flatMap((l) => l.sessions);
     const coord = sessions.find((s) => s.id === 'main');
     const worker = sessions.find((s) => s.id === 'a');
