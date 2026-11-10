@@ -1,9 +1,9 @@
 {
   "name": "devdesk-claude",
-  "displayName": "DevDesk Claude",
+  "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -75,7 +75,7 @@
       {
         "command": "devdesk.claude.switchVersion",
         "title": "Switch Version…",
-        "category": "DevDesk Claude"
+        "category": "DevDesk for Claude Code"
       },
       {
         "command": "devdesk.features.refresh",
@@ -1097,7 +1097,7 @@
             "type": "number",
             "default": 12,
             "minimum": 0,
-            "markdownDescription": "Keep at most this many DevDesk Claude sessions running: when more run, park the ones idle for `#devdesk.sessions.idleMinutes#`, read ones and the least recently active first. Working sessions, those waiting on you and those with an open terminal keep running, so more may run. Each running session takes memory (Claude and its MCP servers). `0`: no limit.",
+            "markdownDescription": "Keep at most this many DevDesk for Claude Code sessions running: when more run, park the ones idle for `#devdesk.sessions.idleMinutes#`, read ones and the least recently active first. Working sessions, those waiting on you and those with an open terminal keep running, so more may run. Each running session takes memory (Claude and its MCP servers). `0`: no limit.",
             "order": 5
           },
           "devdesk.sessions.parkBelowFreeMemoryPercent": {

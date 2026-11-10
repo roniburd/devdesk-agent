@@ -1,6 +1,6 @@
 <p align="center"><img src="images/icon.png" width="128" height="128" alt=""></p>
 
-<h1 align="center">DevDesk Claude</h1>
+<h1 align="center">DevDesk for Claude Code</h1>
 
 <p align="center">The real Claude Code CLI in VS Code that survives restarts.<br>
 Adds richer views, token statistics and worktree workflows,<br>
@@ -47,7 +47,7 @@ the Extensions view choose **… → Install from VSIX…** (in a Remote-SSH win
 
 Claude Code is at its best when you run several sessions at once, each on its own task. In a VS Code terminal that
 gets hard: a reload or a dropped SSH connection kills them, you click through tabs to find the one waiting on you, and
-the changes pile up in one checkout. DevDesk Claude keeps the real CLI and adds what running many of them needs.
+the changes pile up in one checkout. DevDesk for Claude Code keeps the real CLI and adds what running many of them needs.
 
 <p align="center"><img src="images/how-it-works.png" width="760" alt="VS Code attaches to tmux, which keeps one Claude Code per session running"></p>
 
@@ -58,7 +58,7 @@ the changes pile up in one checkout. DevDesk Claude keeps the real CLI and adds 
 
 ## What it adds to Claude Code in a terminal
 
-| You want to | Plain Claude Code in a terminal | With DevDesk Claude |
+| You want to | Plain Claude Code in a terminal | With DevDesk for Claude Code |
 |---|---|---|
 | Keep Claude working when VS Code closes | The session ends with the terminal | **Every session runs in tmux.** Close, reload, disconnect: it carries on, and your terminals come back. |
 | Know which session needs you | Check each tab | **A side panel, most urgent first:** *needs permission*, *question*, *plan to review*. **N need you** in the status bar jumps to the next. |

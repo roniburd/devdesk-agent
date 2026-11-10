@@ -26,7 +26,7 @@ function terminalInFront(): vscode.Terminal | undefined {
 }
 
 /**
- * ← in a DevDesk Claude terminal: on an empty prompt, focuses the Claude view (on the session's row) where Claude would
+ * ← in a DevDesk for Claude Code terminal: on an empty prompt, focuses the Claude view (on the session's row) where Claude would
  * open its agent view; otherwise passes ← on to Claude.
  */
 async function leftArrow(tree: SessionsTree): Promise<void> {

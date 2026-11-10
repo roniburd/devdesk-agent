@@ -1,6 +1,6 @@
-# DevDesk Claude manual
+# DevDesk for Claude Code manual
 
-This manual explains everything DevDesk Claude does. New here? Read the [README](README.md) first.
+This manual explains everything DevDesk for Claude Code does. New here? Read the [README](README.md) first.
 
 **Contents**
 
@@ -26,7 +26,7 @@ This manual explains everything DevDesk Claude does. New here? Read the [README]
 
 ![VS Code attaches to tmux, which keeps one Claude Code per session running](images/how-it-works.png)
 
-DevDesk Claude runs Claude Code inside tmux. VS Code only shows what tmux runs. So when you close VS Code, Claude keeps working.
+DevDesk for Claude Code runs Claude Code inside tmux. VS Code only shows what tmux runs. So when you close VS Code, Claude keeps working.
 
 ![The Claude view in the sidebar, next to a Claude terminal](images/terminal.png)
 
@@ -880,7 +880,7 @@ Each call is a separate `claude -p --bare` run:
 
 Your sessions are never touched.
 
-Calls run in VS Code, so only while a window with DevDesk Claude is open. Answers are kept in `insights/` in `devdesk.sessions.stateDir`. Every window reads them, and only one window makes each call. At most 5 calls run at once (`devdesk.insights.maxConcurrent`).
+Calls run in VS Code, so only while a window with DevDesk for Claude Code is open. Answers are kept in `insights/` in `devdesk.sessions.stateDir`. Every window reads them, and only one window makes each call. At most 5 calls run at once (`devdesk.insights.maxConcurrent`).
 
 If a call fails, the card shows what it would show without insights.
 
@@ -983,7 +983,7 @@ The arrows move between places only from an empty prompt box. With text in it, *
 
 ### How ← works in a Claude terminal
 
-The Claude view stands in for Claude Code's own agent view. In Claude Code, ← on an empty prompt backgrounds the session and opens its agent view. In a DevDesk Claude terminal, it moves focus to the Claude view instead. Anywhere else in the prompt, ← moves the cursor as usual.
+The Claude view stands in for Claude Code's own agent view. In Claude Code, ← on an empty prompt backgrounds the session and opens its agent view. In a DevDesk for Claude Code terminal, it moves focus to the Claude view instead. Anywhere else in the prompt, ← moves the cursor as usual.
 
 To make this work, DevDesk does three things:
 

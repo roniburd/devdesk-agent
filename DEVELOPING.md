@@ -1,6 +1,6 @@
-# Developing DevDesk Claude
+# Developing DevDesk for Claude Code
 
-This guide is for people who want to build DevDesk Claude from source, change it, or send a fix. To learn what the
+This guide is for people who want to build DevDesk for Claude Code from source, change it, or send a fix. To learn what the
 extension does, read the [README](README.md) and the [manual](MANUAL.md) first.
 
 ## Where the code comes from
