@@ -10,6 +10,8 @@ import { basename, dirname, join } from 'node:path';
 export const V1_ID = 'roniburd.devdesk-claude';
 /** The v2 extension: this one. */
 export const V2_ID = 'roniburd.devdesk-claude-beta';
+/** How this version names the read marks it saves (`readMarks.ts`). */
+export const EDITION_TAG = 'v2';
 /** This extension's ID, for `@ext:` settings queries. */
 export const EXTENSION_ID = V2_ID;
 /** The Extensions view search showing both versions. */

@@ -67,6 +67,11 @@ export class SharedMemento implements ModifiableMemento, vscode.Disposable {
     }
   }
 
+  /** What this extension saved under `key` in its own Memento (for a shared key, before the shared file). */
+  ownValue<T>(key: string): T | undefined {
+    return this.base.get<T>(key);
+  }
+
   private shares(key: string): boolean {
     return !!this.store && this.isShared(key);
   }
