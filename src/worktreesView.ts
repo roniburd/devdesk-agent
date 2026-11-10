@@ -9,11 +9,11 @@ import { type SeenCards, sessionSignals } from './core/worktreeSignals';
 import { discoverFeatures, type Feature } from './core/worktrees';
 import { isClaudeTerminal, killClaude } from './claudeSessions';
 import { featureDiscovery, openSettings, sessionsStuckMs, setGlobalSetting, workspaceRoot, worktreesPauseWhenUnfocused, worktreesRefreshSeconds } from './config';
-import { type FeatureNode, FeaturesTree, type FileNode } from './featuresTree';
+import { type FeatureNode, FeaturesTree, type FileNode, type Node } from './featuresTree';
 import { GitContentProvider, SCHEME } from './gitContent';
 import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
-import { openFeatureSession } from './sessionsCommands';
+import { cardOf, openFeatureSession } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
 import type { WorktreeChecks } from './worktreeChecks';
 import { cleanUpWorktrees, suggestCleanup } from './worktreeCleanup';
@@ -31,6 +31,7 @@ export function updateWorkspaceContext(): void {
 /** The Worktrees view and its rows' state text (each worktree's most urgent session's), by worktree directory. */
 export interface WorktreesView {
   tree: FeaturesTree;
+  view: vscode.TreeView<Node>;
   urgent: () => ReadonlyMap<string, string>;
   /** Shows the worktrees' checks hints on their rows, fetched on the view's refresh tick for the worktrees it lists. */
   setChecks(checks: WorktreeChecks): void;
@@ -95,6 +96,27 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
   };
   const touchUris = (uris: readonly vscode.Uri[]) => tree.touchPaths(uris.filter((u) => u.scheme === 'file').map((u) => u.fsPath));
 
+  // A session's See Diff: its worktree's row in this view, expanded down to the changed files, with the first one
+  // selected and the view focused, so a click (or Enter) on a file opens its diff.
+  const seeDiff = async (card: SessionCard) => {
+    const dir = card.featureDir ?? card.cwd;
+    const node = dir ? await tree.featureRow(dir) : undefined;
+    if (!node) {
+      void vscode.window.showInformationMessage(`This session (${card.cwd ?? card.id}) is not in a worktree of this workspace.`);
+      return;
+    }
+    log.info(`sessions.seeDiff ${node.feature.name}`);
+    const packages = await tree.changedPackages(node);
+    await view.reveal(node, { select: true, focus: true, expand: true });
+    if (!packages.length) {
+      void vscode.window.showInformationMessage(`No changed files in ${node.feature.name} (${view.description}).`);
+      return;
+    }
+    for (const pkg of packages) await view.reveal(pkg, { select: false, focus: false, expand: true });
+    const first = tree.fileRows(packages[0])[0];
+    if (first) await view.reveal(first, { select: true, focus: true });
+  };
+
   const openSession = (feature: Feature, command: string) => {
     log.info(`${command} ${feature.name}`);
     openFeatureSession(sessions, sessionsTree, feature);
@@ -139,6 +161,10 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
       describeMode();
       tree.refresh();
     }),
+    registerTimedCommand('devdesk.sessions.seeDiff', (arg: unknown) => {
+      const card = cardOf(sessions, sessionsTree, arg);
+      return card ? seeDiff(card) : undefined;
+    }),
     registerTimedCommand('devdesk.openDiff', (node: FileNode) => openDiff(node)),
     registerTimedCommand('devdesk.claude.open', (node: FeatureNode) => openSession(node.feature, 'claude.open')),
     // For other extensions (DevDesk Personal Stacks): opens, or starts, the Claude session of the worktree at `dir`.
@@ -170,6 +196,7 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
   );
   return {
     tree,
+    view,
     urgent: () => urgent,
     setChecks: (c) => {
       checks = c;
