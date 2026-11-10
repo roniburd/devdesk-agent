@@ -23,10 +23,23 @@ export function startNotice(): EditionNotice | undefined {
 }
 
 /**
- * The v2 marks: a `DevDesk Claude v2` status bar item, DevDesk Claude: Switch Version…, and a notice when v1 is
- * enabled in the same window or v2's views are missing (see `editionNotice`).
+ * True when v1 runs in this window too, so v2 must not start (both register the same commands and views): says so,
+ * and v1 registers DevDesk Claude: Switch Version…. Otherwise the v2 marks: a `DevDesk Claude v2` status bar item,
+ * Switch Version…, and a notice when an older v1 is enabled too or v2's views are missing (see `editionNotice`).
  */
-export async function registerEdition(ctx: vscode.ExtensionContext): Promise<void> {
+export async function registerEdition(ctx: vscode.ExtensionContext): Promise<boolean> {
+  const v1 = vscode.extensions.getExtension(V1_ID);
+  const viewsRegistered = (await vscode.commands.getCommands(true)).includes(`${PROBE_VIEW}.focus`);
+  notice = editionNotice(v1 && ((v1.packageJSON.version as string | undefined) ?? '0.0.0'), viewsRegistered);
+  if (notice) {
+    const { message, action } = notice;
+    log.warn(message);
+    void vscode.window.showWarningMessage(message, action).then((pick) => {
+      if (pick === 'Show Extensions') return showVersions();
+      if (pick === 'Reload Window') return reloadWindow();
+    });
+    if (notice.kind === 'stepAside') return true;
+  }
   const item = vscode.window.createStatusBarItem('devdesk.claude.version', vscode.StatusBarAlignment.Left, 49);
   item.name = 'DevDesk Claude Version';
   item.text = '$(beaker) DevDesk Claude v2';
@@ -34,14 +47,5 @@ export async function registerEdition(ctx: vscode.ExtensionContext): Promise<voi
   item.command = 'devdesk.claude.switchVersion';
   item.show();
   ctx.subscriptions.push(item, vscode.commands.registerCommand('devdesk.claude.switchVersion', switchVersion));
-
-  const viewsRegistered = (await vscode.commands.getCommands(true)).includes(`${PROBE_VIEW}.focus`);
-  notice = editionNotice(!!vscode.extensions.getExtension(V1_ID), viewsRegistered);
-  if (!notice) return;
-  const { message, action } = notice;
-  log.warn(message);
-  void vscode.window.showWarningMessage(message, action).then((pick) => {
-    if (pick === 'Show Extensions') return showVersions();
-    if (pick === 'Reload Window') return reloadWindow();
-  });
+  return false;
 }

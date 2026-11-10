@@ -31,6 +31,8 @@ export interface SessionsParts {
   sessionsTree: SessionsTree;
   worktreeTasks: WorktreeTaskStore;
   insights: InsightsWorker;
+  /** This project folder's state, with the keys both versions share in their shared file (`SharedMemento`). */
+  projectState: vscode.Memento;
 }
 
 /** After the hooks were installed or removed: the hooks row and the sessions' status may have changed. */
@@ -149,7 +151,7 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     registerTimedCommand('devdesk.sessions.nextWaiting', () => openNextWaiting(sessionsTree)),
     registerTimedCommand('devdesk.sessions.openChild', (file: unknown) => openChildFile(file)),
     ...registerLeftArrow(sessionsTree),
-    ...registerTerminalRestore(ctx.workspaceState, terminalTitles(sessions)),
+    ...registerTerminalRestore(parts.projectState, terminalTitles(sessions)),
     registerTimedCommand('devdesk.sessions.openSettings', () => openSettings('devdesk.sessions')),
     registerTimedCommand('devdesk.sessions.installTmux', installTmux),
     registerTimedCommand('devdesk.sessions.installHooks', async () => {

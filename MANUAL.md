@@ -1202,7 +1202,7 @@ devdesk note --clear                                 # remove it
 - What opens leaves the keyboard focus where it was, in Claude's terminal, unless `--focus`. `devdesk diff` with no file opens one multi-file diff editor, which VS Code puts in front.
 - The diff compares against the base the Worktrees view uses (mainline or uncommitted), and you can leave notes for Claude on it (see [Leave notes for Claude on a diff](#leave-notes-for-claude-on-a-diff)).
 - A note shows under the card's title (📌) and in its hover, and the board's search finds it. It belongs to the session's tmux pane, so it works only in a tmux session, and goes when the pane does.
-- The command prints what it did. When it can't, it says why on stderr and exits with status 1: for example, no VS Code window shows that folder.
+- The command prints what it did. When it can't, it says why on stderr and exits with status 1: for example, no VS Code window running DevDesk Claude v2 has that folder open.
 
 ### Tell Claude about it
 
@@ -1210,11 +1210,13 @@ Claude doesn't know the command until you tell it. Run **Claude: Teach Claude th
 
 ### Which window handles it
 
-Every VS Code window with DevDesk Claude writes a small record: the folders it shows, the tmux panes of its sessions, and when it was last in front. The command picks one window:
+Every VS Code window with DevDesk Claude v2 writes a small record: the folders it shows, the tmux panes of its sessions, and when it was last in front. The command picks one window:
 
 1. the one whose Claude view lists the session's tmux pane,
 2. else the one whose folder (workspace root or worktree) holds the file most closely, or the folder the command runs in,
 3. else, of those that tie, the one in front last.
+
+A window that does neither never gets the request, for `note` and `worker` too. When no window fits, the command fails: it needs a DevDesk Claude v2 window with this folder (or worktree) open. DevDesk Claude v1 windows write no record, so a session in a v1 window gets this error even when a v2 window has another folder open.
 
 Only that window gets the request, and it takes it once. Requests and answers are files in `~/.claude/devdesk/ipc`, a folder only you can open, and each window only acts on requests that carry its own random token. No network port is opened. This works on a remote machine too (over Remote-SSH), where the extension and Claude run on the same host.
 

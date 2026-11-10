@@ -113,6 +113,11 @@ describe('the window record and the skill', () => {
     expect(isOurSkill(text)).toBe(true);
     expect(isOurSkill('---\nname: devdesk\n---\nmine')).toBe(false);
   });
+  it('says the commands need a DevDesk Claude v2 window on this folder, and what the error means', () => {
+    const text = skillText('devdesk');
+    expect(text).toContain('needs a VS Code window running DevDesk Claude v2 with this folder (or worktree) open');
+    expect(text).toContain('"no VS Code window running DevDesk Claude v2 has ... open" means there is none');
+  });
 });
 
 const pythonRuns = spawnSync('python3', ['-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)']).status === 0;
@@ -187,21 +192,34 @@ describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
     expect((await run(paths, work, ['diff', 'src/a.ts'])).request).toMatchObject({ window: 'w2', body: { path: join(work, 'src', 'a.ts') } });
   });
 
-  it('sets a note from tmux only, through any window', async () => {
-    const { paths, work } = setUp(() => [{ roots: ['/nowhere'] }]);
+  it('sets a note from tmux only, through the window that has its folder open', async () => {
+    const { paths, work } = setUp((_, work) => [{ roots: ['/nowhere'], focusedAt: 9 }, { roots: [work] }]);
     const tmux = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%2' };
-    expect((await run(paths, work, ['note', 'waiting', 'for', 'CI'], tmux)).request?.body).toMatchObject({ action: 'note', text: 'waiting for CI', server: 'default', pane: '%2' });
+    expect((await run(paths, work, ['note', 'waiting', 'for', 'CI'], tmux)).request).toMatchObject({ window: 'w1', body: { action: 'note', text: 'waiting for CI', server: 'default', pane: '%2' } });
     expect((await run(paths, work, ['note', '--clear'], tmux)).request?.body).toMatchObject({ text: '' });
     const outside = await run(paths, work, ['note', 'x']);
     expect(outside.code).toBe(1);
     expect(outside.err).toMatch(/only in a tmux session/);
   });
 
+  it('sends note and worker requests to no window that neither shows the session nor has its folder open', async () => {
+    // A session in a v1 window, or in a folder no v2 window has open: the v2 window in front shows something else.
+    const { paths, work } = setUp((home) => [{ roots: [join(home, 'elsewhere')], panes: ['default:%9'], focusedAt: 9 }]);
+    const tmux = { TMUX: '/tmp/tmux-1/default,1,0', TMUX_PANE: '%2' };
+    for (const args of [['note', 'x'], ['worker', 'check'], ['worker', 'list'], ['worker', 'done', '--task', 'w-0a1b2c', '--outcome', 'succeeded', '--summary', 'ok']]) {
+      const r = await run(paths, work, args, tmux);
+      expect(r).toMatchObject({ code: 1, request: undefined });
+      expect(r.err).toBe(
+        `devdesk: no VS Code window running DevDesk Claude v2 has ${work} open. The devdesk command needs a DevDesk Claude v2 window with this folder (or worktree) open; DevDesk Claude v1 windows do not take its requests.\n`,
+      );
+    }
+  });
+
   it('says why when no window shows the folder, the file is missing, or the window refuses', async () => {
     const { paths, work } = setUp((_, work) => [{ roots: ['/nowhere'] }, { roots: [work], pid: 999_999_999 }]);
     const none = await run(paths, work, ['open', 'src/a.ts']);
     expect(none).toMatchObject({ code: 1, request: undefined });
-    expect(none.err).toMatch(/no VS Code window with DevDesk Claude shows/);
+    expect(none.err).toMatch(/no VS Code window running DevDesk Claude v2 has .*src\/a\.ts open\. .*v1 windows do not take its requests/);
     expect((await run(paths, work, ['open', 'src/nope.ts'])).err).toMatch(/no file src\/nope.ts/);
     expect((await run(paths, work, ['bogus'])).code).toBe(2);
     expect((await run(paths, work, ['--help'])).out).toMatch(/^usage: devdesk/);

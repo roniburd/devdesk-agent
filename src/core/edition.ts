@@ -27,21 +27,44 @@ export function sharedStorageDir(own: string, ownId = EXTENSION_ID): string {
 /** A view v2 contributes; its `.focus` command exists only while VS Code has the view registered. */
 export const PROBE_VIEW = 'devdesk.sessions';
 
-/** What v2 tells the user when it starts: what is wrong and the one button that fixes it. */
+/** The first v1 release that runs when v2 is enabled too (earlier ones step aside for v2). */
+export const V1_STAYS_FROM = '1.3.0';
+
+/** Whether `version` (`major.minor.patch`, any pre-release tag ignored) is `from` or later. */
+export function versionAtLeast(version: string, from: string): boolean {
+  const parts = (v: string) => v.split('-')[0].split('.').map((n) => Number.parseInt(n, 10) || 0);
+  const [a, b] = [parts(version), parts(from)];
+  for (let i = 0; i < 3; i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  return true;
+}
+
+/**
+ * What v2 tells the user when it starts: what is wrong and the one button that fixes it. `stepAside`: v2 does not
+ * start (v1 runs in this window).
+ */
 export interface EditionNotice {
-  kind: 'bothEnabled' | 'reload';
+  kind: 'stepAside' | 'bothEnabled' | 'reload';
   message: string;
   action: 'Show Extensions' | 'Reload Window';
 }
 
 /**
- * What v2 says when it starts, or undefined when all is well. `v1Enabled`: v1 is enabled in this window too.
- * `viewsRegistered`: VS Code has v2's views. They go missing when v1 was enabled as the window loaded (VS Code rejects
- * the second extension's views, settings and menus with the same IDs) and was disabled afterwards: VS Code registers
- * them again only when the window reloads, not on Restart Extensions.
+ * What v2 says when it starts, or undefined when all is well. `v1Version`: the version of v1 when it is enabled in this
+ * window too. Only one may run, and v1 does: from `V1_STAYS_FROM` it runs, so v2 steps aside; an earlier v1 steps aside
+ * itself, but VS Code may still show its views instead of v2's. `viewsRegistered`: VS Code has v2's views. They go
+ * missing when v1 was enabled as the window loaded (VS Code rejects the second extension's views, settings and menus
+ * with the same IDs) and was disabled afterwards: VS Code registers them again only when the window reloads, not on
+ * Restart Extensions.
  */
-export function editionNotice(v1Enabled: boolean, viewsRegistered: boolean): EditionNotice | undefined {
-  if (v1Enabled) {
+export function editionNotice(v1Version: string | undefined, viewsRegistered: boolean): EditionNotice | undefined {
+  if (v1Version !== undefined && versionAtLeast(v1Version, V1_STAYS_FROM)) {
+    return {
+      kind: 'stepAside',
+      message: 'DevDesk Claude v2 is not running because DevDesk Claude v1 is enabled in this window. To use v2, disable "DevDesk Claude" in the Extensions view, then reload the window.',
+      action: 'Show Extensions',
+    };
+  }
+  if (v1Version !== undefined) {
     return {
       kind: 'bothEnabled',
       message: 'DevDesk Claude v1 is also enabled in this window, so v2 cannot show its views. Disable "DevDesk Claude" in the Extensions view, then reload the window.',

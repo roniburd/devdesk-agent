@@ -9,6 +9,9 @@ import {
   backupsToPrune,
   HOOK_EVENTS,
   HOOK_SCRIPT,
+  HOOK_SCRIPT_VERSION,
+  hookScriptVersion,
+  replacesHookScript,
   KEEP_BACKUPS,
   hasHooks,
   hookCommand,
@@ -822,6 +825,34 @@ describe('refreshHookScript', () => {
     expect(await readFile(script, 'utf8')).toBe(HOOK_SCRIPT);
     expect((await stat(script)).mode & 0o111).not.toBe(0);
     expect(await refreshHookScript(join(home, '.claude'))).toBe(false);
+  });
+
+  it("leaves a newer script alone (the other DevDesk Claude version's), also when installing hooks", async () => {
+    const script = join(home, '.claude', 'devdesk', 'devdesk_hook.py');
+    await mkdir(join(home, '.claude', 'devdesk'), { recursive: true });
+    const newer = `#!/usr/bin/env python3\n# devdesk-hook-version: ${HOOK_SCRIPT_VERSION + 1}\n`;
+    await writeFile(script, newer);
+    expect(await refreshHookScript(join(home, '.claude'))).toBe(false);
+    await installHooksInto(join(home, '.claude'), new Date(), join(home, 'state'));
+    expect(await readFile(script, 'utf8')).toBe(newer);
+  });
+});
+
+describe('hook script versions', () => {
+  it('says its version in its second line', () => {
+    expect(HOOK_SCRIPT.split('\n')[1]).toBe(`# devdesk-hook-version: ${HOOK_SCRIPT_VERSION}`);
+    expect(hookScriptVersion(HOOK_SCRIPT)).toBe(HOOK_SCRIPT_VERSION);
+    expect(hookScriptVersion('#!/usr/bin/env python3\nimport json\n')).toBe(0);
+  });
+
+  it('replaces a missing, older, unversioned or same-version script that differs, never a newer one', () => {
+    const v = (n: number) => `#!/usr/bin/env python3\n# devdesk-hook-version: ${n}\nprint()\n`;
+    expect(replacesHookScript(undefined)).toBe(true);
+    expect(replacesHookScript(HOOK_SCRIPT)).toBe(false);
+    expect(replacesHookScript('# before versions\n')).toBe(true);
+    expect(replacesHookScript(v(HOOK_SCRIPT_VERSION - 1))).toBe(true);
+    expect(replacesHookScript(v(HOOK_SCRIPT_VERSION))).toBe(true);
+    expect(replacesHookScript(v(HOOK_SCRIPT_VERSION + 1))).toBe(false);
   });
 });
 

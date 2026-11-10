@@ -13,8 +13,10 @@ import { isPaneId, isServerName } from './tmux';
  *
  * - Each window running the extension writes `ipc/windows/<id>.json` (0600): its extension host's pid, a random token,
  *   the folders it shows (its workspace root and worktrees), the tmux panes of its sessions, and when it was last in front.
- * - The command picks one window (the one showing its pane, else the one whose folder holds the path most closely, else
- *   the last one in front) and writes its request to `ipc/requests/<id>/<request id>.json` with that window's token.
+ * - The command picks one window that shows its pane or a folder holding the path (the one showing its pane, else the one
+ *   whose folder holds the path most closely, else the last one in front) and writes its request to
+ *   `ipc/requests/<id>/<request id>.json` with that window's token. With no such window it fails: only v2 windows write
+ *   records, so a session in a v1 window (or in a folder no v2 window has open) is told it needs one.
  * - The window takes the request by renaming it (so it is handled once), does it, and answers in
  *   `ipc/responses/<request id>.json`, which the command prints.
  */
@@ -252,6 +254,9 @@ ${SKILL_MARK}
 
 You run in a DevDesk session that a VS Code window shows. \`${q}\` asks that window to show the user something.
 It prints what it did, or why it could not (exit status 1).
+Every command here, workers too, needs a VS Code window running DevDesk Claude v2 with this folder (or worktree) open.
+"no VS Code window running DevDesk Claude v2 has ... open" means there is none (a DevDesk Claude v1 window does not
+count): tell the user once and go on without the command.
 
 \`\`\`bash
 ${q} open <file>[:<line>[:<column>]] [--focus]   # open a file, at a line (and column)
@@ -557,10 +562,13 @@ def pick(found, req, pane_key):
     target = req.get('path') or req['cwd']
     paths = {target, os.path.realpath(target)}
     scored = [(score(w, paths, pane_key), w.get('focusedAt') or 0, w) for w in found]
-    if req['action'] not in ('note', 'worker'):
-        scored = [x for x in scored if x[0] > 0]
+    scored = [x for x in scored if x[0] > 0]
     scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
     return scored[0][2] if scored else None
+
+
+NO_WINDOW = ('no VS Code window running DevDesk Claude v2 has %s open. The devdesk command needs a DevDesk Claude v2 '
+             'window with this folder (or worktree) open; DevDesk Claude v1 windows do not take its requests.')
 
 
 def write_private(path, data):
@@ -581,7 +589,7 @@ def main(argv):
         fail('devdesk note works only in a tmux session (a DevDesk Claude session)')
     w = pick(windows(), req, '%s:%s' % (server, pane) if pane else None)
     if not w:
-        fail('no VS Code window with DevDesk Claude shows %s' % (req.get('path') or req['cwd']))
+        fail(NO_WINDOW % (req.get('path') or req['cwd']))
     req['id'] = secrets.token_hex(12)
     req['token'] = w['token']
     requests = os.path.join(IPC, 'requests', w['id'])
