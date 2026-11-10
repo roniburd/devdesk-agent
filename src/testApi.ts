@@ -116,6 +116,8 @@ export function testApi(
         })),
       );
     },
+    /** The Worktrees view's selected rows' labels, and whether the view is visible. */
+    worktreesSelection: () => ({ visible: worktrees.view.visible, labels: worktrees.view.selection.map((n) => tree.getTreeItem(n).label) }),
     /** The Worktrees rows alone (nothing expanded), with their descriptions. */
     worktreeRoots: async () =>
       (await tree.getChildren()).map((node) => {

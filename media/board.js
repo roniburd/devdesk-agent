@@ -247,7 +247,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const card = cardEl(`card look-${color.split(' ')[0]}${s.canOpen ? ' clickable' : ''}`, key, `${s.lookLabel}${s.unread ? ', unread' : ''}: ${s.title}, ${s.worktree}`);
     sigs.set(card, sig);
     card.dataset.session = s.id;
-    // Right-click: Mark as Read / Unread and the Color submenu (the webview/context menu in package.json).
+    // Right-click: See Diff, Mark as Read / Unread and the Color submenu (the webview/context menu in package.json).
     card.dataset.vscodeContext = JSON.stringify({ webviewSection: 'session', sessionId: s.id, sessionUnread: !!s.unread, sessionColor: s.color || '', preventDefaultContextMenuItems: true });
     // A color given by hand draws the title in it, over a read card's grey (as in the Claude view).
     if (s.color) card.classList.add(`color-${s.color}`);

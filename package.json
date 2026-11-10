@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -183,6 +183,12 @@
         "command": "devdesk.sessions.forkWithMode",
         "title": "Fork Claude Session with Mode…",
         "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.sessions.seeDiff",
+        "title": "See Diff",
+        "category": "Worktrees",
+        "icon": "$(diff)"
       },
       {
         "command": "devdesk.sessions.openCard",
@@ -478,6 +484,11 @@
           "group": "session@3"
         },
         {
+          "command": "devdesk.sessions.seeDiff",
+          "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
+          "group": "session@5"
+        },
+        {
           "command": "devdesk.sessions.kill",
           "when": "view == devdesk.sessions && viewItem =~ /\\btmux\\b/",
           "group": "session@4"
@@ -598,6 +609,11 @@
           "submenu": "devdesk.sessions.color",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
           "group": "read@2"
+        },
+        {
+          "command": "devdesk.sessions.seeDiff",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "session@1"
         }
       ],
       "commandPalette": [
@@ -719,6 +735,10 @@
         },
         {
           "command": "devdesk.board.openFromEditorTitle",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.seeDiff",
           "when": "false"
         }
       ],

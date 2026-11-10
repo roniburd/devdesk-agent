@@ -8,6 +8,7 @@ import { gitFingerprint, withMainline } from './core/gitRefs';
 import { type Activity, packageForPath } from './core/worktreeSignals';
 import { createPriorityLimiter } from './core/limit';
 import { getPooled, LoadCache } from './core/loadCache';
+import { featureForCwd } from './core/sessions';
 import { listSessions, sessionLabel, sessionName, type TmuxSession } from './core/tmux';
 import {
   featureDiscovery,
@@ -297,9 +298,8 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
       return timed(`getChildren(feature ${node.feature.name})`, () => this.featureChildren(node));
     }
     if (node.kind === 'package' && node.base) {
-      const base = node.base;
       log.debug(`getChildren(package ${node.feature.name}/${node.pkg.name}): ${node.changes.length} files`);
-      return node.changes.map((change): FileNode => ({ kind: 'file', feature: node.feature, pkg: node.pkg, base, change }));
+      return this.fileRows(node);
     }
     return [];
   }
@@ -307,7 +307,35 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
   /** Needed by TreeView.reveal (the Personal Stacks view reveals features, which are root items). */
   getParent(node: Node): Node | undefined {
     if (node.kind === 'package') return this.featureNodes.find((n) => n.feature.dir === node.feature.dir) ?? { kind: 'feature', feature: node.feature };
+    // A file row's package, as loaded (the row only shows once it is): needed to reveal a file row.
+    if (node.kind === 'file') return this.packages.peek(this.packageKey(node.feature, node.pkg));
     return undefined;
+  }
+
+  /** The worktree row of the worktree at (or containing) `dir`, listing the worktrees first if the view hasn't yet. */
+  async featureRow(dir: string): Promise<FeatureNode | undefined> {
+    await this.getChildren();
+    const exact = this.featureNodes.find((n) => n.feature.dir === dir || n.feature.realDir === dir);
+    if (exact) return exact;
+    const feature = featureForCwd(this.featureNodes.map((n) => n.feature), dir);
+    return feature && this.featureNodes.find((n) => n.feature === feature);
+  }
+
+  /**
+   * The worktree's packages with changed files in the current mode, by name: loaded again now (ahead of background
+   * loads), since an edit git has not seen yet changes no fingerprint. Its row is redrawn with them.
+   */
+  async changedPackages(node: FeatureNode): Promise<PackageNode[]> {
+    for (const pkg of node.feature.packages) this.drop(this.packageKey(node.feature, pkg));
+    const packages = await Promise.all(node.feature.packages.map((pkg) => this.cachedPackage(node.feature, pkg)));
+    this.redraw([node]);
+    return packages.filter((p) => p.base && p.changes.length).sort((a, b) => a.pkg.name.localeCompare(b.pkg.name));
+  }
+
+  /** A package's file rows, as getChildren lists them. */
+  fileRows(node: PackageNode): FileNode[] {
+    const base = node.base;
+    return base ? node.changes.map((change): FileNode => ({ kind: 'file', feature: node.feature, pkg: node.pkg, base, change })) : [];
   }
 
   private async featureChildren(node: FeatureNode): Promise<Node[]> {

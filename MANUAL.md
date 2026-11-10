@@ -402,6 +402,8 @@ Expand a worktree, then a package, to see its changed files. By default, only pa
 
 Click a file to open its diff.
 
+From a session, right-click it in the Claude view or on the board and pick **See Diff**. The Worktrees view opens on the session's worktree, expanded down to its changed files, with the first file selected: click a file, or press Enter, to open its diff.
+
 ![A worktree's changed file and its diff against mainline](images/diff.png)
 
 The diff base button switches what the diff compares:
