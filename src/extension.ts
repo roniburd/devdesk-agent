@@ -56,7 +56,7 @@ import { WorkerHub } from './workers';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
 export async function activate(ctx: vscode.ExtensionContext) {
-  registerEdition(ctx);
+  await registerEdition(ctx);
   for (const [from, to] of MIGRATED_SETTINGS) await migrateSetting(from, to);
   // v1's storage folders, which both versions share (see core/edition.ts).
   const globalStorage = sharedStorageDir(ctx.globalStorageUri.fsPath);

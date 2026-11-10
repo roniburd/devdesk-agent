@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bothEnabledWarning, sharedStorageDir, V1_ID, V2_ID } from '../src/core/edition';
+import { editionNotice, sharedStorageDir, V1_ID, V2_ID } from '../src/core/edition';
 
 describe('sharedStorageDir', () => {
   it("uses v1's sibling folder for this extension's storage", () => {
@@ -17,9 +17,17 @@ describe('sharedStorageDir', () => {
   });
 });
 
-describe('bothEnabledWarning', () => {
-  it('warns only when v1 is enabled too', () => {
-    expect(bothEnabledWarning(false)).toBeUndefined();
-    expect(bothEnabledWarning(true)).toMatch(/disable "DevDesk Claude"/);
+describe('editionNotice', () => {
+  it('says nothing when only v2 is enabled and its views are registered', () => {
+    expect(editionNotice(false, true)).toBeUndefined();
+  });
+
+  it('asks to disable v1 when both are enabled', () => {
+    expect(editionNotice(true, true)).toMatchObject({ kind: 'bothEnabled', action: 'Show Extensions' });
+    expect(editionNotice(true, false)).toMatchObject({ kind: 'bothEnabled' });
+  });
+
+  it('asks to reload the window when v1 was disabled without a reload, leaving no views', () => {
+    expect(editionNotice(false, false)).toMatchObject({ kind: 'reload', action: 'Reload Window' });
   });
 });

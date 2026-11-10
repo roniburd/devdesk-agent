@@ -24,9 +24,40 @@ export function sharedStorageDir(own: string, ownId = EXTENSION_ID): string {
   return basename(own).toLowerCase() === ownId.toLowerCase() ? join(dirname(own), V1_ID) : own;
 }
 
-/** The warning v2 shows when v1 is enabled in the same window, or undefined when it is not. */
-export function bothEnabledWarning(v1Enabled: boolean): string | undefined {
-  return v1Enabled
-    ? 'DevDesk Claude v1 is also enabled in this window. Only one version can run: disable "DevDesk Claude" in the Extensions view, then restart extensions.'
-    : undefined;
+/** A view v2 contributes; its `.focus` command exists only while VS Code has the view registered. */
+export const PROBE_VIEW = 'devdesk.sessions';
+
+/** What v2 tells the user when it starts: what is wrong and the one button that fixes it. */
+export interface EditionNotice {
+  kind: 'bothEnabled' | 'reload';
+  message: string;
+  action: 'Show Extensions' | 'Reload Window';
 }
+
+/**
+ * What v2 says when it starts, or undefined when all is well. `v1Enabled`: v1 is enabled in this window too.
+ * `viewsRegistered`: VS Code has v2's views. They go missing when v1 was enabled as the window loaded (VS Code rejects
+ * the second extension's views, settings and menus with the same IDs) and was disabled afterwards: VS Code registers
+ * them again only when the window reloads, not on Restart Extensions.
+ */
+export function editionNotice(v1Enabled: boolean, viewsRegistered: boolean): EditionNotice | undefined {
+  if (v1Enabled) {
+    return {
+      kind: 'bothEnabled',
+      message: 'DevDesk Claude v1 is also enabled in this window, so v2 cannot show its views. Disable "DevDesk Claude" in the Extensions view, then reload the window.',
+      action: 'Show Extensions',
+    };
+  }
+  if (!viewsRegistered) {
+    return {
+      kind: 'reload',
+      message: "DevDesk Claude v2's views and settings load only when the window loads, so they are missing after switching versions. Reload the window to show them.",
+      action: 'Reload Window',
+    };
+  }
+  return undefined;
+}
+
+/** What DevDesk Claude: Switch Version… says next to the Extensions view it opens. */
+export const SWITCH_HINT =
+  'Enable one DevDesk Claude version and disable the other, then reload the window. Restart Extensions is not enough: VS Code loads the views only when the window loads.';

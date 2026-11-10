@@ -13,6 +13,7 @@ import type { SessionNode, SessionsTree } from './sessionsTree';
 import { hostKey } from './state/mementoState';
 import type { UsageScope } from './core/usageScope';
 import { planLimits } from './planLimits';
+import { startNotice } from './edition';
 import type { UsagePanel } from './usagePanel';
 import type { UsageScopeState } from './usageScopeState';
 import type { WorktreesView } from './worktreesView';
@@ -71,6 +72,8 @@ export function testApi(
       return { label, description: item.description, tooltip, icon, contextValue: item.contextValue, unread: node.kind === 'session' && sessionsTree.unreadIds.has(node.card.id), expanded, command: item.command, children };
     });
   return {
+    /** What v2 told the user when it started (v1 enabled too, or its views missing), if anything. */
+    editionNotice: startNotice,
     /** A Claude view session row's decoration (read state and color), with its theme color's id. */
     sessionDecoration: (id: string) => {
       const d = sessionsTree.provideFileDecoration(vscode.Uri.from({ scheme: 'devdesk-session', path: `/${id}` }));
