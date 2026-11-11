@@ -217,14 +217,31 @@ describe('session', () => {
   it('shows the transcript and the reply box at an empty prompt', async () => {
     const c = card({ id: 'tmux:devdesk:%3' });
     const p = await page(answering(detail(c)), `#/s/${encodeURIComponent(c.id)}`);
-    expect(p.$$('.turn').map((t) => [t.dataset.kind, t.textContent])).toEqual([
-      ['user', 'run the tests'],
-      ['tool', '- Bash npm test'],
-      ['assistant', 'All green.'],
+    expect(p.$$('.turn').map((t) => [t.dataset.kind, t.querySelector('.turn-mark')?.textContent, t.querySelector('.turn-body, summary')!.textContent])).toEqual([
+      ['user', '>', 'run the tests'],
+      ['tool', undefined, 'Ran a tool: Bash'],
+      ['assistant', '⏺', 'All green.'],
     ]);
     expect(p.visible(p.$('textarea.reply-text'))).toBe(true);
     expect(p.visible(p.$('.keys'))).toBe(false);
     expect(p.visible(p.$('.reply button[data-key="Escape"]'))).toBe(false);
+  });
+
+  it("renders Claude's Markdown, keeps the prompt as typed, and folds each run of tool calls into one line", async () => {
+    const turns: SessionDetail['turns'] = [
+      { kind: 'user', text: 'what **passed**?' },
+      { kind: 'tool', text: '- Bash npm test' },
+      { kind: 'tool', text: '- mcp__playwright__browser_click Send' },
+      { kind: 'tool', text: '- Bash npm run e2e' },
+      { kind: 'assistant', text: '| Check | Result |\n|---|---|\n| unit | **ok** |' },
+    ];
+    const p = await page(answering(detail(card(), { turns })), '#/s/s1');
+    const [you, tools, claude] = p.$$('.turns > li');
+    expect(you.querySelector('.turn-body')!.textContent).toBe('what **passed**?');
+    expect(tools.querySelector('summary')!.textContent).toBe('Ran 3 tools: Bash, browser_click');
+    expect([...tools.querySelectorAll('.tool-calls li')].map((l) => l.textContent)).toEqual(['Bash npm test', 'mcp__playwright__browser_click Send', 'Bash npm run e2e']);
+    expect([...claude.querySelectorAll('th')].map((c) => c.textContent)).toEqual(['Check', 'Result']);
+    expect(claude.querySelector('td strong')!.textContent).toBe('ok');
   });
 
   it('replaces the reply box with key buttons and opens the Screen tab when a dialog is open', async () => {

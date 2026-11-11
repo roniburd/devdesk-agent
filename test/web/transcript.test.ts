@@ -53,9 +53,21 @@ describe('transcriptTurns', () => {
     expect(transcriptTurns(Array.from({ length: 50 }, (_, i) => user(`p${i}`)))).toHaveLength(40);
   });
 
+  it('counts only prompts and replies toward the limit, keeping the tool calls among them', () => {
+    const call = (cmd: string) => assistant([{ type: 'tool_use', name: 'Bash', input: { command: cmd } }]);
+    const lines = [user('p0'), call('a'), user('p1'), call('b'), call('c'), assistant([{ type: 'text', text: 'r1' }]), call('d')];
+    expect(transcriptTurns(lines, 2)).toEqual([
+      { kind: 'user', text: 'p1' },
+      { kind: 'tool', text: '- Bash b' },
+      { kind: 'tool', text: '- Bash c' },
+      { kind: 'assistant', text: 'r1' },
+      { kind: 'tool', text: '- Bash d' },
+    ]);
+  });
+
   it('caps long text', () => {
-    const [turn] = transcriptTurns([assistant([{ type: 'text', text: 'x'.repeat(5000) }])]);
-    expect(turn.text.length).toBe(4000);
+    const [turn] = transcriptTurns([assistant([{ type: 'text', text: 'x'.repeat(9000) }])]);
+    expect(turn.text.length).toBe(8000);
     expect(turn.text.endsWith('…')).toBe(true);
   });
 

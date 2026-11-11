@@ -12,7 +12,7 @@ import { ansiToSpans } from './ansi';
 import { toWebCard, type WebView } from './cards';
 import type { DaemonConfig } from './config';
 import { keyArgs } from './keys';
-import { DETAIL_TAIL_BYTES, transcriptTurns } from './transcript';
+import { DETAIL_MAX_TAIL_BYTES, DETAIL_TAIL_BYTES, DETAIL_TURNS, transcriptTurns } from './transcript';
 import type { ErrorCode, ErrorResponse, NewSessionRequest, NewSessionResponse, OkResponse, ScreenState, SessionDetail, Turn, WebKey } from './types';
 
 /** What the web access routes do to a session: read it, type into it, press a key in it, or start a new one. */
@@ -35,9 +35,22 @@ const tmuxFailed = (err: unknown) => fail(502, 'tmux', `tmux failed: ${(err as E
 const NO_SCREEN: ScreenState = { empty: false, dialog: false, working: false, inMode: false, exited: false };
 
 /** The card's transcript turns, its pane's screen and what that shows. `o.server`: card.tmuxServer ?? cfg.tmux.server. */
+/**
+ * The detail's turns from the end of a transcript. Tool output (screenshots, file reads) can fill the first read, so while
+ * it holds fewer than DETAIL_TURNS messages and the file goes on further back, it reads twice as far, up to
+ * DETAIL_MAX_TAIL_BYTES.
+ */
+export async function detailTurns(path: string): Promise<Turn[]> {
+  for (let bytes = DETAIL_TAIL_BYTES; ; bytes *= 2) {
+    const tail = await readTail(path, bytes);
+    if (!tail) return [];
+    const turns = transcriptTurns(tail.lines);
+    if (turns.filter((t) => t.kind !== 'tool').length >= DETAIL_TURNS || tail.bytes <= bytes || bytes >= DETAIL_MAX_TAIL_BYTES) return turns;
+  }
+}
+
 export async function sessionDetail(card: SessionCard, o: WebView & { server: string }, d: ActionDeps): Promise<ActionResult<SessionDetail>> {
-  const tail = card.transcriptPath ? await readTail(card.transcriptPath, DETAIL_TAIL_BYTES) : undefined;
-  const turns: Turn[] = tail ? transcriptTurns(tail.lines) : [];
+  const turns: Turn[] = card.transcriptPath ? await detailTurns(card.transcriptPath) : [];
   const detail: SessionDetail = { card: toWebCard(card, o), turns, screen: [], prompt: NO_SCREEN, ended: claudeGone(card) };
   const target = paneTarget(card);
   if (!target) return { status: 200, body: { ...detail, ended: true } };
