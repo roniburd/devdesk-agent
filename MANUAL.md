@@ -1361,7 +1361,7 @@ devdesk worker ask --task <id> <question>                                     # 
 
 ## 17. Web access from your phone
 
-Web access is a small page for your phone's browser. It shows the same sessions as the Claude view, and keeps working when VS Code is closed or Remote-SSH drops:
+Web access is a small page for your phone's browser. It also works in a laptop or desktop browser: with a mouse, the page uses smaller controls and a wider column, and a touch screen keeps the large controls at any size. It shows the same sessions as the Claude view, and keeps working when VS Code is closed or Remote-SSH drops:
 
 - **List**: the sessions that need you first, then the working ones, then the rest, in the Claude view's order (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, worktree and what it is doing or asking.
 - **Session**: two tabs. **Transcript** is the conversation: the last 40 of your prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). Between them, one grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran; tap it to see the calls. **Screen** is the session's terminal as it is now. Type a reply. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
