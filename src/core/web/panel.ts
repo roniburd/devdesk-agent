@@ -31,7 +31,7 @@ export function daemonScript(command: string): { script: string; version?: strin
 export interface WebPanelInput {
   status: WebStatus;
   /** The running daemon's settings (its config file), when readable. */
-  settings?: Pick<WebAccessSettings, 'auth' | 'allowedUsers' | 'identityHeader'>;
+  settings?: Pick<WebAccessSettings, 'auth' | 'allowedUsers' | 'identityHeader'> & Partial<Pick<WebAccessSettings, 'tunnel' | 'cloudflare'>>;
   /** The running daemon's script, when `ps` could tell; compared with `script`. */
   running?: { script: string; version?: string };
   /** This extension's `dist/web.js`. */
@@ -108,32 +108,61 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
     });
   }
   rows.push({ id: 'local', label: 'Loopback URL', description: local, tooltip: `${local}\n\nFor ssh -L. Click to copy.`, icon: 'link', action: 'copyLocal' });
-  if (o.settings) {
-    const users = o.settings.allowedUsers;
-    rows.push(
-      o.settings.auth === 'loopback'
-        ? {
-            id: 'access',
-            label: 'Access: no identity check',
-            description: 'loopback',
-            tooltip: 'devdesk.web.auth is loopback: any process on this host can open the page.',
-            icon: 'unlock',
-            color: 'problemsWarningIcon.foreground',
-            action: 'settings',
-          }
-        : {
-            id: 'access',
-            label: users.length ? `Access: ${users.join(', ')}` : 'Access: nobody',
-            description: o.settings.identityHeader || 'no identity header',
-            tooltip: users.length && o.settings.identityHeader
-              ? `Requests whose ${o.settings.identityHeader} header names ${users.join(' or ')}.`
-              : 'devdesk.web.identityHeader or devdesk.web.allowedUsers is empty: every request is denied.',
-            icon: 'lock',
-            ...(users.length && o.settings.identityHeader ? {} : { color: 'problemsWarningIcon.foreground' }),
-            action: 'settings',
-          },
-    );
-  }
+  if (o.settings) rows.push(accessRow(o.settings));
   rows.push({ id: 'log', label: 'Log', description: 'daemon.log', icon: 'output', action: 'openLog' });
   return rows;
+}
+
+/** Who may use web access, as the running daemon checks it. */
+function accessRow(c: NonNullable<WebPanelInput['settings']>): WebPanelRow {
+  const users = c.allowedUsers;
+  const warn = { color: 'problemsWarningIcon.foreground' };
+  if (c.auth === 'loopback') {
+    return {
+      id: 'access',
+      label: 'Access: no identity check',
+      description: 'loopback',
+      tooltip: 'devdesk.web.auth is loopback: any process on this host can open the page.',
+      icon: 'unlock',
+      ...warn,
+      action: 'settings',
+    };
+  }
+  if (c.auth === 'tunnel') {
+    return {
+      id: 'access',
+      label: 'Access: the tunnel owner',
+      description: 'Dev Tunnels',
+      tooltip: 'Dev Tunnels lets in only the account that started it, and names no one: any process on this host can also open the page.',
+      icon: 'unlock',
+      ...warn,
+      action: 'settings',
+    };
+  }
+  if (c.auth === 'cloudflare') {
+    const ready = users.length && c.cloudflare?.team && c.cloudflare.audience;
+    return {
+      id: 'access',
+      label: users.length ? `Access: ${users.join(', ')}` : 'Access: nobody',
+      description: 'Cloudflare Access',
+      tooltip: ready
+        ? `Requests with a Cloudflare Access token from ${c.cloudflare!.team}.cloudflareaccess.com naming ${users.join(' or ')}.`
+        : 'devdesk.web.allowedUsers, devdesk.web.cloudflare.team or devdesk.web.cloudflare.audience is empty: every request is denied.',
+      icon: 'lock',
+      ...(ready ? {} : warn),
+      action: 'settings',
+    };
+  }
+  const ok = users.length && c.identityHeader;
+  return {
+    id: 'access',
+    label: users.length ? `Access: ${users.join(', ')}` : 'Access: nobody',
+    description: c.tunnel === 'tailscale' ? 'Tailscale' : c.tunnel === 'ngrok' ? 'ngrok sign-in' : c.identityHeader || 'no identity header',
+    tooltip: ok
+      ? `Requests whose ${c.identityHeader} header names ${users.join(' or ')}.`
+      : 'devdesk.web.allowedUsers (or, for your own proxy, devdesk.web.identityHeader) is empty: every request is denied. Run Choose Web Access Tunnel to set it up.',
+    icon: 'lock',
+    ...(ok ? {} : warn),
+    action: 'settings',
+  };
 }

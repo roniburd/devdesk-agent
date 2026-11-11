@@ -25,6 +25,8 @@ export interface WebState {
   /** Last stderr line (or "no URL within 60 s") when down. */
   tunnelError?: string;
   tunnelPid?: number;
+  /** An https link the tunnel asks you to open before it can come up (Tailscale: turn on HTTPS), while starting. */
+  tunnelAction?: string;
 }
 
 /** The daemon's folder in the sessions state directory (`web-v2`: v1's daemon has `web`, see `WEB_ACCESS`). */
@@ -72,6 +74,7 @@ export function parseWebState(text: string): WebState | undefined {
   if (r.url !== undefined && typeof r.url !== 'string') return undefined;
   if (r.tunnelError !== undefined && typeof r.tunnelError !== 'string') return undefined;
   if (r.tunnelPid !== undefined && !isPid(r.tunnelPid)) return undefined;
+  if (r.tunnelAction !== undefined && (typeof r.tunnelAction !== 'string' || !r.tunnelAction.startsWith('https://'))) return undefined;
   const state: WebState = {
     version: 1,
     pid: r.pid,
@@ -84,6 +87,7 @@ export function parseWebState(text: string): WebState | undefined {
   if (r.url !== undefined) state.url = r.url;
   if (r.tunnelError !== undefined) state.tunnelError = r.tunnelError;
   if (r.tunnelPid !== undefined) state.tunnelPid = r.tunnelPid;
+  if (r.tunnelAction !== undefined) state.tunnelAction = r.tunnelAction;
   return state;
 }
 

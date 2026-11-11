@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.20",
+  "version": "2.1.0-prototype.21",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -521,6 +521,12 @@
         "icon": "$(debug-restart)"
       },
       {
+        "command": "devdesk.web.chooseTunnel",
+        "title": "Choose Web Access Tunnel",
+        "category": "DevDesk",
+        "icon": "$(plug)"
+      },
+      {
         "command": "devdesk.web.openSettings",
         "title": "Web Access Settings",
         "category": "DevDesk",
@@ -579,6 +585,11 @@
           "command": "devdesk.web.stop",
           "when": "view == devdesk.web && devdesk.web.running",
           "group": "navigation@2"
+        },
+        {
+          "command": "devdesk.web.chooseTunnel",
+          "when": "view == devdesk.web",
+          "group": "navigation@8"
         },
         {
           "command": "devdesk.web.openSettings",
@@ -2382,13 +2393,38 @@
         "title": "Web Access",
         "order": 14,
         "properties": {
+          "devdesk.web.tunnel": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "tailscale",
+              "devtunnel",
+              "cloudflare",
+              "ngrok",
+              "custom",
+              "none"
+            ],
+            "default": "auto",
+            "scope": "machine",
+            "enumDescriptions": [
+              "devdesk.web.tunnelCommand when set, else the workspace kind's tunnel if it has one, else Start asks which tunnel to use.",
+              "Tailscale Serve (recommended): reachable only from devices on your tailnet; Tailscale names the visitor, who must be in devdesk.web.allowedUsers.",
+              "Microsoft Dev Tunnels: a private tunnel only your GitHub or Microsoft account can open. It names no one, so DevDesk checks no one itself: any process on this host can also use web access.",
+              "Cloudflare Tunnel behind Cloudflare Access: DevDesk checks Access's signed token (devdesk.web.cloudflare.team and .audience) and that its email is in devdesk.web.allowedUsers. Needs devdesk.web.publicHost.",
+              "ngrok, with its OAuth sign-in (devdesk.web.ngrok.oauthProvider) letting in only the emails in devdesk.web.allowedUsers.",
+              "devdesk.web.tunnelCommand, behind your own identity proxy (devdesk.web.identityHeader).",
+              "No tunnel: only 127.0.0.1 (through ssh -L, or a proxy you run yourself)."
+            ],
+            "markdownDescription": "Which tunnel takes web access to your phone. Run **Choose Web Access Tunnel** to set it up step by step. A preset runs its own command and identity check (`#devdesk.web.tunnelCommand#` and `#devdesk.web.identityHeader#` do not apply); `custom` runs `#devdesk.web.tunnelCommand#`. Ignored with `#devdesk.web.auth#` `loopback`.",
+            "order": 1
+          },
           "devdesk.web.port": {
             "type": "number",
             "default": 7691,
             "minimum": 1024,
             "maximum": 65535,
             "markdownDescription": "Port the web access daemon listens on, on `127.0.0.1` only (there is no setting for the address: reach it through a proxy or `ssh -L`). 1024 to 65535.",
-            "order": 1
+            "order": 2
           },
           "devdesk.web.auth": {
             "type": "string",
@@ -2403,14 +2439,14 @@
               "No identity check, for ssh -L: any process on this host can then open the page and drive your Claude sessions. Use it only on a host no one else uses. Web access then answers on 127.0.0.1 and localhost only, and does not start with devdesk.web.tunnelCommand or devdesk.web.publicHost set."
             ],
             "markdownDescription": "How web access decides who may use it. `header` (default): the identity proxy in front of it must set `#devdesk.web.identityHeader#` to one of `#devdesk.web.allowedUsers#`; when either is missing, every request is denied. `loopback`: no identity check, for `ssh -L`; any process on this host can then drive Claude. It answers on `127.0.0.1` and `localhost` only, and does not start with `#devdesk.web.tunnelCommand#` or `#devdesk.web.publicHost#` set.",
-            "order": 2
+            "order": 3
           },
           "devdesk.web.identityHeader": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "HTTP header the identity proxy sets to the signed-in visitor (for example `Tailscale-User-Login` or `Cf-Access-Authenticated-User-Email`); the proxy must remove any value the browser sends. Empty: the workspace kind's header when its default tunnel command runs, else none (every request is denied).",
-            "order": 3
+            "order": 4
           },
           "devdesk.web.allowedUsers": {
             "type": "array",
@@ -2419,22 +2455,22 @@
             },
             "default": [],
             "scope": "machine",
-            "markdownDescription": "Values of `#devdesk.web.identityHeader#` that may use web access, matched exactly (case and spaces count). Empty: your user name when the workspace kind's default tunnel command runs, else none (every request is denied).",
-            "order": 4
+            "markdownDescription": "Who may use web access, matched exactly (case and spaces count): your Tailscale login, or your email for `cloudflare` and `ngrok`, or the values of `#devdesk.web.identityHeader#` your proxy sets. **Choose Web Access Tunnel** fills it in. Empty: your user name when the workspace kind's default tunnel command runs, else none (every request is denied). Not used by `devtunnel`.",
+            "order": 5
           },
           "devdesk.web.publicHost": {
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Host name (`host` or `host:port`) the proxy serves web access on; requests for any other host than this and `127.0.0.1` are refused. Empty: taken from the URL the tunnel command prints.",
-            "order": 5
+            "markdownDescription": "Host name (`host` or `host:port`) the proxy serves web access on; requests for any other host than this and `127.0.0.1` are refused. Needed for the `cloudflare` tunnel (the host its DNS route and Access application use); for `ngrok`, your reserved domain. Empty: taken from the URL the tunnel command prints.",
+            "order": 6
           },
           "devdesk.web.tunnelCommand": {
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts, with `{port}`, `{user}` and `{host}` (this machine's short host name) filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
-            "order": 6
+            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts when `#devdesk.web.tunnel#` is `custom` (or `auto`), with `{port}`, `{user}`, `{host}` (this machine's short host name) and `{publicHost}` filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
+            "order": 7
           },
           "devdesk.web.pollMs": {
             "type": "number",
@@ -2442,7 +2478,34 @@
             "minimum": 500,
             "maximum": 60000,
             "markdownDescription": "How often, in milliseconds, the web page's session list is refreshed while it is open. 500 to 60000.",
-            "order": 7
+            "order": 8
+          },
+          "devdesk.web.cloudflare.team": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "For the `cloudflare` tunnel: your Cloudflare One team name (`<team>.cloudflareaccess.com`). Empty: every request is denied.",
+            "order": 9
+          },
+          "devdesk.web.cloudflare.audience": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "For the `cloudflare` tunnel: the Application Audience (AUD) Tag of the Access application in front of `#devdesk.web.publicHost#`. Empty: every request is denied.",
+            "order": 10
+          },
+          "devdesk.web.ngrok.oauthProvider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "github",
+              "microsoft",
+              "gitlab"
+            ],
+            "default": "google",
+            "scope": "machine",
+            "markdownDescription": "For the `ngrok` tunnel: the account visitors sign in with; only the emails in `#devdesk.web.allowedUsers#` get through.",
+            "order": 11
           }
         }
       }

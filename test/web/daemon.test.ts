@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { webBuild } from '../../scripts/webBuild.mjs';
 import type { HookRecord } from '../../src/core/sessions';
-import { type DaemonConfig, defaultDaemonConfig } from '../../src/core/web/config';
+import { type DaemonConfig, defaultDaemonConfig, resolveWebSettings } from '../../src/core/web/config';
 import { EXIT_BAD_CONFIG, EXIT_PORT_IN_USE, parseWebState, type WebState } from '../../src/core/web/webState';
 import { runTunnel } from '../../src/web/tunnel';
 import { EMPTY_SCREEN, paneLine } from './fakes';
@@ -73,7 +73,7 @@ interface Daemon {
 }
 
 /** Starts `node web.js --config <file>` with `over` on the config, waits for its web.json. */
-async function startDaemon(over: Partial<DaemonConfig> = {}): Promise<Daemon> {
+async function startDaemon(over: Partial<DaemonConfig> = {}, env: Record<string, string> = {}): Promise<Daemon> {
   const stateDir = await mkdtemp(join(tmp, 'state-'));
   const port = over.port ?? (await freePort());
   const record: HookRecord = {
@@ -109,7 +109,7 @@ async function startDaemon(over: Partial<DaemonConfig> = {}): Promise<Daemon> {
   await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
   const child = spawn(process.execPath, [webJs, '--config', configPath], {
     stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, DEVDESK_FAKE_TMUX_LOG: tmuxLog, DEVDESK_FAKE_TMUX_STATE: tmuxState },
+    env: { ...process.env, DEVDESK_FAKE_TMUX_LOG: tmuxLog, DEVDESK_FAKE_TMUX_STATE: tmuxState, ...env },
   });
   daemons.push(child);
   let err = '';
@@ -445,9 +445,105 @@ describe('runTunnel', () => {
     await until('the tunnel stopped', () => (alive(r.pid!) ? undefined : true));
   });
 
+  it('skips URLs the rules do not take, reports action links once, and takes a ready line', async () => {
+    const actions: string[] = [];
+    const r = await new Promise<{ url?: string; down?: string }>((resolve) => {
+      const t = runTunnel(
+        'echo https://docs.example/a; echo https://act.example/x; echo https://act.example/x; echo https://me.ts.net/; sleep 30',
+        { onUrl: (url) => (t.stop(), resolve({ url })), onDown: (down) => resolve({ down }), onAction: (u) => actions.push(u) },
+        undefined,
+        { classify: (u) => (u.includes('ts.net') ? 'url' : u.includes('act.') ? 'action' : 'other') },
+      );
+    });
+    expect(r.url).toBe('https://me.ts.net/');
+    expect(actions).toEqual(['https://act.example/x']);
+    const ready = await new Promise<{ url?: string }>((resolve) => {
+      const t = runTunnel('echo https://docs.example/a >&2; echo "Registered tunnel connection" >&2; sleep 30', { onUrl: (url) => (t.stop(), resolve({ url })), onDown: () => resolve({}) }, undefined, {
+        classify: () => 'other',
+        ready: /Registered tunnel connection/,
+        readyUrl: 'https://d.example.com/',
+      });
+    });
+    expect(ready.url).toBe('https://d.example.com/');
+  });
+
   it('is down, and stopped, when no URL comes in time', async () => {
     const r = await events('echo waiting >&2; sleep 30', 300);
     expect(r.down).toMatch(/^no URL within .*: waiting$/);
     await until('the tunnel stopped', () => (alive(r.pid!) ? undefined : true));
   });
+});
+
+describe('web access daemon (tunnel presets, with fake tools on PATH)', () => {
+  let bin = '';
+  const PATH = () => ({ PATH: `${bin}:${process.env.PATH}` });
+  const tool = async (name: string, script: string) => {
+    await writeFile(join(bin, name), `#!/bin/sh\n${script}\n`);
+    await chmod(join(bin, name), 0o755);
+  };
+  /** The settings a preset resolves to, for the daemon config. */
+  const preset = (s: Record<string, unknown>) => {
+    const { port: _, ...r } = resolveWebSettings({ port: undefined, auth: undefined, identityHeader: '', allowedUsers: [], publicHost: '', tunnelCommand: '', pollMs: 500, ...s }, { user: 'roni' });
+    return r;
+  };
+  const stateOf = (d: Daemon, f: (s: WebState) => boolean) =>
+    until('web.json', async () => {
+      const s = await readState(d.stateDir);
+      return s && f(s) ? s : undefined;
+    });
+
+  beforeAll(async () => {
+    bin = await mkdtemp(join(tmp, 'bin-'));
+    // Serve's first run on a tailnet without HTTPS: a link to turn it on, then the URL.
+    await tool('tailscale', 'echo "To enable, visit: https://login.tailscale.com/f/serve?node=n1"; echo "see https://tailscale.com/kb/1312/serve"; sleep 1; echo "Available within your tailnet:"; echo "https://mac.tail1.ts.net/"; sleep 30');
+    await tool('devtunnel', 'echo "Connect via browser: https://inspect9-$3-inspect.usw2.devtunnels.ms"; echo "Connect via browser: https://abc1-$3.usw2.devtunnels.ms"; sleep 30');
+    await tool('cloudflared', 'case "$2" in run) echo "see https://developers.cloudflare.com/x" >&2; echo "INF Registered tunnel connection connIndex=0" >&2; sleep 30;; *) exit 0;; esac');
+    await tool('ngrok', 'cp "$4" "$(dirname "$4")/policy-seen.yml"; echo \'msg="started tunnel" url=https://abc.ngrok-free.app\'; sleep 30');
+  });
+
+  it('tailscale: shows the link to open, then comes up on its ts.net URL and lets in only the login', async () => {
+    const d = await startDaemon(preset({ tunnel: 'tailscale', allowedUsers: ['me@github'] }), PATH());
+    const asked = await stateOf(d, (s) => !!s.tunnelAction || s.tunnel === 'up');
+    expect(asked.tunnelAction ?? '').toMatch(/^https:\/\/login\.tailscale\.com\/f\/serve/);
+    const up = await stateOf(d, (s) => s.tunnel === 'up');
+    expect(up.url).toBe('https://mac.tail1.ts.net/');
+    expect(up.tunnelAction).toBeUndefined();
+    const via = { host: 'mac.tail1.ts.net' };
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'tailscale-user-login': 'me@github' } })).status).toBe(200);
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'tailscale-user-login': 'you@github' } })).status).toBe(403);
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, [USER_HEADER]: 'roni' } })).status).toBe(403);
+  }, 30_000);
+
+  it('devtunnel: comes up on the browser URL (not inspect) and checks no one itself', async () => {
+    const d = await startDaemon(preset({ tunnel: 'devtunnel' }), PATH());
+    const up = await stateOf(d, (s) => s.tunnel === 'up');
+    expect(up.url).toBe(`https://abc1-${d.port}.usw2.devtunnels.ms`);
+    expect((await call(d.port, { path: '/api/sessions', headers: { host: `abc1-${d.port}.usw2.devtunnels.ms` } })).status).toBe(200);
+    expect((await call(d.port, { path: '/api/sessions', headers: { host: 'evil.example' } })).status).toBe(403);
+  }, 30_000);
+
+  it('cloudflare: up on the public host once connected, and denies all without a verified Access token', async () => {
+    const d = await startDaemon(preset({ tunnel: 'cloudflare', publicHost: 'd.example.com', allowedUsers: ['me@example.com'], cloudflareTeam: 'devdesk-e2e-none', cloudflareAudience: 'a'.repeat(64) }), PATH());
+    const up = await stateOf(d, (s) => s.tunnel === 'up');
+    expect(up.url).toBe('https://d.example.com/');
+    const via = { host: 'd.example.com' };
+    expect((await call(d.port, { path: '/api/sessions', headers: via })).status).toBe(403);
+    // The email header alone is never trusted, nor a token no key signed.
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'cf-access-authenticated-user-email': 'me@example.com' } })).status).toBe(403);
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'cf-access-jwt-assertion': 'eyJhbGciOiJSUzI1NiJ9.e30.c2ln' } })).status).toBe(403);
+  }, 30_000);
+
+  it('ngrok: writes its private policy, comes up, and lets in only the email the policy names', async () => {
+    const d = await startDaemon(preset({ tunnel: 'ngrok', allowedUsers: ['me@example.com'], ngrokProvider: 'github' }), PATH());
+    const up = await stateOf(d, (s) => s.tunnel === 'up');
+    expect(up.url).toBe('https://abc.ngrok-free.app');
+    const policy = await readFile(join(d.stateDir, 'web', 'policy-seen.yml'), 'utf8');
+    expect(policy).toContain("['me@example.com']");
+    expect(policy).toContain('provider: github');
+    const { stat } = await import('node:fs/promises');
+    expect(((await stat(join(d.stateDir, 'web', 'ngrok-policy.yml'))).mode & 0o777).toString(8)).toBe('600');
+    const via = { host: 'abc.ngrok-free.app' };
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'x-devdesk-user': 'me@example.com' } })).status).toBe(200);
+    expect((await call(d.port, { path: '/api/sessions', headers: { ...via, 'x-devdesk-user': 'you@example.com' } })).status).toBe(403);
+  }, 30_000);
 });

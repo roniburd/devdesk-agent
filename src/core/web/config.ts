@@ -4,6 +4,7 @@ import { isFiniteNumber } from '../json';
 import { shellQuote } from '../shell';
 import type { ClaudeLaunch } from '../sessionStart';
 import { DEFAULT_PASTE_SETTLE_MS, isServerName } from '../tmux';
+import { allowsAnonymous, cloudflareAudienceOf, cloudflareTeamOf, type DaemonAuth, isTunnelPreset, TUNNEL_PRESETS, type NgrokOAuthProvider, ngrokProviderOf, presetSpec, type TunnelPreset, tunnelChoiceOf } from './tunnelPresets';
 import { SORT_MODES, type SortMode } from '../urgency';
 import { webDir } from './webState';
 
@@ -34,14 +35,24 @@ export interface WebSettings {
   publicHost: unknown;
   tunnelCommand: unknown;
   pollMs: unknown;
+  /** devdesk.web.tunnel; in a DaemonConfig, the preset that ran ('' none). */
+  tunnel?: unknown;
+  /** devdesk.web.cloudflare.team / .audience; in a DaemonConfig, `cloudflare`. */
+  cloudflareTeam?: unknown;
+  cloudflareAudience?: unknown;
+  cloudflare?: unknown;
+  /** devdesk.web.ngrok.oauthProvider */
+  ngrokProvider?: unknown;
 }
 
 export interface WebAccessSettings {
   /** Integer 1024..65535, else DEFAULT_WEB_PORT. */
   port: number;
-  /** Only the exact string 'loopback' gives loopback. */
-  auth: 'header' | 'loopback';
-  /** Lower-cased; '' -> the provider's when its tunnel is used, else '' (deny all). */
+  /** Only the exact string 'loopback' gives loopback; a preset gives its own (presetSpec). */
+  auth: DaemonAuth;
+  /** The preset whose command runs; '' for the provider's, a custom command, or none. */
+  tunnel: TunnelPreset | '';
+  /** Lower-cased; the preset's with one; '' -> the provider's when its tunnel is used, else '' (deny all). */
   identityHeader: string;
   /** Non-empty strings, kept exactly (no trim, no case folding); [] -> [user] with the provider's tunnel, else []. */
   allowedUsers: string[];
@@ -51,6 +62,13 @@ export interface WebAccessSettings {
   tunnelCommand: string;
   /** 500..60000, default 2000. */
   pollMs: number;
+  /** The preset's URL rules (TunnelSpec); '' with none. */
+  tunnelUrlHost: string;
+  tunnelReadyLine: string;
+  tunnelActionHost: string;
+  /** For `cloudflare` auth: the team name and the application's AUD tag ('' when invalid: every request is denied). */
+  cloudflare: { team: string; audience: string };
+  ngrokProvider: NgrokOAuthProvider;
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -64,27 +82,62 @@ const pollOf = (v: unknown) => (isFiniteNumber(v) ? Math.min(MAX_POLL_MS, Math.m
 const usersOf = (v: unknown) => (Array.isArray(v) ? v.filter((u): u is string => typeof u === 'string' && u !== '') : []);
 
 /**
- * `provider`: the provider's defaults, only when the window's root is one of its workspaces. `user`: $USER. The
- * provider's header and user stand in only when its own tunnel runs (the tunnel command is left empty): with a custom
- * tunnel command and no header or users configured, every request is denied. Loopback auth (no identity check, for
- * `ssh -L`) never gets the provider's tunnel; a tunnel command or public host set with it is refused by
- * parseDaemonConfig.
+ * `provider`: the provider's defaults, only when the window's root is one of its workspaces. `user`: $USER.
+ *
+ * Which tunnel runs (`devdesk.web.tunnel`): a preset runs its own command, header and auth (the identity header and
+ * tunnel command settings do not apply to it); `custom` runs the tunnel command; `none` runs nothing; `auto` runs the
+ * tunnel command when set, else the provider's tunnel, else none (Start then asks which to use). The provider's header
+ * and user stand in only when its own tunnel runs: with a custom tunnel command and no header or users configured,
+ * every request is denied. Loopback auth (no identity check, for `ssh -L`) runs no preset or provider tunnel; a tunnel
+ * command or public host set with it is refused by parseDaemonConfig.
  */
 export function resolveWebSettings(s: WebSettings, ctx: { provider?: WebProviderDefaults; user: string }): WebAccessSettings {
-  const tunnelCommand = str(s.tunnelCommand);
+  const custom = str(s.tunnelCommand);
   const loopback = s.auth === 'loopback';
-  const providerTunnel = !tunnelCommand && !loopback && ctx.provider ? ctx.provider : undefined;
-  const identityHeader = headerName(s.identityHeader) || (providerTunnel ? headerName(providerTunnel.identityHeader) : '');
+  const choice = tunnelChoiceOf(s.tunnel);
+  const publicHost = str(s.publicHost).toLowerCase();
   const users = usersOf(s.allowedUsers);
-  return {
+  const cf = (isObject(s.cloudflare) ? s.cloudflare : {}) as { team?: unknown; audience?: unknown };
+  const base = {
     port: validPort(s.port) ? s.port : DEFAULT_WEB_PORT,
+    publicHost,
+    pollMs: pollOf(s.pollMs),
+    cloudflare: { team: cloudflareTeamOf(s.cloudflareTeam ?? cf.team), audience: cloudflareAudienceOf(s.cloudflareAudience ?? cf.audience) },
+    ngrokProvider: ngrokProviderOf(s.ngrokProvider),
+    tunnelUrlHost: '',
+    tunnelReadyLine: '',
+    tunnelActionHost: '',
+  };
+  if (!loopback && isTunnelPreset(choice)) {
+    const spec = presetSpec(choice, { publicHost });
+    return {
+      ...base,
+      auth: spec.auth,
+      tunnel: choice,
+      identityHeader: spec.identityHeader,
+      allowedUsers: spec.auth === 'tunnel' ? [] : users,
+      tunnelCommand: spec.command,
+      tunnelUrlHost: spec.urlHost,
+      tunnelReadyLine: spec.readyLine,
+      tunnelActionHost: spec.actionHost,
+    };
+  }
+  const tunnelCommand = choice === 'none' ? '' : custom;
+  const providerTunnel = choice === 'auto' && !custom && !loopback && ctx.provider ? ctx.provider : undefined;
+  const identityHeader = headerName(s.identityHeader) || (providerTunnel ? headerName(providerTunnel.identityHeader) : '');
+  return {
+    ...base,
     auth: loopback ? 'loopback' : 'header',
+    tunnel: '',
     identityHeader,
     allowedUsers: users.length ? users : providerTunnel && ctx.user ? [ctx.user] : [],
-    publicHost: str(s.publicHost).toLowerCase(),
     tunnelCommand: tunnelCommand || (providerTunnel?.tunnelCommand.trim() ?? ''),
-    pollMs: pollOf(s.pollMs),
   };
+}
+
+/** Start should ask which tunnel to use: `auto`, header auth, no tunnel command, and no provider tunnel for this root. */
+export function needsTunnelChoice(s: Pick<WebSettings, 'tunnel' | 'auth' | 'tunnelCommand'>, hasProvider: boolean): boolean {
+  return tunnelChoiceOf(s.tunnel) === 'auto' && s.auth !== 'loopback' && !str(s.tunnelCommand) && !hasProvider;
 }
 
 /** The file the extension writes (`<stateDir>/web-v2/config.json`, mode 0600) and `node dist/web.js --config <file>` reads. */
@@ -146,7 +199,24 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   for (const k of ['user', 'identityHeader', 'publicHost', 'tunnelCommand'] as const) if (typeof r[k] !== 'string') return `${k} must be a string`;
   for (const k of ['stateDir', 'webDir'] as const) if (typeof r[k] !== 'string' || !r[k]) return `${k} must be a non-empty string`;
   if (!validPort(r.port)) return 'port must be an integer from 1024 to 65535';
-  if (r.auth !== 'header' && r.auth !== 'loopback') return "auth must be 'header' or 'loopback'";
+  if (!['header', 'loopback', 'tunnel', 'cloudflare'].includes(r.auth as string)) return "auth must be 'header', 'loopback', 'tunnel' or 'cloudflare'";
+  if (r.tunnel !== undefined && r.tunnel !== '' && !isTunnelPreset(r.tunnel)) return 'tunnel must be a tunnel preset or empty';
+  // Dev Tunnels names no one: the daemon trusts that only its owner gets through, so the tunnel must not let anyone in.
+  if (r.auth === 'tunnel' && (r.tunnel !== 'devtunnel' || allowsAnonymous(str(r.tunnelCommand)))) {
+    return "auth 'tunnel' runs only with the devtunnel preset, without anonymous access";
+  }
+  for (const k of ['tunnelUrlHost', 'tunnelReadyLine', 'tunnelActionHost'] as const) {
+    if (r[k] === undefined) continue;
+    if (typeof r[k] !== 'string') return `${k} must be a string`;
+    try {
+      new RegExp(r[k] as string);
+    } catch {
+      return `${k} must be a regular expression`;
+    }
+  }
+  if (r.cloudflare !== undefined && (!isObject(r.cloudflare) || typeof r.cloudflare.team !== 'string' || typeof r.cloudflare.audience !== 'string')) {
+    return 'cloudflare must have a team and an audience';
+  }
   // Loopback has no identity check: whatever a tunnel or proxy lets through would drive Claude unchecked.
   for (const k of ['tunnelCommand', 'publicHost'] as const) {
     if (r.auth === 'loopback' && str(r[k])) {
@@ -261,6 +331,12 @@ export function defaultDaemonConfig(home: string, user: string): DaemonConfig {
     publicHost: '',
     tunnelCommand: '',
     pollMs: DEFAULT_POLL_MS,
+    tunnel: '',
+    tunnelUrlHost: '',
+    tunnelReadyLine: '',
+    tunnelActionHost: '',
+    cloudflare: { team: '', audience: '' },
+    ngrokProvider: 'google',
     user,
     stateDir,
     webDir: webDir(stateDir),
@@ -298,6 +374,11 @@ const FLAGS: Readonly<Record<string, Flag>> = {
   '--allow-user': (v, o) => void (o.allowedUsers = [...(o.allowedUsers ?? []), v]),
   '--public-host': (v, o) => void (o.publicHost = v),
   '--tunnel-command': (v, o) => void (o.tunnelCommand = v),
+  '--tunnel': (v, o) => {
+    if (v !== '' && !isTunnelPreset(v)) return `--tunnel must be one of ${TUNNEL_PRESETS.join(', ')}`;
+    o.tunnel = v as TunnelPreset | '';
+    return undefined;
+  },
   '--state-dir': (v, o) => {
     o.stateDir = v;
     o.webDir = webDir(v);
@@ -318,7 +399,7 @@ const FLAGS: Readonly<Record<string, Flag>> = {
 
 /**
  * Manual runs: `node dist/web.js [--config <file>] [--port N] [--auth header|loopback] [--identity-header H]
- * [--allow-user U]... [--public-host H] [--tunnel-command C] [--state-dir D] [--root D] [--poll-ms N]`.
+ * [--allow-user U]... [--public-host H] [--tunnel-command C] [--tunnel PRESET] [--state-dir D] [--root D] [--poll-ms N]`.
  * Flags override the file. Without --config: state dir ~/.claude/devdesk/state, tmux server `devdesk`, scope `all`,
  * no tunnel. Unknown flags are an error. There is no --host / --bind flag.
  */
@@ -362,9 +443,14 @@ export function shortHostName(hostname: string, user: string): string {
   return h || 'host';
 }
 
-/** {port}, {user} and {host} replaced: the port as digits, the user shellQuote()d, the host as shortHostName(); other text untouched. */
-export function fillTunnelCommand(command: string, v: { port: number; user: string; host: string }): string {
-  return command.replace(/\{(port|user|host)\}/g, (_, k: string) =>
-    k === 'port' ? String(Math.trunc(v.port)) : k === 'user' ? shellQuote(v.user) : shortHostName(v.host, v.user),
-  );
+/**
+ * {port}, {user}, {host}, {publicHost} and {ngrokPolicy} replaced: the port as digits, the host as shortHostName(), the
+ * others shellQuote()d (an unset publicHost or ngrokPolicy as ''); other text untouched.
+ */
+export function fillTunnelCommand(command: string, v: { port: number; user: string; host: string; publicHost?: string; ngrokPolicy?: string }): string {
+  return command.replace(/\{(port|user|host|publicHost|ngrokPolicy)\}/g, (_, k: string) => {
+    if (k === 'port') return String(Math.trunc(v.port));
+    if (k === 'host') return shortHostName(v.host, v.user);
+    return shellQuote(k === 'user' ? v.user : k === 'publicHost' ? (v.publicHost ?? '') : (v.ngrokPolicy ?? ''));
+  });
 }
