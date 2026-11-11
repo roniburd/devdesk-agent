@@ -317,15 +317,16 @@ button, input, textarea { font: inherit; color: inherit; }
 .turn-none { color: var(--muted); }
 
 .screen { margin: 0 var(--pad) 12px; border-radius: 12px; background: var(--screen-bg); }
+/* The pane is wider than a phone: its lines wrap to the window (spacing kept), and a rule line is clipped instead. */
 .term {
-  display: inline-block;
-  min-width: 100%;
   padding: 12px;
   color: var(--screen-fg);
   font: 12px/1.35 var(--mono);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .term .row { min-height: 1.35em; }
+.term .row.rule { white-space: pre; overflow: hidden; }
 
 /* ---- The dock: reply box or dialog keys ---- */
 

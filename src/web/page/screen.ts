@@ -36,13 +36,37 @@ function spanEl(s: Span): HTMLSpanElement {
   return el;
 }
 
+const RULE = /^[\s\u2500-\u257f-]+$/;
+
+/**
+ * A screen line made to fit a phone's width, where it wraps: without the pane's trailing padding (spaces drawn with no
+ * background), so a wrapped line adds no blank rows, and `rule` when it is only box-drawing (Claude Code's separators
+ * and box borders span the pane), which is clipped to the width instead, as wrapping would stack it into several rules.
+ */
+export function fitLine(line: ScreenLine): { spans: ScreenLine; rule: boolean } {
+  const spans = [...line];
+  while (spans.length) {
+    const last = spans[spans.length - 1];
+    if (last.bg !== undefined || last.inverse) break;
+    const text = last.text.replace(/\s+$/, '');
+    if (text) {
+      spans[spans.length - 1] = { ...last, text };
+      break;
+    }
+    spans.pop();
+  }
+  const text = spans.map((s) => s.text).join('');
+  return { spans, rule: /[\u2500-\u257f]/.test(text) && RULE.test(text) };
+}
+
 /** One `<div>` per screen line (an empty line keeps its height), each holding its styled spans. */
 export function renderScreen(target: HTMLElement, lines: ScreenLine[]): void {
   const rows = lines.map((line) => {
+    const { spans, rule } = fitLine(line);
     const row = document.createElement('div');
-    row.className = 'row';
-    if (line.length === 0) row.textContent = ' ';
-    for (const s of line) row.append(spanEl(s));
+    row.className = rule ? 'row rule' : 'row';
+    if (spans.length === 0) row.textContent = ' ';
+    for (const s of spans) row.append(spanEl(s));
     return row;
   });
   target.replaceChildren(...rows);

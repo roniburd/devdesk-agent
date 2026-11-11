@@ -6,7 +6,7 @@ import { buildSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CardsResponse, FoldersResponse, SessionDetail, WebCard } from '../../src/core/web/types';
-import { cssColor } from '../../src/web/page/screen';
+import { cssColor, fitLine } from '../../src/web/page/screen';
 
 const PAGE = join(__dirname, '..', '..', 'src', 'web', 'page');
 let bundle: string | undefined;
@@ -463,5 +463,26 @@ describe('cssColor', () => {
     expect(cssColor('red;background:url(x)')).toBeUndefined();
     expect(cssColor(256)).toBeUndefined();
     expect(cssColor(undefined)).toBeUndefined();
+  });
+});
+
+describe('fitLine', () => {
+  it("drops the pane's trailing padding, so a wrapped line adds no blank rows", () => {
+    expect(fitLine([{ text: '> hi' }, { text: '      ' }])).toEqual({ spans: [{ text: '> hi' }], rule: false });
+    expect(fitLine([{ text: 'a b   ' }])).toEqual({ spans: [{ text: 'a b' }], rule: false });
+  });
+
+  it('keeps trailing spaces that are drawn (a background or inverse bar)', () => {
+    const bar = [{ text: 'mode ' }, { text: '    ', bg: 4 }];
+    expect(fitLine(bar)).toEqual({ spans: bar, rule: false });
+    expect(fitLine([{ text: ' x  ', inverse: true }]).spans).toEqual([{ text: ' x  ', inverse: true }]);
+  });
+
+  it('marks a line of box-drawing rules, which is clipped to the width instead of wrapped', () => {
+    expect(fitLine([{ text: '────────', fg: 8 }, { text: '  ' }]).rule).toBe(true);
+    expect(fitLine([{ text: '╰──────╯' }]).rule).toBe(true);
+    expect(fitLine([{ text: '╭──── Claude ────╮' }]).rule).toBe(false);
+    expect(fitLine([{ text: '--' }]).rule).toBe(false);
+    expect(fitLine([]).rule).toBe(false);
   });
 });
