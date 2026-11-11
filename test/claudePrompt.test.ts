@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeIsWorking, claudePromptIsEmpty } from '../src/core/claudePrompt';
+import { claudeIsWorking, claudePromptIsEmpty, claudePromptShown } from '../src/core/claudePrompt';
 
 const E = '\x1b';
 const rule = `${E}[38;5;244m${'─'.repeat(40)} devdesk-agents ─`;
@@ -89,5 +89,22 @@ describe('claudeIsWorking', () => {
     ];
     expect(claudeIsWorking(box(...transcript))).toBe(false);
     expect(claudeIsWorking(box('⏺ Done.', '', '> what does esc to interrupt do?', ''))).toBe(false);
+  });
+});
+
+describe('claudePromptShown', () => {
+  it('is true with the prompt box on screen, empty or with text typed', () => {
+    expect(claudePromptShown(screen(`${E}[39m❯ ${E}[7m ${E}[0m`))).toBe(true);
+    expect(claudePromptShown(screen(`${E}[39m❯ ytou 1${E}[7m ${E}[0m`))).toBe(true);
+  });
+
+  it('is false while a dialog takes the prompt box’s place', () => {
+    const dialog = [
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again',
+      '   3. No, and tell Claude what to do differently (esc)',
+    ].join('\n');
+    expect(claudePromptShown(dialog)).toBe(false);
   });
 });

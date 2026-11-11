@@ -108,6 +108,20 @@ the changes pile up in one checkout. DevDesk for Claude Code keeps the real CLI 
 Prefer the side panel? **+** starts a session in main, and **New Worktree Session** asks for a task and starts it in a
 new worktree.
 
+## Web access from your phone
+
+See your sessions and answer them from a phone browser, even with VS Code closed. Run **DevDesk for Claude Code: Start
+Web Access**. The page lists the sessions that need you, shows each one's transcript and screen, sends replies,
+answers Claude's dialogs, and starts new sessions.
+
+It listens on `127.0.0.1` only. Your phone reaches it through a proxy that signs you in and tells DevDesk who you are.
+
+- **Set it up:** Tailscale Serve or Cloudflare Access in front of the port, and two settings that name the identity
+  header and you. From a laptop, `ssh -L` works too.
+  [Manual: set up a proxy](MANUAL.md#anywhere-else-tailscale-cloudflare-access-or-ssh--l).
+- The `Web: on` item in the status bar copies the URL, shows a QR code, restarts the tunnel and stops it.
+- Use it only on a host no one else uses. [Manual: web access](MANUAL.md#16-web-access-from-your-phone).
+
 ## Settings you may want
 
 | Setting | What it does |

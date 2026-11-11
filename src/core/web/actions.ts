@@ -1,0 +1,116 @@
+import { joinArgs } from '../modes';
+import { readPaneScreen, readPromptScreen, SUBMIT_DELAY_MS, typeIntoPane } from '../paneScreen';
+import type { ProcessTable } from '../processes';
+import type { SessionCard } from '../sessions';
+import { claudeGone, sendBlocker } from '../sessionSend';
+import { tmuxStartCommand } from '../sessionStart';
+import { promptArg } from '../shell';
+import { attachArgs, claudeShellCommand, nextSessionName, paneTarget, sessionName, tmuxTargetGone, type TmuxRunner, typedLine } from '../tmux';
+import { readTail } from '../transcriptTail';
+import type { Feature } from '../worktrees';
+import { ansiToSpans } from './ansi';
+import { toWebCard, type WebView } from './cards';
+import type { DaemonConfig } from './config';
+import { keyArgs } from './keys';
+import { DETAIL_TAIL_BYTES, transcriptTurns } from './transcript';
+import type { ErrorCode, ErrorResponse, NewSessionRequest, NewSessionResponse, OkResponse, ScreenState, SessionDetail, Turn, WebKey } from './types';
+
+/** What the web access routes do to a session: read it, type into it, press a key in it, or start a new one. */
+
+export interface ActionDeps {
+  tmux: (server: string) => TmuxRunner;
+  listProcesses: () => Promise<ProcessTable | undefined>;
+  /** os.tmpdir(), for scripted long commands. */
+  tmpDir: string;
+  /** SUBMIT_DELAY_MS (150) */
+  submitDelayMs?: number;
+}
+
+export type ActionResult<T> = { status: 200 | 201; body: T } | { status: 400 | 404 | 409 | 410 | 413 | 502; body: ErrorResponse };
+
+type ErrorStatus = 400 | 404 | 409 | 410 | 413 | 502;
+const fail = (status: ErrorStatus, code: ErrorCode, error: string): { status: ErrorStatus; body: ErrorResponse } => ({ status, body: { error, code } });
+const ended = () => fail(410, 'ended', 'The session has ended.');
+const tmuxFailed = (err: unknown) => fail(502, 'tmux', `tmux failed: ${(err as Error).message}`);
+const NO_SCREEN: ScreenState = { empty: false, dialog: false, working: false, inMode: false, exited: false };
+
+/** The card's transcript turns, its pane's screen and what that shows. `o.server`: card.tmuxServer ?? cfg.tmux.server. */
+export async function sessionDetail(card: SessionCard, o: WebView & { server: string }, d: ActionDeps): Promise<ActionResult<SessionDetail>> {
+  const tail = card.transcriptPath ? await readTail(card.transcriptPath, DETAIL_TAIL_BYTES) : undefined;
+  const turns: Turn[] = tail ? transcriptTurns(tail.lines) : [];
+  const detail: SessionDetail = { card: toWebCard(card, o), turns, screen: [], prompt: NO_SCREEN, ended: claudeGone(card) };
+  const target = paneTarget(card);
+  if (!target) return { status: 200, body: { ...detail, ended: true } };
+  try {
+    const { capture, screen, promptShown } = await readPaneScreen(d.tmux(o.server), target, d.listProcesses);
+    detail.screen = ansiToSpans(capture);
+    detail.prompt = { ...screen, dialog: !promptShown && !screen.exited && !screen.inMode };
+    detail.ended ||= screen.exited;
+  } catch (err) {
+    if (!tmuxTargetGone((err as Error).message)) return tmuxFailed(err);
+    detail.ended = true;
+  }
+  return { status: 200, body: detail };
+}
+
+/** claudeGone / no pane -> 410; readPromptScreen; exited -> 410; sendBlocker(card, '', screen, 'your reply') -> 409; typeIntoPane; tmuxTargetGone -> 410; other tmux error -> 502. */
+export async function sendText(card: SessionCard, text: string, server: string, d: ActionDeps): Promise<ActionResult<OkResponse>> {
+  const target = paneTarget(card);
+  if (!target || claudeGone(card)) return ended();
+  if (!typedLine(text)) return fail(400, 'bad-request', 'There is nothing to send.');
+  const tmux = d.tmux(server);
+  try {
+    const screen = await readPromptScreen(tmux, target, d.listProcesses);
+    if (screen.exited) return ended();
+    const blocker = sendBlocker(card, '', screen, 'your reply');
+    if (blocker) return fail(409, 'blocked', blocker);
+    await typeIntoPane(tmux, target, text, d.submitDelayMs ?? SUBMIT_DELAY_MS);
+  } catch (err) {
+    return tmuxTargetGone((err as Error).message) ? ended() : tmuxFailed(err);
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+/** No pane / claudeGone -> 410; keyArgs; tmuxTargetGone -> 410. No sendBlocker: keys are for dialogs and Esc. */
+export async function pressKey(card: SessionCard, key: WebKey, server: string, d: ActionDeps): Promise<ActionResult<OkResponse>> {
+  const target = paneTarget(card);
+  if (!target || claudeGone(card)) return ended();
+  let args: string[];
+  try {
+    args = keyArgs(target, key);
+  } catch (err) {
+    return fail(400, 'bad-request', (err as Error).message);
+  }
+  try {
+    await d.tmux(server)(args);
+  } catch (err) {
+    return tmuxTargetGone((err as Error).message) ? ended() : tmuxFailed(err);
+  }
+  return { status: 200, body: { ok: true } };
+}
+
+/**
+ * Starts Claude in a new detached tmux session in one of `features` (`req.dir` must be its dir, or its realDir: else
+ * 400), named after the feature (`cc-main`, then `cc-main-2`, … past `existing`), on cfg.tmux.server, with DevDesk's
+ * environment and tmux options; the prompt, when given, as Claude's first prompt.
+ */
+export async function startSession(
+  req: NewSessionRequest,
+  features: readonly Feature[],
+  existing: readonly string[],
+  cfg: Pick<DaemonConfig, 'tmux' | 'claude'>,
+  d: ActionDeps,
+): Promise<ActionResult<NewSessionResponse>> {
+  const feature = features.find((f) => f.dir === req.dir || (f.realDir !== undefined && f.realDir === req.dir));
+  if (!feature) return fail(400, 'bad-request', 'Sessions can only start in one of the listed folders.');
+  const name = nextSessionName(sessionName(feature), existing);
+  const { command, path, args } = cfg.claude;
+  const shell = claudeShellCommand({ command, path, args }, joinArgs(cfg.claude.modeArgs, req.prompt ? promptArg(req.prompt) : ''));
+  try {
+    const run = tmuxStartCommand(shell, d.tmpDir);
+    await d.tmux(cfg.tmux.server)(attachArgs(name, feature.dir, run, cfg.tmux.env, cfg.tmux.options, true));
+  } catch (err) {
+    return tmuxFailed(err);
+  }
+  return { status: 201, body: { tmuxSession: name, server: cfg.tmux.server } };
+}

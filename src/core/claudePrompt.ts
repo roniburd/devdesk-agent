@@ -76,6 +76,14 @@ export function claudePromptIsEmpty(capture: string): boolean {
   return prompt.every((c, i) => c.dim || !c.ch.trim() || (i === cursor && placeholder));
 }
 
+/**
+ * True when Claude Code's prompt box shows in a `tmux capture-pane -p -e` capture of its pane, empty or not. False while
+ * a dialog or menu (a permission prompt, a choice) takes its place: what Claude waits for then is a key, not text.
+ */
+export function claudePromptShown(capture: string): boolean {
+  return promptLine(capture.split('\n').map(cells)) >= 0;
+}
+
 /** How many lines above the prompt box's top rule Claude's spinner may sit (its todo list can show in between). */
 const SPINNER_REACH = 12;
 /**

@@ -74,9 +74,26 @@ real sessions too.
 | `src/boardPanel.ts`, `src/boardComposer.ts`, `src/board/` | The Claude Board and its prompt box. |
 | `media/` | The webviews' scripts and styles: `board.js`, `usage.js` (`// @ts-check`). `npm run build` bundles each script, with the `src/core/` modules it imports (`boardQuery.ts`, `usageProgress.ts`; nothing that needs Node), into `dist/webview/` (`scripts/webviews.mjs`), which the webview loads. |
 | `src/log.ts` | The **DevDesk** output channel. |
+| `src/webAccess.ts`, `src/web/`, `src/core/web/` | Web access: the Start/Stop commands and status bar item (`webAccess.ts`), the daemon `dist/web.js` (`src/web/main.ts`, `server.ts`, `tunnel.ts`), its page (`src/web/page/`, plain TypeScript, no framework) and its pure logic (`src/core/web/`: auth, routes, cards, config). |
 
 `src/core/workspaceProvider.ts` is where the development repository plugs in support for other kinds of multi-package
 workspaces; in this repository it has none, so DevDesk works with git repositories and plain folders.
+
+### Web access
+
+Web access is a second bundle, `dist/web.js`, next to `dist/extension.js` in the same VSIX. `scripts/webBuild.mjs` builds it (`npm run build` calls it): it bundles the page's `src/web/page/app.ts` for the browser, then builds `src/web/main.ts` for Node with the page's HTML, script and CSS inlined, so the daemon never reads a file to serve it. It has no `external`, so anything in `src/web/` that imports `vscode` fails the build. The page is type-checked with the DOM types (`tsconfig.webview.json`), the rest without.
+
+- `test/web/daemon.test.ts` builds `dist/web.js` into a temporary folder, starts it on a free port with a fake tmux (`test/web/fixtures/fake-tmux.mjs`) and fixture hook records, and calls the API over HTTP: auth, Host and Origin checks, actions, the tunnel, signals, and that nothing listens beyond `127.0.0.1`.
+- `test/web/page.test.ts` runs the page in jsdom with a fake `fetch` and `EventSource`.
+- The `claude` e2e configuration starts and stops it through the commands, with a tunnel command that only prints a URL.
+
+To run the daemon by hand, from this folder after `npm run build`:
+
+```sh
+node dist/web.js --auth loopback --port 7690
+```
+
+and open `http://127.0.0.1:7690/`. `--auth loopback` skips the identity check: don't leave it running on a shared host. The other flags are in `parseDaemonArgs` (`src/core/web/config.ts`). It reads the hook records in `~/.claude/devdesk/state` (`--state-dir`) and the sessions on tmux server `devdesk`.
 
 ### Add a setting
 
@@ -84,7 +101,7 @@ workspaces; in this repository it has none, so DevDesk works with git repositori
    `"scope": "machine"`, so a repository's workspace settings can't change what runs.
 2. Read it through one function in `src/config.ts`. An empty string means the default. Expand a leading `~`.
 3. Make a change take effect without a reload: listen to `onDidChangeConfiguration`.
-4. List it in the [All settings](MANUAL.md#17-all-settings) table of the manual.
+4. List it in the [All settings](MANUAL.md#18-all-settings) table of the manual.
 
 ### Where state lives
 

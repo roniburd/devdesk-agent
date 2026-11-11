@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { isFiniteNumber, parseObject, positiveNumber } from './json';
 import { isInjectedPrompt, type SessionCard } from './sessions';
 import { clip } from './text';
@@ -206,7 +208,8 @@ interface Entry {
 
 const TOOL_INPUT_KEYS = ['description', 'command', 'file_path', 'notebook_path', 'pattern', 'url', 'query', 'prompt', 'skill'] as const;
 
-function toolLine(block: Record<string, unknown>): string {
+/** A tool call as one line (`- Bash npm test`): its name and its most telling input. */
+export function toolLine(block: Record<string, unknown>): string {
   const name = typeof block.name === 'string' ? block.name : 'tool';
   const input = block.input && typeof block.input === 'object' ? (block.input as Record<string, unknown>) : {};
   // AskUserQuestion: its questions are what the user is asked.
@@ -398,4 +401,18 @@ export function ledgerLine(at: number, kind: InsightKind, sessionId: string, res
 /** A session's insight file name, or undefined for an id that is not a plain file name. */
 export function insightFileName(sessionId: string, ext: 'json' | 'lock'): string | undefined {
   return /^[\w-]+$/.test(sessionId) ? `${sessionId}.${ext}` : undefined;
+}
+
+/** Where insights live: `<state dir>/insights`, out of the way of the hook records the sessions watcher reads. */
+export const insightsDir = (stateDir: string) => join(stateDir, 'insights');
+
+/** Session `sessionId`'s insight file, parsed; undefined when there is none (or it cannot be read). */
+export async function readInsight(stateDir: string, sessionId: string): Promise<Insight | undefined> {
+  const name = insightFileName(sessionId, 'json');
+  if (!name) return undefined;
+  try {
+    return parseInsight(await readFile(join(insightsDir(stateDir), name), 'utf8'));
+  } catch {
+    return undefined;
+  }
 }

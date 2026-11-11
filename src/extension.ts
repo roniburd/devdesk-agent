@@ -47,6 +47,7 @@ import { testApi } from './testApi';
 import { UsagePanel } from './usagePanel';
 import { UsageScopeState } from './usageScopeState';
 import { UsageService } from './usageService';
+import { registerWebAccess } from './webAccess';
 import { WorktreeTaskStore } from './worktreeSessions';
 import { registerWorktreesView, updateWorkspaceContext } from './worktreesView';
 
@@ -124,6 +125,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(log, sessions, sessionsTree, viewState, worktreeTasks, backlog, board, usagePanel, usage, usageScope);
   const worktrees = registerWorktreesView(ctx, sessions, sessionsTree);
   registerSessions(ctx, { sessions, sessionsTree, worktreeTasks, insights, projectState });
+  const web = registerWebAccess(ctx);
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
@@ -164,7 +166,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, globalState, projectState });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, globalState, projectState, web });
 }
 
 export function deactivate(): void {}

@@ -1,17 +1,12 @@
 import * as vscode from 'vscode';
-import { claudeIsWorking, claudePromptIsEmpty } from '../core/claudePrompt';
-import { findDescendant, listProcesses } from '../core/processes';
-import { isClaudeCommand } from '../core/sessions';
+import { readPromptScreen, typeIntoPane } from '../core/paneScreen';
 import type { SessionCard } from '../core/sessions';
 import { currentCard, NEW_SESSION, type PromptScreen, runningSessions, sessionEnded, sessionPicks } from '../core/sessionSend';
-import { FIELD_SEP, isShellCommand, paneTarget, sendKeysArgs } from '../core/tmux';
+import { paneTarget } from '../core/tmux';
 import { sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
 import { openSessionCard, type SessionRowSelector } from '../sessionsCommands';
-
-/** How long Claude gets to show what was typed (and its `/` menu) before Enter submits it. */
-const SUBMIT_DELAY_MS = 150;
 
 /**
  * The running sessions as the board's prompt box reaches them (`composer.sessions`): which one a command goes to, whether
@@ -76,25 +71,14 @@ export class BoardSessions {
   async promptScreen(card: SessionCard): Promise<PromptScreen> {
     const pane = paneOf(card);
     if (!pane) return { empty: false, working: false };
-    const capture = await pane.tmux(['capture-pane', '-p', '-e', '-t', pane.target]);
-    const format = `#{pane_pid}${FIELD_SEP}#{pane_in_mode}${FIELD_SEP}#{pane_current_command}`;
-    const [pid, inMode, command = ''] = (await pane.tmux(['display-message', '-p', '-t', pane.target, format])).trim().split(FIELD_SEP);
-    return {
-      empty: claudePromptIsEmpty(capture),
-      working: claudeIsWorking(capture),
-      exited: !(await claudeRunsIn(Number(pid), command)),
-      inMode: inMode === '1',
-    };
+    return readPromptScreen(pane.tmux, pane.target);
   }
 
   /** Types `text` (as one line) into the session's pane and presses Enter, as if typed in its terminal. */
   async typeInto(card: SessionCard, text: string): Promise<void> {
     const pane = paneOf(card);
     if (!pane) throw new Error('it does not run in tmux');
-    const { type, submit } = sendKeysArgs(pane.target, text);
-    for (const piece of type) await pane.tmux(piece);
-    await new Promise((r) => setTimeout(r, SUBMIT_DELAY_MS));
-    await pane.tmux(submit);
+    await typeIntoPane(pane.tmux, pane.target, text);
   }
 
   /** Whether the session has ended (stopped, or its tmux session gone), as the sessions are just refreshed. */
@@ -111,17 +95,6 @@ export class BoardSessions {
     await this.beforeOpen(latest);
     return openSessionCard(this.tree, latest);
   }
-}
-
-/**
- * Whether Claude runs in a pane whose process is `pid` and whose foreground command tmux names `command`: a Claude
- * process under it (tmux names a `claude; exec $SHELL -l` wrapper shell `sh` while Claude runs), else, when the process
- * list cannot be read, a foreground command that is not a shell.
- */
-async function claudeRunsIn(pid: number, command: string): Promise<boolean> {
-  const procs = Number.isInteger(pid) && pid > 0 ? await listProcesses() : undefined;
-  if (procs) return findDescendant(procs, pid, isClaudeCommand) !== undefined;
-  return isClaudeCommand(command) || (command !== '' && !isShellCommand(command));
 }
 
 /** The session's tmux runner and pane target; undefined outside tmux. */

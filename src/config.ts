@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, realpathSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
@@ -9,6 +9,8 @@ import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } fr
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { scrollLines } from './core/smoothScroll';
 import { claudeConfigFilePath } from './core/trust';
+import { type DaemonConfig, resolveWebSettings, type WebSettings } from './core/web/config';
+import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
@@ -354,6 +356,11 @@ export function sessionsClaudeEnv(): Record<string, string> {
   return sessionsLeftArrowOpensSidebar() ? { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } : {};
 }
 
+/** A Claude session's environment. The status hook asks tmux for the session name, so it is told which tmux when not the one on PATH. */
+export function sessionsEnv(bin = sessionsTmuxPath()): Record<string, string> {
+  return bin === 'tmux' ? sessionsClaudeEnv() : { ...sessionsClaudeEnv(), DEVDESK_TMUX: bin };
+}
+
 /** Show the "needs you" status bar item (setting `devdesk.sessions.statusBar`). */
 export function sessionsStatusBar(): boolean {
   return bool('sessions.statusBar', true);
@@ -641,4 +648,73 @@ export function usageDefaultScope(): 'project' | 'all' {
  */
 export function boardSearchHistorySaveMs(): number {
   return numberSetting('boardSearch.historySaveMinutes', 5, 0, 60) * 60_000;
+}
+
+/** `devdesk.web.*` as VS Code gives them, unchecked: resolveWebSettings() checks and fills them. */
+function webSettings(): WebSettings {
+  const c = cfg();
+  return {
+    port: c.get('web.port'),
+    auth: c.get('web.auth'),
+    identityHeader: c.get('web.identityHeader'),
+    allowedUsers: c.get('web.allowedUsers'),
+    publicHost: c.get('web.publicHost'),
+    tunnelCommand: c.get('web.tunnelCommand'),
+    pollMs: c.get('web.pollMs'),
+  };
+}
+
+/** The root as configured and with symlinks resolved (a session's cwd is the real path), as the Claude view scopes it. */
+function scopeDirsOf(root: string): string[] {
+  let real = root;
+  try {
+    real = realpathSync(root);
+  } catch {
+    // A root that is gone scopes by its name.
+  }
+  return real === root ? [root] : [root, real];
+}
+
+/**
+ * Everything the web access daemon runs with (`<stateDir>/web/config.json`): the `devdesk.web.*` settings, with the
+ * workspace kind's tunnel and identity header when `root` is one of its workspaces, and the sessions settings the
+ * Claude view uses, so the phone sees the sessions this window sees. `root` defaults to this window's.
+ */
+export function webAccessConfig(root: string | undefined = workspaceRoot()): DaemonConfig {
+  const user = process.env.USER || userInfo().username;
+  const provider = root && workspaceProvider?.isWorkspace(root) ? workspaceProvider.web : undefined;
+  const stateDir = sessionsStateDir();
+  const { bin = 'tmux', configFile } = sessionsTmuxSetup();
+  const c = cfg();
+  const claude: DaemonConfig['claude'] = { modeArgs: sessionsDefaultMode().args };
+  const command = c.get<string>('sessions.command');
+  const path = claudeBinary();
+  const args = c.get<string>('sessions.claudeArgs');
+  if (command) claude.command = command;
+  if (path) claude.path = path;
+  if (args) claude.args = args;
+  return {
+    version: 1,
+    ...resolveWebSettings(webSettings(), { provider, user }),
+    user,
+    stateDir,
+    webDir: webDir(stateDir),
+    ...(root ? { root } : {}),
+    scopeDirs: root ? scopeDirsOf(root) : [],
+    scope: sessionsWorkspaceOnly() ? 'workspace' : 'all',
+    showAll: sessionsShowAll(),
+    discovery: featureDiscovery(),
+    claudeSessionsDir: claudeSessionsDir(),
+    stuckMs: sessionsStuckMs(),
+    idleMs: sessionsIdleMs(),
+    insights: insightsEnabled(),
+    tmux: {
+      bin,
+      ...(configFile ? { configFile } : {}),
+      server: sessionsTmuxServer(),
+      options: sessionsTmuxOptions(),
+      env: sessionsEnv(bin),
+    },
+    claude,
+  };
 }

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { GrowingFiles, isFiniteNumber, LineScan, parseObject, readJsonFiles } from './json';
+import type { SessionCard } from './sessions';
 
 /**
  * What Claude Code itself says about a session, beyond the hook records: the name the agent view shows and the
@@ -132,4 +133,31 @@ export function claudeTitle(entry: RegistryEntry | undefined, meta: TranscriptMe
   if (meta?.customTitle) return meta.customTitle;
   if (entry?.name && entry.nameSource === 'auto') return entry.name;
   return meta?.aiTitle;
+}
+
+/**
+ * Adds names, recaps and start times from Claude Code's own session registry and transcripts to `cards` (in place),
+ * then forgets the transcripts `meta` read before that no card named now.
+ */
+export async function addSessionInfo(cards: SessionCard[], registry: readonly RegistryEntry[], meta: MetaReader): Promise<void> {
+  await Promise.all(
+    cards.map(async (card) => {
+      const own = card.sessionId || card.pid !== undefined ? registryFor(registry, card.sessionId, card.pid) : undefined;
+      // Attached to a background job: its conversation (name, recap) is what the terminal shows.
+      const job = parkedJob(registry, own);
+      const entry = job ?? own;
+      const transcript = job && card.transcriptPath ? join(dirname(card.transcriptPath), `${job.sessionId}.jsonl`) : card.transcriptPath;
+      const read = transcript ? await meta.read(transcript) : undefined;
+      const name = claudeTitle(entry, read);
+      if (name) card.name = name;
+      if (userNamed(entry, read)) card.nameByUser = true;
+      if (read?.summary) {
+        card.summary = read.summary;
+        if (read.summaryAt !== undefined) card.summaryAt = read.summaryAt;
+      }
+      const startedAt = entry?.startedAt ?? read?.startedAt;
+      if (startedAt !== undefined) card.startedAt = startedAt;
+    }),
+  );
+  meta.prune();
 }

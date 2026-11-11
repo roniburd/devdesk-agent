@@ -5,6 +5,7 @@ import { DEFAULT_SERVER, isNumberedSession, isShellCommand, serverOf, sessionNam
 import type { SessionChild } from './sessionChildren';
 import { featureDirs, type Feature } from './worktrees';
 import { isWithin, trimSlashes } from './paths';
+import { findDescendant, type ProcessTable } from './processes';
 import type { EndedRecord, EndReason } from './ended';
 import type { RegistryEntry } from './sessionInfo';
 import { isRecordState, STATE_INFO } from './sessionStates';
@@ -315,6 +316,18 @@ export function splitRecords(records: readonly HookRecord[], panes: readonly Tmu
 
 /** tmux shows Claude Code as `claude`, or as its version (`2.1.3`) for the native build. */
 export const isClaudeCommand = (command: string) => command === 'claude' || /^\d+\.\d+\.\d+$/.test(command);
+
+/**
+ * `panes` with whether Claude runs in each (`claude`, and its process `claudePid`), from the process table: tmux names
+ * the foreground process group leader, so `claude; exec $SHELL` shows as a shell. `panes` as they are without a table.
+ */
+export function withClaudeProcesses(panes: TmuxPane[], procs: ProcessTable | undefined): TmuxPane[] {
+  if (!procs) return panes;
+  return panes.map((p) => {
+    const claudePid = p.pid ? findDescendant(procs, p.pid, isClaudeCommand) : undefined;
+    return p.pid ? { ...p, claude: claudePid !== undefined, ...(claudePid !== undefined ? { claudePid } : {}) } : p;
+  });
+}
 
 /** Claude runs in the pane: from its process tree when the caller looked (`claude`), else from tmux's command name. */
 const paneRunsClaude = (p: TmuxPane) => p.claude ?? isClaudeCommand(p.command);

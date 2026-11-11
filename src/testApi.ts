@@ -11,6 +11,7 @@ import { hostKey } from './state/mementoState';
 import type { UsageScope } from './core/usageScope';
 import type { UsagePanel } from './usagePanel';
 import type { UsageScopeState } from './usageScopeState';
+import type { WebAccess } from './webAccess';
 import type { WorktreesView } from './worktreesView';
 
 /** A Claude view row as the e2e tests see it. */
@@ -38,6 +39,7 @@ export function testApi(
     usageScope,
     globalState,
     projectState,
+    web,
   }: {
     sessionsTree: SessionsTree;
     worktrees: WorktreesView;
@@ -46,6 +48,7 @@ export function testApi(
     usageScope: UsageScopeState;
     globalState: SharedMemento;
     projectState: SharedMemento;
+    web: WebAccess;
   },
 ) {
   const tree = worktrees.tree;
@@ -63,6 +66,9 @@ export function testApi(
       return { label, description: item.description, tooltip, icon, contextValue: item.contextValue, unread: node.kind === 'session' && sessionsTree.state.unreadIds.has(node.card.id), expanded, command: item.command, children };
     });
   return {
+    /** Web access's daemon state (read again from `web.json`), and its status bar item. */
+    webStatus: () => web.refresh(),
+    webStatusBar: () => web.statusBar,
     /** A Claude view session row's decoration (read state and color), with its theme color's id. */
     sessionDecoration: (id: string) => {
       const d = sessionsTree.provideFileDecoration(vscode.Uri.from({ scheme: 'devdesk-session', path: `/${id}` }));

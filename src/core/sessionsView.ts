@@ -199,7 +199,7 @@ export function badgeFor(cards: readonly SessionCard[]): { value: number; toolti
  * A done session whose subagents, background shells or workflows still run: its turn ended, but Claude picks up again
  * when they finish (for example after a background `sleep 600` it started to wait for a build).
  */
-function waitsOnBackground(card: SessionCard): boolean {
+export function waitsOnBackground(card: SessionCard): boolean {
   return card.state === 'done' && (!!card.runsInBackground || (!!card.children && runningBackground(card.children)));
 }
 

@@ -1,21 +1,20 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { mkdir, readFile, realpath, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { findDescendant, listProcesses } from './core/processes';
+import { listProcesses } from './core/processes';
 import { EndedRecords, endedDir, listableEnded, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
 import { ChildrenReader, runningBackground } from './core/sessionChildren';
-import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
-import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
+import { addSessionInfo, ForkParentReader, MetaReader, readRegistry, type RegistryEntry, registryFor } from './core/sessionInfo';
+import { buildSessionCards, cardsInScope, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds, withClaudeProcesses } from './core/sessions';
 import { STATE_INFO } from './core/sessionStates';
 import { transitionsToWaiting } from './core/sessionsView';
 import { DEFAULT_SERVER, killSessionArgs, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
 import { discoverFeatures, type Feature } from './core/worktrees';
-import { freshInsights, type Insight, withInsight, withInsights } from './core/insights';
+import { freshInsights, type Insight, insightsDir, readInsight, withInsight, withInsights } from './core/insights';
 import { type PendingTurn, withPendingTurns, withRecords } from './core/livePatches';
 import { type TickLoop, tickLoop } from './core/tickLoop';
-import { insightsDir, readInsight } from './insightsWorker';
 import { log, noteLatency, stepTimer, track } from './log';
 
 /** File events within this long of each other cause one refresh. */
@@ -284,27 +283,8 @@ export class SessionsModel implements vscode.Disposable {
   }
 
   /** Names, recaps and start times from Claude Code's own session registry and transcripts. */
-  private async addInfo(cards: SessionCard[], registry: readonly RegistryEntry[]): Promise<void> {
-    await Promise.all(
-      cards.map(async (card) => {
-        const own = card.sessionId || card.pid !== undefined ? registryFor(registry, card.sessionId, card.pid) : undefined;
-        // Attached to a background job: its conversation (name, recap) is what the terminal shows.
-        const job = parkedJob(registry, own);
-        const entry = job ?? own;
-        const transcript = job && card.transcriptPath ? join(dirname(card.transcriptPath), `${job.sessionId}.jsonl`) : card.transcriptPath;
-        const meta = transcript ? await this.metaReader.read(transcript) : undefined;
-        const name = claudeTitle(entry, meta);
-        if (name) card.name = name;
-        if (userNamed(entry, meta)) card.nameByUser = true;
-        if (meta?.summary) {
-          card.summary = meta.summary;
-          if (meta.summaryAt !== undefined) card.summaryAt = meta.summaryAt;
-        }
-        const startedAt = entry?.startedAt ?? meta?.startedAt;
-        if (startedAt !== undefined) card.startedAt = startedAt;
-      }),
-    );
-    this.metaReader.prune();
+  private addInfo(cards: SessionCard[], registry: readonly RegistryEntry[]): Promise<void> {
+    return addSessionInfo(cards, registry, this.metaReader);
   }
 
   /**
@@ -555,12 +535,7 @@ export class SessionsModel implements vscode.Disposable {
       steps.mark('list');
       const tmuxPanes = paneLists.flat();
       // tmux names the foreground process group leader, so `claude; exec $SHELL` shows as a shell: look at the tree.
-      const panes = procs
-        ? tmuxPanes.map((p) => {
-            const claudePid = p.pid ? findDescendant(procs, p.pid, isClaudeCommand) : undefined;
-            return p.pid ? { ...p, claude: claudePid !== undefined, ...(claudePid !== undefined ? { claudePid } : {}) } : p;
-          })
-        : tmuxPanes;
+      const panes = withClaudeProcesses(tmuxPanes, procs);
       if (generation !== this.generation) return; // stopped or restarted mid-refresh; discard stale result
       steps.mark('processes');
       const features = await this.featuresFor(sessionsOf(panes.filter((p) => serverOf(p) === server)), generation);

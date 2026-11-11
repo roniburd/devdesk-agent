@@ -1,3 +1,5 @@
+import type { WebProviderDefaults } from './web/config';
+
 /**
  * A kind of package workspace, beyond plain git repositories: a root holding git packages under `<root>/src/<package>`
  * and its own worktrees under `<root>/worktrees/<name>`, made and deleted by shell commands. Which kind DevDesk knows
@@ -15,4 +17,6 @@ export interface WorkspaceProvider {
   readonly defaultDeleteCommand: string;
   /** How the delete confirmation describes deleting one of its worktrees. */
   readonly deleteDescription: string;
+  /** Web access defaults: the tunnel command used when `devdesk.web.tunnelCommand` is empty, and the identity header its proxy sets. */
+  readonly web?: WebProviderDefaults;
 }

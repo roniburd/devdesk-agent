@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -372,6 +372,32 @@
         "command": "devdesk.claude.openWorktree",
         "title": "Open a Worktree's Claude Session",
         "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.web.start",
+        "title": "Start Web Access",
+        "category": "DevDesk for Claude Code"
+      },
+      {
+        "command": "devdesk.web.stop",
+        "title": "Stop Web Access",
+        "category": "DevDesk for Claude Code"
+      },
+      {
+        "command": "devdesk.web.menu",
+        "title": "Web Access…",
+        "category": "DevDesk for Claude Code"
+      },
+      {
+        "command": "devdesk.web.restartTunnel",
+        "title": "Restart Web Access Tunnel",
+        "category": "DevDesk for Claude Code"
+      },
+      {
+        "command": "devdesk.web.openSettings",
+        "title": "Web Access Settings",
+        "category": "DevDesk for Claude Code",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -814,6 +840,11 @@
           "command": "devdesk.board.openFromEditorTitle",
           "group": "navigation@100",
           "when": "config.devdesk.board.editorTitleButton && activeWebviewPanelId != devdesk.board"
+        },
+        {
+          "command": "devdesk.web.openSettings",
+          "group": "navigation@100",
+          "when": "activeWebviewPanelId == devdesk.web.qr"
         }
       ]
     },
@@ -1598,9 +1629,78 @@
         }
       },
       {
+        "id": "devdesk-claude.web",
+        "title": "Web Access",
+        "order": 10,
+        "properties": {
+          "devdesk.web.port": {
+            "type": "number",
+            "default": 7690,
+            "minimum": 1024,
+            "maximum": 65535,
+            "markdownDescription": "Port the web access daemon listens on, on `127.0.0.1` only (there is no setting for the address: reach it through a proxy or `ssh -L`). 1024 to 65535.",
+            "order": 1
+          },
+          "devdesk.web.auth": {
+            "type": "string",
+            "enum": [
+              "header",
+              "loopback"
+            ],
+            "default": "header",
+            "scope": "machine",
+            "enumDescriptions": [
+              "A request is allowed only when the proxy's identity header (devdesk.web.identityHeader) names one of devdesk.web.allowedUsers. Missing either: every request is denied.",
+              "No identity check, for ssh -L: any process on this host can then open the page and drive your Claude sessions. Use it only on a host no one else uses. Web access then answers on 127.0.0.1 and localhost only, and does not start with devdesk.web.tunnelCommand or devdesk.web.publicHost set."
+            ],
+            "markdownDescription": "How web access decides who may use it. `header` (default): the identity proxy in front of it must set `#devdesk.web.identityHeader#` to one of `#devdesk.web.allowedUsers#`; when either is missing, every request is denied. `loopback`: no identity check, for `ssh -L`; any process on this host can then drive Claude. It answers on `127.0.0.1` and `localhost` only, and does not start with `#devdesk.web.tunnelCommand#` or `#devdesk.web.publicHost#` set.",
+            "order": 2
+          },
+          "devdesk.web.identityHeader": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "HTTP header the identity proxy sets to the signed-in visitor (for example `Tailscale-User-Login` or `Cf-Access-Authenticated-User-Email`); the proxy must remove any value the browser sends. Empty: the workspace kind's header when its default tunnel command runs, else none (every request is denied).",
+            "order": 3
+          },
+          "devdesk.web.allowedUsers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "scope": "machine",
+            "markdownDescription": "Values of `#devdesk.web.identityHeader#` that may use web access, matched exactly (case and spaces count). Empty: your user name when the workspace kind's default tunnel command runs, else none (every request is denied).",
+            "order": 4
+          },
+          "devdesk.web.publicHost": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Host name (`host` or `host:port`) the proxy serves web access on; requests for any other host than this and `127.0.0.1` are refused. Empty: taken from the URL the tunnel command prints.",
+            "order": 5
+          },
+          "devdesk.web.tunnelCommand": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts, with `{port}` and `{user}` filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
+            "order": 6
+          },
+          "devdesk.web.pollMs": {
+            "type": "number",
+            "default": 2000,
+            "minimum": 500,
+            "maximum": 60000,
+            "markdownDescription": "How often, in milliseconds, the web page's session list is refreshed while it is open. 500 to 60000.",
+            "order": 7
+          }
+        }
+      },
+      {
         "id": "devdesk-claude.advanced",
         "title": "Advanced",
-        "order": 10,
+        "order": 11,
         "properties": {
           "devdesk.sessions.stateDir": {
             "type": "string",

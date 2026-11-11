@@ -1,5 +1,6 @@
 {
-  // The webviews' scripts (media/*.js, each `// @ts-check`), in the browser, strict but for implicit any.
+  // The webviews' scripts (media/*.js, each `// @ts-check`) and the web access page (src/web/page/), in the browser,
+  // strict but for implicit any.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -14,5 +15,5 @@
     "strict": true,
     "noImplicitAny": false
   },
-  "include": ["media/*.js", "media/*.d.ts"]
+  "include": ["media/*.js", "media/*.d.ts", "src/web/page/**/*.ts"]
 }

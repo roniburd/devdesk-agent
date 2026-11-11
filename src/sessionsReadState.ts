@@ -17,7 +17,10 @@ import {
   withHandMarks,
 } from './core/sessionsView';
 import { cardServer, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
-import { sessionsReadAfterMs, sessionsTmuxServer } from './config';
+import { sessionsReadAfterMs, sessionsStateDir, sessionsTmuxServer } from './config';
+import { mkdir } from 'node:fs/promises';
+import { writeFileAtomic } from './core/atomicWrite';
+import { webDir, webSeenJson, webSeenPath } from './core/web/webState';
 import { log } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { hostKey, MementoEntries } from './state/mementoState';
@@ -56,6 +59,8 @@ export interface ReadChange {
  */
 export class SessionsReadState implements vscode.Disposable {
   private unreadIds = new Set<string>();
+  /** What `shareWithWeb` last wrote. */
+  private webSeen: string | undefined;
   /** What the user has seen of each of this host's sessions, as saved now (by this window or another). */
   private readonly saved: MementoEntries<string>;
   /** What versions before per-host read state saved for every host together, for a host's first load. */
@@ -223,10 +228,25 @@ export class SessionsReadState implements vscode.Disposable {
     const changes = changedEntries(saved, seen);
     if (first || changes.size) this.save(changes);
     const unread = unreadCards(seen, cards);
+    this.shareWithWeb(seen);
     this.logReadChanges(cards, unread, looked, first && { fromShared: cards.filter((c) => first.shared.has(c.id)).length }, seen);
     const changed = unread.size !== this.unreadIds.size || [...unread].some((id) => !this.unreadIds.has(id));
     this.unreadIds = unread;
     return changed;
+  }
+
+  /**
+   * Writes what the user has read to `<stateDir>/web/seen.json` when it changed, so the web access daemon (which
+   * cannot read VS Code's state) orders and marks sessions as this view does, also after the window closes.
+   */
+  private shareWithWeb(seen: ReadonlyMap<string, string>): void {
+    const text = webSeenJson(seen);
+    if (text === this.webSeen) return;
+    this.webSeen = text;
+    const dir = webDir(sessionsStateDir());
+    void mkdir(dir, { recursive: true })
+      .then(() => writeFileAtomic(webSeenPath(dir), text))
+      .then(undefined, (err) => log.warn(`cannot share read sessions with web access: ${(err as Error).message}`));
   }
 
   /** `<id prefix> "<title>"`, for log lines. */
