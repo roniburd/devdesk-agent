@@ -1361,61 +1361,26 @@ devdesk worker ask --task <id> <question>                                     # 
 
 ## 17. Web access from your phone
 
-Web access is a small page for your phone's browser. It also works in a laptop or desktop browser: with a mouse, the page uses smaller controls and a wider column, and a touch screen keeps the large controls at any size. It shows the same sessions as the Claude view, and keeps working when VS Code is closed or Remote-SSH drops:
+![Web access on a phone: the session list with the sessions that need you first, and a session waiting for permission, with the keys to answer it](images/manual-web-phone.png)
 
-- **List**: the sessions that need you first, then the working ones, then the rest, in the Claude view's order (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, worktree and what it is doing or asking.
-- **Session**: two tabs. **Transcript** is the conversation: the last 40 of your prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). Between them, one grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran; tap it to see the calls. **Screen** is the session's terminal as it is now. Type a reply. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
+Web access is a page for your phone's browser. It shows your Claude sessions and lets you answer them, even when VS Code is closed or Remote-SSH drops. It works in a laptop browser too.
+
+- **List**: the sessions that need you first, then the working ones, then the rest (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, its worktree and what it is doing or asking.
+- **Session**: two tabs. **Transcript** is the conversation: your last 40 prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). One grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran between them; tap it to see the calls. **Screen** is the session's terminal as it is now. Type a reply. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
 - **New**: start a session in `main` or a worktree, with a prompt.
 
-It can't show the Claude Board or diffs, make worktrees, resume parked sessions, or attach images.
+It can't show the Claude Board or diffs, make worktrees, resume parked sessions, or attach images. With a mouse, the page uses smaller controls and a wider column; a touch screen keeps the large ones.
 
-### Start and stop it
+### How it works
 
-1. Run **DevDesk: Start Web Access**. A small server (the *daemon*, `dist/web.js` on VS Code's own Node) starts in the background. It lives on after the window closes.
-2. The status bar shows **Web: on**, or **Web: tunnel down** when the tunnel command stopped. Click it for:
-   - **Copy URL**, **Open URL** and **Show QR Code**: the URL the tunnel printed, for your phone.
-   - **Copy Loopback URL**: `http://127.0.0.1:7691/`.
-   - **Restart Tunnel**: runs the tunnel command again. **Start Web Access** does the same while the daemon runs.
-   - **Restart Web Access**: stops the daemon and starts it again, with the current settings and this version's page.
-   - **Stop Web Access**: stops the daemon and its tunnel. **DevDesk: Stop Web Access** does the same.
-   - **Settings**.
-3. The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off:
-   - whether it runs, since when, and its process; **Started by version 1.6.0** when a daemon an older version started is still running (an update doesn't restart it, so the phone still gets the old page: click the row to restart it);
-   - the **Phone URL** (click to copy; its buttons open it or show its QR code), the **Tunnel** (click to restart it), the **Loopback URL**;
-   - **Access**: who may open the page (`devdesk.web.allowedUsers` and how it is checked: Tailscale, ngrok sign-in, Cloudflare Access or the header), *the tunnel owner* with Dev Tunnels, or *no identity check* with `loopback`;
-   - the **Log** (`daemon.log`).
+- **A small server on the host that runs Claude.** **Start Web Access** starts it in the background: the *daemon*, `dist/web.js` on VS Code's own Node. It keeps running after VS Code closes.
+- **It listens on `127.0.0.1` only.** No port opens on the host, and no setting changes that.
+- **A proxy brings your phone to it.** The proxy (a *tunnel*) signs you in, gives the page an HTTPS URL, and tells the daemon who you are. The daemon checks that on every request and turns everyone else away. (Dev Tunnels is the exception: it tells DevDesk nothing, so its own sign-in is the only check.)
+- **No passwords, no links with tokens.** Who you are comes from the proxy. Use web access only on a host no one else uses: see [Who can open it](#who-can-open-it).
 
-   Its title bar has **Start** (or **Restart**), **Stop**, **Choose Web Access Tunnel** and the settings gear.
+### Set it up anywhere else
 
-The daemon lists the sessions of the window that started it, as its Claude view does (`devdesk.sessions.scope`, `devdesk.sessions.show`). Changing a `devdesk.web`, `devdesk.sessions` or `devdesk.claude` setting (the Claude accounts) restarts it with the new values. It starts new sessions in the default launch mode and Claude account, as **New Claude Session** does. Its files are in `~/.claude/devdesk/state/web-v2/` (under `devdesk.sessions.stateDir`): `web.json` (its pid, port and URL), `config.json` (the settings it runs with) and `daemon.log`.
-
-**DevDesk Claude v1 and v2 each have their own.** Both can be installed on one host and share the sessions state directory, so each runs a daemon of its own: v2 on port `7691` with its files in `web-v2/`, v1 on `7690` in `web/`. Start Web Access in a v2 window starts v2's daemon and never stops or restarts v1's. Both can run at once, each at its own URL; stop the one you don't use.
-
-### Who can open it
-
-The daemon listens on `127.0.0.1` only (port `devdesk.web.port`, `7691`). No setting changes that. So a phone never reaches it directly. It goes through an **identity proxy**: a service that signs you in, then forwards the request to the port on this host, with your name in a header. The proxy must replace any value of that header the browser sent: check that yours does.
-
-`devdesk.web.auth` decides what the daemon checks:
-
-- **`header`** (default). The request must carry the header `devdesk.web.identityHeader`, and its value must be one of `devdesk.web.allowedUsers`, exactly (case and spaces count). When either setting is empty, every request gets a page that says what to set. Nothing gets through by default.
-- **`loopback`**. No identity check, for `ssh -L`. Any process on this host can then open the page and drive your Claude sessions. The daemon then answers on `127.0.0.1` and `localhost` only, runs no tunnel, and refuses to start when `devdesk.web.tunnelCommand` or `devdesk.web.publicHost` is set, so nothing reaches it unchecked through a proxy.
-
-The daemon also refuses requests for any host but `127.0.0.1`, `localhost` and the proxy's (`devdesk.web.publicHost`, else the host of the URL the tunnel printed). Replies, keys and new sessions must come from the page itself (same origin). There are no passwords or links with tokens: who you are comes from the proxy.
-
-> **Use web access only on a host no one else uses.** Any process on this host can reach `127.0.0.1` and set the header itself. A dev machine of your own is fine; a shared host is not.
-
-### Set up a proxy
-
-The tunnel command (`devdesk.web.tunnelCommand`) runs when the daemon starts, with `{port}`, `{user}` and `{host}` filled in. `{host}` is this machine's short host name (its first part, without anything up to your user name), so each machine can have a tunnel of its own. The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. Whatever proxy you pick, the steps are the same:
-
-1. The proxy signs you in and forwards to `http://127.0.0.1:<devdesk.web.port>` on this host.
-2. It puts who you are in a request header, and drops any value of that header the browser sent.
-3. You tell DevDesk that header's name (`devdesk.web.identityHeader`) and your name in it (`devdesk.web.allowedUsers`). If the proxy's hostname isn't in the URL the tunnel command prints, also set `devdesk.web.publicHost`.
-4. You check that a browser that hasn't signed in can't open the URL: it must get the proxy's sign-in page, not the session list.
-
-#### Anywhere else: Tailscale, Dev Tunnels, Cloudflare, ngrok or `ssh -L`
-
-The first time you run **Start Web Access** with no tunnel set up, DevDesk asks how your phone should reach it. Run **DevDesk for Claude Code: Choose Web Access Tunnel** (or the plug button in the Web Access view's title bar) to change it later. The list says which tools are installed. For the one you pick, DevDesk checks that you are signed in (and opens a terminal to sign in if not), fills in who may use web access, saves `devdesk.web.tunnel` and the settings below, starts web access, and shows the QR code once the tunnel is up.
+The first time you run **Start Web Access** with no tunnel set up, DevDesk asks how your phone should reach it. Run **DevDesk: Choose Web Access Tunnel** (or the plug button in the Web Access view's title bar) to change it later. The list says which tools are installed. For the one you pick, DevDesk checks that you are signed in (and opens a terminal to sign in if not), fills in who may use web access, saves `devdesk.web.tunnel` and the settings below, starts web access, and shows the QR code once the tunnel is up.
 
 | `devdesk.web.tunnel` | Who can reach it | Who DevDesk lets in | What you need |
 |---|---|---|---|
@@ -1429,15 +1394,61 @@ What DevDesk runs for each (you don't type these: they come with the preset, and
 - **Tailscale**: `tailscale serve {port}`, in the foreground, so serving stops with web access. The URL is `https://<machine>.<tailnet>.ts.net/`, and doesn't change. The first time, Tailscale may print a link to turn on HTTPS for your tailnet: DevDesk shows it with an **Open Link** button and waits up to 5 minutes. On Linux, let your user run Serve once with `sudo tailscale set --operator=$USER`. Don't use Tailscale Funnel: it puts the page on the public internet.
 - **Dev Tunnels**: `devtunnel host -p {port}`, a temporary tunnel only you can open, deleted when it stops; its URL changes on each start. Dev Tunnels tells DevDesk nothing about the visitor, so DevDesk can't check again: the tunnel's own sign-in is the only check, and any process on this host can also use the page through `127.0.0.1`. DevDesk asks you to accept that once, and the daemon refuses to run a Dev Tunnels command with `--allow-anonymous`. Use it only on a machine no one else uses.
 - **Cloudflare**: a named tunnel `devdesk-{host}` per machine (created the first time), a DNS record for `devdesk.web.publicHost` pointing at it, then `cloudflared tunnel run --url http://127.0.0.1:{port} devdesk-{host}`. First create a self-hosted [Access application](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) for that host name, with a policy that allows only your email. DevDesk asks for your team name (`<team>.cloudflareaccess.com`, saved in `devdesk.web.cloudflare.team`) and the application's AUD tag (`devdesk.web.cloudflare.audience`). The daemon then checks the token Access sends in `Cf-Access-Jwt-Assertion`: signed by one of your team's keys (fetched from `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), for that application, not expired. It never trusts the `Cf-Access-Authenticated-User-Email` header alone, since without an Access application in front of the tunnel anyone could send it. Until the keys are fetched, or with the team or AUD tag missing, every request is denied.
-- **ngrok**: `ngrok http 127.0.0.1:{port} --traffic-policy-file <policy>` (plus `--url` with `devdesk.web.publicHost`, for a domain you reserved). DevDesk writes the policy to `web/ngrok-policy.yml` (private to you): visitors sign in with `devdesk.web.ngrok.oauthProvider` (Google by default); anyone whose email isn't in `devdesk.web.allowedUsers` is turned away by ngrok; the rest reach DevDesk with their email in `X-DevDesk-User` (any value the browser sent is removed first), which DevDesk checks again.
+- **ngrok**: `ngrok http 127.0.0.1:{port} --traffic-policy-file <policy>` (plus `--url` with `devdesk.web.publicHost`, for a domain you reserved). DevDesk writes the policy to `web-v2/ngrok-policy.yml` (private to you): visitors sign in with `devdesk.web.ngrok.oauthProvider` (Google by default); anyone whose email isn't in `devdesk.web.allowedUsers` is turned away by ngrok; the rest reach DevDesk with their email in `X-DevDesk-User` (any value the browser sent is removed first), which DevDesk checks again.
 
 Check once, from a private window or a phone that isn't signed in, that the URL asks you to sign in (or, for Tailscale, doesn't open off your tailnet) before you rely on it.
 
-**Your own proxy** (`custom`). Set `devdesk.web.tunnelCommand`, `devdesk.web.identityHeader` and `devdesk.web.allowedUsers` as in [Set up a proxy](#set-up-a-proxy). With `devdesk.web.tunnel` left at `auto`, a tunnel command you set runs as before.
+**Your own proxy** (`custom`). Any proxy works if it signs you in and passes who you are in a header it controls:
 
-**`ssh -L` from a laptop** (no phone, no proxy). Pick **No tunnel**, or set `"devdesk.web.auth": "loopback"` in your user settings (read the caveat above, and leave `devdesk.web.tunnelCommand` and `devdesk.web.publicHost` empty). Then run `ssh -L 7691:127.0.0.1:7691 <host>` and open `http://127.0.0.1:7691/` on the laptop.
+1. The proxy signs you in and forwards to `http://127.0.0.1:<devdesk.web.port>` (`7691`) on this host.
+2. It puts who you are in a request header, and drops any value of that header the browser sent.
+3. You tell DevDesk that header's name (`devdesk.web.identityHeader`) and your name in it (`devdesk.web.allowedUsers`). If the proxy's hostname isn't in the URL the tunnel command prints, also set `devdesk.web.publicHost`.
+4. You check that a browser that hasn't signed in can't open the URL: it must get the proxy's sign-in page, not the session list.
+
+DevDesk can start your proxy: `devdesk.web.tunnelCommand` runs when the daemon starts, with `{port}`, `{user}` and `{host}` filled in (`{host}` is this machine's short host name, so each machine can have a tunnel of its own). The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. With `devdesk.web.tunnel` left at `auto`, a tunnel command you set runs as before.
+
+**`ssh -L` from a laptop** (no phone, no proxy). Pick **No tunnel**, or set `"devdesk.web.auth": "loopback"` in your user settings (read [Who can open it](#who-can-open-it) first, and leave `devdesk.web.tunnelCommand` and `devdesk.web.publicHost` empty). Then run `ssh -L 7691:127.0.0.1:7691 <host>` and open `http://127.0.0.1:7691/` on the laptop.
 
 Don't put the port on the network yourself, with a reverse proxy that doesn't sign you in, a router port forward, or a public tunnel without its own sign-in. The daemon would turn those visitors away anyway (they carry no identity), but it shouldn't be the only thing standing between your Claude sessions and the internet.
+
+### Start and stop it
+
+![The Web Access view: running since, the phone URL, the tunnel, the loopback URL, who may open the page, and the log](images/manual-web-access.png)
+
+Run **DevDesk: Start Web Access**. The status bar shows **Web: on**, or **Web: tunnel down** when the tunnel command stopped. Click it for:
+
+- **Copy URL**, **Open URL** and **Show QR Code**: the URL the tunnel printed, for your phone.
+- **Copy Loopback URL**: `http://127.0.0.1:7691/`.
+- **Restart Tunnel**: runs the tunnel command again. **Start Web Access** does the same while the daemon runs.
+- **Restart Web Access**: stops the daemon and starts it again, with the current settings and this version's page.
+- **Stop Web Access**: stops the daemon and its tunnel. **DevDesk: Stop Web Access** does the same.
+- **Settings**.
+
+The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off. Its title bar has **Start** (or **Restart**), **Stop**, **Choose Web Access Tunnel** and the settings gear. Its rows:
+
+- **Running**: since when, and its process. **Started by version 1.6.0** means a daemon an older version started is still running: an update doesn't restart it, so the phone still gets the old page. Click the row to restart it.
+- **Phone URL**: click to copy; its buttons open it or show its QR code.
+- **Tunnel**: click to restart it.
+- **Loopback URL**: for `ssh -L`.
+- **Access**: who may open the page (`devdesk.web.allowedUsers` and how it is checked: Tailscale, ngrok sign-in, Cloudflare Access or the header), *the tunnel owner* with Dev Tunnels, or *no identity check* with `loopback`.
+- **Log**: `daemon.log`.
+
+The daemon lists the sessions of the window that started it, as its Claude view does (`devdesk.sessions.scope`, `devdesk.sessions.show`). Changing a `devdesk.web`, `devdesk.sessions` or `devdesk.claude` setting (the Claude accounts) restarts it with the new values. It starts new sessions in the default launch mode and Claude account, as **New Claude Session** does. Its files are in `~/.claude/devdesk/state/web-v2/` (under `devdesk.sessions.stateDir`): `web.json` (its pid, port and URL), `config.json` (the settings it runs with) and `daemon.log`.
+
+**DevDesk Claude v1 and v2 each have their own.** Both can be installed on one host and share the sessions state directory, so each runs a daemon of its own: v2 on port `7691` with its files in `web-v2/`, v1 on `7690` in `web/`. Start Web Access in a v2 window starts v2's daemon and never stops or restarts v1's. Both can run at once, each at its own URL; stop the one you don't use.
+
+### Who can open it
+
+The daemon listens on `127.0.0.1` only (port `devdesk.web.port`, `7691`), so a phone never reaches it directly. It goes through the proxy, which signs you in and forwards the request with your name in a header. The proxy must replace any value of that header the browser sent: check that yours does.
+
+`devdesk.web.auth` decides what the daemon checks:
+
+- **`header`** (default). The request must carry the header `devdesk.web.identityHeader`, and its value must be one of `devdesk.web.allowedUsers`, exactly (case and spaces count). When either setting is empty, every request gets a page that says what to set. Nothing gets through by default.
+- **`loopback`**. No identity check, for `ssh -L`. Any process on this host can then open the page and drive your Claude sessions. The daemon then answers on `127.0.0.1` and `localhost` only, runs no tunnel, and refuses to start when `devdesk.web.tunnelCommand` or `devdesk.web.publicHost` is set, so nothing reaches it unchecked through a proxy.
+
+The daemon also refuses requests for any host but `127.0.0.1`, `localhost` and the proxy's (`devdesk.web.publicHost`, else the host of the URL the tunnel printed). Replies, keys and new sessions must come from the page itself (same origin).
+
+> **Use web access only on a host no one else uses.** Any process on this host can reach `127.0.0.1` and set the header itself. A dev machine of your own is fine; a shared host is not.
 
 ### How the list is ordered
 
@@ -1702,7 +1713,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 
 | Setting | Default |
 |---|---|
-| `devdesk.web.tunnel` | *machine*, `auto`: `devdesk.web.tunnelCommand` when set, else Start asks. `tailscale`, `devtunnel`, `cloudflare`, `ngrok`: that preset ([Anywhere else](#anywhere-else-tailscale-dev-tunnels-cloudflare-ngrok-or-ssh--l)); `custom`: the tunnel command; `none`: no tunnel |
+| `devdesk.web.tunnel` | *machine*, `auto`: `devdesk.web.tunnelCommand` when set, else Start asks. `tailscale`, `devtunnel`, `cloudflare`, `ngrok`: that preset ([Anywhere else](#set-it-up-anywhere-else)); `custom`: the tunnel command; `none`: no tunnel |
 | `devdesk.web.port` | `7691` (v1 has `7690`; the daemon listens on `127.0.0.1` only) |
 | `devdesk.web.auth` | *machine*, `header` (`loopback`: no identity check, so any process on this host can drive Claude; no tunnel or public host with it) |
 | `devdesk.web.identityHeader` | *machine*, empty: none, so every request is denied. Not used by the presets |
