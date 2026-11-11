@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.6.8",
+  "version": "1.6.9",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -188,7 +188,7 @@
       },
       {
         "command": "devdesk.sessions.forkWithMode",
-        "title": "Fork Claude Session with Mode…",
+        "title": "Fork with Mode…",
         "category": "Worktrees"
       },
       {
@@ -199,36 +199,36 @@
       },
       {
         "command": "devdesk.sessions.openCard",
-        "title": "Open Claude Session",
+        "title": "Open",
         "category": "Worktrees",
         "icon": "$(terminal)"
       },
       {
         "command": "devdesk.sessions.fork",
-        "title": "Fork Claude Session",
+        "title": "Fork",
         "category": "Worktrees",
         "icon": "$(repo-forked)"
       },
       {
         "command": "devdesk.sessions.kill",
-        "title": "End Claude Session",
+        "title": "End",
         "category": "Worktrees",
         "icon": "$(close)"
       },
       {
         "command": "devdesk.sessions.remove",
-        "title": "Remove Parked Claude Session from List",
+        "title": "Remove from List",
         "category": "Worktrees",
         "icon": "$(trash)"
       },
       {
         "command": "devdesk.sessions.markRead",
-        "title": "Mark Claude Session as Read",
+        "title": "Mark as Read",
         "category": "Worktrees"
       },
       {
         "command": "devdesk.sessions.markUnread",
-        "title": "Mark Claude Session as Unread",
+        "title": "Mark as Unread",
         "category": "Worktrees"
       },
       {
@@ -583,57 +583,52 @@
         {
           "command": "devdesk.sessions.openCard",
           "when": "view == devdesk.sessions && viewItem =~ /\\bsession\\b/",
-          "group": "session@1"
+          "group": "1_open@1"
         },
         {
-          "command": "devdesk.sessions.fork",
-          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
-          "group": "session@2"
-        },
-        {
-          "command": "devdesk.sessions.forkWithMode",
-          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
-          "group": "session@3"
+          "submenu": "devdesk.sessions.forkMenu",
+          "when": "(view == devdesk.sessions && viewItem =~ /\\bforkable\\b/) || (view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/)",
+          "group": "4_more@1"
         },
         {
           "command": "devdesk.sessions.seeDiff",
           "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
-          "group": "session@5"
+          "group": "3_diff@1"
         },
         {
           "command": "devdesk.sessions.kill",
           "when": "view == devdesk.sessions && viewItem =~ /\\btmux\\b/",
-          "group": "session@4"
+          "group": "1_open@2"
         },
         {
           "command": "devdesk.sessions.remove",
           "when": "view == devdesk.sessions && viewItem =~ /\\bparked\\b/",
-          "group": "session@4"
+          "group": "1_open@2"
         },
         {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\bunread$/",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "command": "devdesk.sessions.markUnread",
           "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\sread$/",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.sessions && listMultiSelection && viewItem =~ /^session\\b/",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "command": "devdesk.sessions.markUnread",
           "when": "view == devdesk.sessions && listMultiSelection && viewItem =~ /^session\\b/",
-          "group": "read@2"
+          "group": "2_read@2"
         },
         {
           "submenu": "devdesk.sessions.color",
           "when": "view == devdesk.sessions && viewItem =~ /^session\\b/",
-          "group": "read@3"
+          "group": "2_read@3"
         },
         {
           "command": "devdesk.claude.open",
@@ -673,59 +668,49 @@
         {
           "command": "devdesk.sessions.openCard",
           "when": "view == devdesk.features && viewItem =~ /^session\\b/",
-          "group": "session@1"
-        },
-        {
-          "command": "devdesk.sessions.fork",
-          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
-          "group": "session@2"
-        },
-        {
-          "command": "devdesk.sessions.forkWithMode",
-          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
-          "group": "session@3"
+          "group": "1_open@1"
         },
         {
           "command": "devdesk.sessions.kill",
           "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\btmux\\b/",
-          "group": "session@4"
+          "group": "1_open@2"
         },
         {
           "command": "devdesk.sessions.remove",
           "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bparked\\b/",
-          "group": "session@4"
+          "group": "1_open@2"
         },
         {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\bunread$/",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "command": "devdesk.sessions.markUnread",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\sread$/",
-          "group": "read@1"
+          "group": "2_read@1"
         }
       ],
       "webview/context": [
         {
           "command": "devdesk.sessions.markRead",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && sessionUnread",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "command": "devdesk.sessions.markUnread",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && !sessionUnread",
-          "group": "read@1"
+          "group": "2_read@1"
         },
         {
           "submenu": "devdesk.sessions.color",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
-          "group": "read@2"
+          "group": "2_read@3"
         },
         {
           "command": "devdesk.sessions.seeDiff",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
-          "group": "session@1"
+          "group": "3_diff@1"
         }
       ],
       "commandPalette": [
@@ -931,6 +916,18 @@
           "command": "devdesk.web.openSettings",
           "group": "navigation@100",
           "when": "activeWebviewPanelId == devdesk.web.qr"
+        }
+      ],
+      "devdesk.sessions.forkMenu": [
+        {
+          "command": "devdesk.sessions.fork",
+          "group": "fork@1",
+          "when": "viewItem =~ /\\bforkable\\b/"
+        },
+        {
+          "command": "devdesk.sessions.forkWithMode",
+          "group": "fork@2",
+          "when": "viewItem =~ /\\bforkable\\b/"
         }
       ]
     },
@@ -1878,7 +1875,11 @@
     "submenus": [
       {
         "id": "devdesk.sessions.color",
-        "label": "Color"
+        "label": "Tag 🏷"
+      },
+      {
+        "id": "devdesk.sessions.forkMenu",
+        "label": "Fork"
       }
     ]
   },

@@ -267,7 +267,7 @@ Click a row, or press Enter on it. Its terminal opens in the editor area and get
 To pick a mode for one session, use:
 
 - **New Claude Session with Mode…** in the Claude view's **…** menu, or
-- **Fork Claude Session with Mode…** in a row's right-click menu.
+- **Fork ▸ Fork with Mode…** in a row's right-click menu.
 
 The shipped modes:
 
@@ -312,7 +312,7 @@ DevDesk saves what you have read. A reload or a reconnect keeps it. Sessions tha
 
 ### Mark sessions read or unread by hand
 
-Right-click a session and pick **Mark Claude Session as Read** or **Mark Claude Session as Unread**, like an email. This works in the Claude view, the Worktrees view and on the board.
+Right-click a session and pick **Mark as Read** or **Mark as Unread** (at the top of the menu), like an email. This works in the Claude view, the Worktrees view and on the board.
 
 To mark several at once in the Claude view, select them with Cmd/Ctrl-click or Shift-click, then right-click.
 
@@ -320,9 +320,9 @@ Note: if you mark a session unread while its terminal is in front, it stays unre
 
 ### Color sessions
 
-![Right-click a session, then Color: No Color, then six colors, with a ✓ on the current one](images/manual-color-menu.png)
+![Right-click a session, then Tag 🏷: No Color, then six colors, with a ✓ on the current one](images/manual-color-menu.png)
 
-Right-click a session in the Claude view or a card on the Claude Board and pick **Color ▸**, then a color: red, orange, yellow, green, blue or purple. Its title is drawn in that color, for example to tell apart what each session is for. The current color has a ✓; pick **No Color** to take it away. In the Claude view, select several sessions first to color them all at once.
+Right-click a session in the Claude view or a card on the Claude Board and pick **Tag 🏷 ▸**, then a color: red, orange, yellow, green, blue or purple. Its title is drawn in that color, for example to tell apart what each session is for. The current color has a ✓; pick **No Color** to take it away. In the Claude view, select several sessions first to color them all at once.
 
 A color wins over the grey of a read session; the unread dot still shows. Colors are kept per host, in every window, across reloads.
 

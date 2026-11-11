@@ -1,4 +1,4 @@
-/** A color the user can give a session by hand (right-click **Color ▸** on its row or board card). */
+/** A color the user can give a session by hand (right-click **Tag 🏷 ▸** on its row or board card). */
 export interface SessionColor {
   id: string;
   label: string;
@@ -41,7 +41,7 @@ export function rowDecoration(
   return { ...(read?.badge ? { badge: read.badge } : {}), color: color.themeColor, tooltip: read ? `${read.tooltip} · ${color.label}` : color.label };
 }
 
-/** The command of a session's right-click **Color ▸** submenu that gives it `color` (undefined: No Color). */
+/** The command of a session's right-click **Tag 🏷 ▸** submenu that gives it `color` (undefined: No Color). */
 export function colorCommand(color: string | undefined): string {
   return `devdesk.sessions.color.${color ?? 'none'}`;
 }
