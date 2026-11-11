@@ -7,6 +7,7 @@ import { parseModels } from './core/composer';
 import type { ParkPolicy } from './core/park';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
+import { scrollLines } from './core/smoothScroll';
 import { claudeConfigFilePath } from './core/trust';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -226,6 +227,16 @@ export function sessionsTmux(server = sessionsTmuxServer()): TmuxRunner {
       noteLatency(`tmux ${args[0]}`, Date.now() - start);
     }
   };
+}
+
+/** Smooth wheel scrolling in DevDesk's tmux server (setting `devdesk.sessions.smoothScroll`, experimental): off by default. */
+export function sessionsSmoothScroll(): boolean {
+  return bool('sessions.smoothScroll', false);
+}
+
+/** Lines one wheel event scrolls with smooth scrolling on (setting `devdesk.sessions.smoothScrollLines`), 1 to 10. */
+export function sessionsSmoothScrollLines(): number {
+  return scrollLines(cfg().get('sessions.smoothScrollLines'));
 }
 
 /** tmux options DevDesk sets on each of its Claude sessions (setting `devdesk.sessions.tmuxOptions`), as name/value pairs. */

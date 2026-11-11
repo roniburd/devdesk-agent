@@ -10,6 +10,7 @@ import { readRegistry } from './core/sessionInfo';
 import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, killSessionArgs, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
+import { applySmoothScrollWhenUp } from './smoothScroll';
 import { type OpenTerminal, ReattachTerminals, reattachKey, type RestoreOutcome } from './state/reattachTerminals';
 import {
   claudeSessionsDir,
@@ -240,6 +241,7 @@ export async function startClaude(
   });
   remember(terminal, { session, server });
   terminal.show(preserveFocus);
+  void applySmoothScrollWhenUp(session);
 }
 
 /** A detached start gives up waiting for its hidden terminal after this. */
@@ -266,6 +268,7 @@ export async function startClaudeDetached(session: string, dir: string, command 
   const code = terminal.exitStatus?.code;
   terminal.dispose();
   if (code !== 0) throw new Error(`tmux could not start session ${session} (exit ${code ?? 'timeout'})`);
+  void applySmoothScrollWhenUp(session);
 }
 
 /**

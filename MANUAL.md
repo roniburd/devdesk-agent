@@ -1012,6 +1012,12 @@ DevDesk starts its sessions on a separate tmux server: `tmux -L devdesk` (settin
 | `devdesk.sessions.tmuxConfigFile` | A config file, loaded with `-f` when DevDesk's tmux server starts. |
 | `devdesk.sessions.tmuxOptions` | Options such as `mouse` or `history-limit`. DevDesk sets them on each session when its terminal opens. |
 
+### Smooth scrolling (experimental)
+
+With tmux's `mouse` on, tmux scrolls a Claude terminal itself, and each wheel event jumps 5 lines. Turn on `devdesk.sessions.smoothScroll` to have each wheel event scroll `devdesk.sessions.smoothScrollLines` lines (3 by default) one line at a time instead, which is closer to VS Code's own terminal. It still scrolls in whole lines.
+
+The setting changes the wheel bindings of DevDesk's tmux server, so it applies to all its sessions, in every window, as soon as you change it. DevDesk first saves the wheel bindings it replaces (tmux's defaults, or your own from a tmux config file), and turning the setting off loads them back.
+
 ### Install tmux
 
 When tmux can't run, DevDesk offers **Install tmux**. It runs `devdesk.sessions.tmuxInstallCommand` in a terminal. The default is `sudo yum install -y tmux`, or `brew install tmux` on macOS. It is also in the command palette as *Worktrees: Install tmux*.
@@ -1211,6 +1217,8 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.tmuxPath` | `tmux` on PATH |
 | `devdesk.sessions.tmuxConfigFile` | tmux's own (`~/.tmux.conf`); read when DevDesk's tmux server starts |
 | `devdesk.sessions.tmuxOptions` | `{}` (for example `{ "mouse": true, "history-limit": 50000 }`, set on each session) |
+| `devdesk.sessions.smoothScroll` | `false` (experimental: the wheel scrolls one line at a time) |
+| `devdesk.sessions.smoothScrollLines` | `3` (lines per wheel event with smooth scrolling on, 1 to 10) |
 | `devdesk.sessions.tmuxInstallCommand` | `sudo yum install -y tmux` (`brew install tmux` on macOS) |
 
 ### Advanced

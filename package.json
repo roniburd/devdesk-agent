@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -1560,6 +1560,20 @@
             "markdownDescription": "tmux config file DevDesk's tmux server loads (`tmux -f <file>`), for example `~/.tmux-devdesk.conf`. Empty: tmux's own (`~/.tmux.conf`). tmux reads it when the server starts: run `tmux -L devdesk kill-server` (this stops every DevDesk session), or `source-file` it, to apply a change to a running server.",
             "order": 3
           },
+          "devdesk.sessions.smoothScroll": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "**Experimental.** Smoother mouse-wheel and trackpad scrolling in DevDesk's Claude terminals. With tmux's `mouse` on, tmux scrolls the terminal itself, 5 lines at a jump per wheel event; this makes each wheel event scroll `#devdesk.sessions.smoothScrollLines#` lines, one line at a time. It changes the wheel bindings of DevDesk's tmux server (all its sessions, in every window); turning it off gives back the bindings it replaced.",
+            "order": 4
+          },
+          "devdesk.sessions.smoothScrollLines": {
+            "type": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10,
+            "markdownDescription": "With `#devdesk.sessions.smoothScroll#` on: lines one wheel event scrolls, one at a time. 3 scrolls about as far as VS Code's own terminal; 1 is the slowest and smoothest.",
+            "order": 5
+          },
           "devdesk.sessions.tmuxOptions": {
             "type": "object",
             "default": {},
@@ -1572,14 +1586,14 @@
               ]
             },
             "markdownDescription": "tmux options DevDesk sets on each Claude session when it opens its terminal (`set-option -t <session>`), for example `{ \"mouse\": true, \"history-limit\": 50000, \"status\": \"off\" }`. `true`/`false` become `on`/`off`. Window options apply to the session's current window. Empty: none, so your tmux config decides.",
-            "order": 4
+            "order": 6
           },
           "devdesk.sessions.tmuxInstallCommand": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Shell command **Install tmux** runs in a terminal, offered when DevDesk cannot run tmux. Empty: `brew install tmux` on macOS, else `sudo yum install -y tmux`.",
-            "order": 5
+            "order": 7
           }
         }
       },
