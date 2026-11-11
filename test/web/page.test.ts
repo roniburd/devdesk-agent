@@ -181,6 +181,7 @@ describe('list', () => {
     expect(asks.querySelector('.label')!.textContent).toBe('Needs permission');
     expect(asks.querySelector('.line')!.textContent).toBe('Bash rm -rf build');
     expect(p.$('a.card[href="#/s/b"] .glyph')!.classList.contains('spin')).toBe(true);
+    expect(p.$('a.card[href="#/s/b"] .glyph')!.textContent).toBe('');
     expect(p.$('button.new')).not.toBeNull();
   });
 
