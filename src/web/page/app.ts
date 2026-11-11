@@ -1,5 +1,7 @@
-// The web access page: the session list, a session's transcript and screen with a reply box or dialog keys, and New.
-// Hash routes `#/`, `#/s/<id>`, `#/new`. It talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
+// The web access page: the session list with a prompt box on top that starts a session, and a session's transcript and
+// screen with a reply box or dialog keys. On a phone the list and a session take turns; from 900 px wide (app.css) they
+// sit side by side, the list on the left. Hash routes `#/`, `#/s/<id>` (and `#/new`, which focuses the prompt box). It
+// talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
 // All data goes in as text (dom.ts, screen.ts, markdown.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
 import type {
   CardsResponse,
@@ -159,21 +161,18 @@ function cardRow(c: WebCard): HTMLElement {
   );
 }
 
-function listView(): View {
+interface ListView extends View {
+  /** Marks the open session's card (the list stays on screen beside it on a wide screen). */
+  select(id: string | undefined): void;
+  focusPrompt(): void;
+}
+
+function listView(): ListView {
+  let selected: string | undefined;
   const badge = h('span', { attrs: { role: 'status' } });
   const body = h('div', { class: 'content list' });
-  const el = h(
-    'div',
-    { class: 'view view-list' },
-    h(
-      'header',
-      { class: 'bar' },
-      h('h1', { class: 'heading', text: 'Claude sessions' }),
-      badge,
-      h('button', { class: 'button primary new', text: 'New session', attrs: { type: 'button' }, on: { click: () => go('#/new') } }),
-    ),
-    body,
-  );
+  const start = composer();
+  const el = h('div', { class: 'view view-list' }, h('header', { class: 'bar' }, h('h1', { class: 'heading', text: 'Claude sessions' }), badge), start.el, body);
   const render = () => {
     showLink(badge);
     const cards = feed.cards;
@@ -182,14 +181,7 @@ function listView(): View {
       return;
     }
     if (cards.length === 0) {
-      body.replaceChildren(
-        h(
-          'div',
-          { class: 'empty' },
-          h('p', { text: 'No Claude sessions are running.' }),
-          h('button', { class: 'button primary', text: 'Start a session', attrs: { type: 'button' }, on: { click: () => go('#/new') } }),
-        ),
-      );
+      body.replaceChildren(h('div', { class: 'empty' }, h('p', { text: 'No Claude sessions are running.' }), h('p', { class: 'hint', text: 'Type a prompt above to start one.' })));
       return;
     }
     const sections = GROUPS.map(({ group, title }) => {
@@ -199,7 +191,15 @@ function listView(): View {
         'section',
         { class: `group group-${group}`, attrs: { 'data-group': group, 'aria-label': title } },
         h('h2', { class: 'group-title' }, title, h('span', { class: 'count', text: String(mine.length) })),
-        h('div', { class: 'cards' }, ...mine.map(cardRow)),
+        h(
+          'div',
+          { class: 'cards' },
+          ...mine.map((c) => {
+            const row = cardRow(c);
+            if (c.id === selected) row.setAttribute('aria-current', 'page');
+            return row;
+          }),
+        ),
       );
     });
     body.replaceChildren(...sections.filter((s): s is HTMLElement => s !== null));
@@ -207,7 +207,19 @@ function listView(): View {
   };
   feed.listeners.add(render);
   render();
-  return { el, dispose: () => feed.listeners.delete(render) };
+  return {
+    el,
+    select: (id) => {
+      if (id === selected) return;
+      selected = id;
+      render();
+    },
+    focusPrompt: () => start.focus(),
+    dispose: () => {
+      feed.listeners.delete(render);
+      start.dispose();
+    },
+  };
 }
 
 type Tab = 'transcript' | 'screen';
@@ -487,19 +499,51 @@ function sessionView(id: string): View {
   };
 }
 
-function newView(): View {
+/** The folders a session can start in, asked for once. */
+let foldersLoad: Promise<{ folders?: WebFolder[]; error?: string }> | undefined;
+function loadFolders(): Promise<{ folders?: WebFolder[]; error?: string }> {
+  foldersLoad ??= api<FoldersResponse>('GET', 'api/folders').then((r) => {
+    if (!r.data) foldersLoad = undefined; // Ask again next time.
+    return r.data ? { folders: r.data.folders ?? [] } : { error: r.error };
+  });
+  return foldersLoad;
+}
+
+/** Rows the prompt box shows: one line until it is used, then up to 8 as you type. */
+const PROMPT_ROWS = { idle: 1, open: 3, max: 8 };
+
+/** The prompt box at the top of the list: type, pick a folder (main is picked), Start. It opens the new session. */
+function composer(): View & { focus(): void } {
   let disposed = false;
-  let waiting: { tmuxSession: string; until: number } | undefined;
+  let waiting: { tmuxSession: string; until: number; from: string } | undefined;
   let waitTimer: number | undefined;
   const notice = h('p', { class: 'notice', attrs: { 'aria-live': 'polite' } });
   notice.hidden = true;
-  const list = h('div', { class: 'folders', attrs: { role: 'radiogroup', 'aria-label': 'Folder' } }, h('p', { class: 'hint', text: 'Loading folders…' }));
   const prompt = h('textarea', {
     class: 'prompt',
-    attrs: { rows: '5', placeholder: 'What should Claude do? You can leave this empty.', 'aria-label': 'Prompt', autocapitalize: 'sentences' },
+    attrs: { rows: String(PROMPT_ROWS.idle), placeholder: 'What should Claude do?', 'aria-label': 'Prompt for a new session', autocapitalize: 'sentences' },
+    on: {
+      input: () => fit(),
+      focus: () => fit(),
+      blur: () => fit(),
+      keydown: (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          void submit();
+        }
+      },
+    },
   });
-  const start = h('button', { class: 'button primary start', text: 'Start session', attrs: { type: 'submit' } });
+  const folder = h('select', { class: 'folder-pick', attrs: { name: 'dir', 'aria-label': 'Folder' } }, h('option', { text: 'Loading folders…', attrs: { value: '' } }));
+  folder.disabled = true;
+  const start = h('button', { class: 'button primary start', text: 'Start', attrs: { type: 'submit' } });
   start.disabled = true;
+
+  function fit(): void {
+    const used = document.activeElement === prompt || prompt.value !== '';
+    const lines = prompt.value.split('\n').length;
+    prompt.rows = used ? Math.min(PROMPT_ROWS.max, Math.max(PROMPT_ROWS.open, lines)) : PROMPT_ROWS.idle;
+  }
 
   const say = (message: string | undefined, error = true) => {
     notice.textContent = message ?? '';
@@ -507,22 +551,11 @@ function newView(): View {
     notice.classList.toggle('error', error);
   };
 
-  const folderRow = (f: WebFolder, checked: boolean) =>
-    h(
-      'label',
-      { class: f.isMain ? 'folder main' : 'folder' },
-      (() => {
-        const input = h('input', { attrs: { type: 'radio', name: 'dir', value: f.dir } });
-        input.checked = checked;
-        return input;
-      })(),
-      h('span', { class: 'folder-text' }, h('span', { class: 'folder-name' }, f.name, f.isMain ? h('span', { class: 'folder-tag', text: 'Main repo' }) : null), h('span', { class: 'folder-dir', text: f.dir })),
-    );
-
-  const form = h(
+  const el = h(
     'form',
     {
-      class: 'content new-form',
+      class: 'composer',
+      attrs: { 'aria-label': 'Start a session' },
       on: {
         submit: (e) => {
           e.preventDefault();
@@ -530,35 +563,28 @@ function newView(): View {
         },
       },
     },
-    // Prompt and Start come first: the folder list can be long, and the default folder is already picked.
-    h('label', { class: 'field' }, h('span', { class: 'field-title', text: 'Prompt' }), prompt),
-    h('div', { class: 'form-actions' }, start),
+    prompt,
+    h('div', { class: 'composer-row' }, h('label', { class: 'folder-chip', attrs: { title: 'Folder the session starts in' } }, folder), start),
     notice,
-    h('fieldset', { class: 'field' }, h('legend', { text: 'Folder' }), list),
   );
 
-  const el = h(
-    'div',
-    { class: 'view view-new' },
-    h('header', { class: 'bar' }, h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }), h('h1', { class: 'heading', text: 'New session' })),
-    form,
-  );
-
-  async function loadFolders(): Promise<void> {
-    const r = await api<FoldersResponse>('GET', 'api/folders');
+  async function fill(): Promise<void> {
+    const r = await loadFolders();
     if (disposed) return;
-    const folders = r.data?.folders ?? [];
-    if (!r.data) {
-      list.replaceChildren();
+    const folders = r.folders ?? [];
+    if (!r.folders) {
+      folder.replaceChildren(h('option', { text: 'No folders', attrs: { value: '' } }));
       say(r.error);
       return;
     }
     if (folders.length === 0) {
-      list.replaceChildren(h('p', { class: 'hint', text: 'No folders are available to start a session in.' }));
+      folder.replaceChildren(h('option', { text: 'No folders to start in', attrs: { value: '' } }));
       return;
     }
     const sorted = [...folders.filter((f) => f.isMain), ...folders.filter((f) => !f.isMain)];
-    list.replaceChildren(...sorted.map((f, i) => folderRow(f, i === 0)));
+    folder.replaceChildren(...sorted.map((f) => h('option', { text: f.isMain ? `${f.name} (main repo)` : f.name, attrs: { value: f.dir, title: f.dir } })));
+    folder.value = sorted[0].dir;
+    folder.disabled = false;
     start.disabled = false;
   }
 
@@ -566,10 +592,13 @@ function newView(): View {
     if (!waiting || disposed) return;
     const c = feed.cards?.find((x) => x.tmuxSession === waiting!.tmuxSession);
     if (c) {
-      const id = c.id;
+      const from = waiting.from;
       waiting = undefined;
       window.clearTimeout(waitTimer);
-      go(sessionHref(id));
+      start.disabled = false;
+      say(undefined);
+      // Open it, unless another session was opened meanwhile: then it just shows up in the list.
+      if ((location.hash || '#/') === from) go(sessionHref(c.id));
       return;
     }
     if (Date.now() > waiting.until) {
@@ -587,8 +616,8 @@ function newView(): View {
   }
 
   async function submit(): Promise<void> {
-    const dir = (list.querySelector('input[name="dir"]:checked') as HTMLInputElement | null)?.value;
-    if (!dir || waiting) return;
+    const dir = folder.value;
+    if (!dir || waiting || start.disabled) return;
     start.disabled = true;
     say(undefined);
     const body: NewSessionRequest = { dir, prompt: prompt.value };
@@ -599,15 +628,22 @@ function newView(): View {
       start.disabled = false;
       return;
     }
+    // Only clear what was sent: anything typed while it went stays.
+    if (prompt.value === body.prompt) prompt.value = '';
+    fit();
     say('Starting Claude…', false);
-    waiting = { tmuxSession: r.data.tmuxSession, until: Date.now() + NEW_SESSION_WAIT_MS };
+    waiting = { tmuxSession: r.data.tmuxSession, until: Date.now() + NEW_SESSION_WAIT_MS, from: location.hash || '#/' };
     arrived();
   }
 
   feed.listeners.add(arrived);
-  void loadFolders();
+  void fill();
   return {
     el,
+    focus: () => {
+      prompt.focus();
+      fit();
+    },
     dispose: () => {
       disposed = true;
       window.clearTimeout(waitTimer);
@@ -618,7 +654,17 @@ function newView(): View {
 
 // ---- Routing ----
 
-let current: View | undefined;
+// The list is made once and stays, so its scroll, the prompt being typed and a session being started survive opening a
+// session. `.shell.has-session` (app.css) shows the list or the session on a phone, and both side by side when wide.
+let list: ListView | undefined;
+let detail: View | undefined;
+let listScroll = 0;
+const shell = { el: h('div', { class: 'shell' }), list: h('div', { class: 'pane pane-list' }), detail: h('div', { class: 'pane pane-detail' }) };
+shell.el.append(shell.list, shell.detail);
+
+function placeholder(): View {
+  return { el: h('div', { class: 'view view-pick' }, h('p', { class: 'hint', text: 'Pick a session, or type a prompt to start one.' })), dispose: () => {} };
+}
 
 function go(hash: string): void {
   if (location.hash === hash) route();
@@ -626,23 +672,28 @@ function go(hash: string): void {
 }
 
 function route(): void {
-  current?.dispose();
   const hash = location.hash || '#/';
-  let view: View;
+  let id: string | undefined;
   if (hash.startsWith('#/s/')) {
-    let id: string | undefined;
     try {
       id = decodeURIComponent(hash.slice(4));
     } catch {
       id = undefined;
     }
-    view = id ? sessionView(id) : listView();
-  } else if (hash === '#/new') view = newView();
-  else view = listView();
-  current = view;
-  const root = document.getElementById('app') ?? document.body;
-  root.replaceChildren(view.el);
-  window.scrollTo?.(0, 0);
+  }
+  const wasSession = shell.el.classList.contains('has-session');
+  if (id && !wasSession) listScroll = window.scrollY ?? 0;
+  detail?.dispose();
+  detail = id ? sessionView(id) : placeholder();
+  shell.detail.replaceChildren(detail.el);
+  shell.el.classList.toggle('has-session', !!id);
+  list!.select(id);
+  if (id) window.scrollTo?.(0, 0);
+  else if (wasSession) window.scrollTo?.(0, listScroll);
+  if (hash === '#/new') {
+    history.replaceState(null, '', '#/');
+    list!.focusPrompt();
+  }
 }
 
 function startPage(): void {
@@ -651,6 +702,9 @@ function startPage(): void {
     if (document.visibilityState === 'visible' && !stream) openStream();
   });
   openStream();
+  list = listView();
+  shell.list.append(list.el);
+  (document.getElementById('app') ?? document.body).replaceChildren(shell.el);
   route();
 }
 

@@ -1367,9 +1367,9 @@ Web access is a page for your phone's browser. It shows your Claude sessions and
 
 - **List**: the sessions that need you first, then the working ones, then the rest (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, its worktree and what it is doing or asking.
 - **Session**: two tabs. **Transcript** is the conversation: your last 40 prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). One grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran between them; tap it to see the calls. **Screen** is the session's terminal as it is now. Type a reply. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
-- **New**: start a session in `main` or a worktree, with a prompt.
+- **Start a session**: the prompt box on top of the list. Type what Claude should do, pick `main` or a worktree (main is picked), and tap **Start** (or press Cmd/Ctrl+Enter). The new session opens.
 
-It can't show the Claude Board or diffs, make worktrees, resume parked sessions, or attach images. With a mouse, the page uses smaller controls and a wider column; a touch screen keeps the large ones.
+On a window 900 px wide or more, the list stays on the left and the open session fills the right, so you can switch sessions or start one without going back. It can't show the Claude Board or diffs, make worktrees, resume parked sessions, or attach images. With a mouse, the page uses smaller controls; a touch screen keeps the large ones.
 
 ### How it works
 
