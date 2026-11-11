@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { sessionLabel, terminalName } from './core/terminalNames';
 import { endedDir, type EndedRecord, readEndedRecords } from './core/ended';
 import { parkedIn } from './core/park';
 import { processAlive, readHookRecords } from './core/sessions';
 import { readRegistries } from './core/sessionInfo';
-import { attachArgs, DEFAULT_SERVER, isPaneId, fitsTmuxCommandLine, killSessionArgs, launchTags, listSessions, resumeArgs, scriptedCommand, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { attachArgs, DEFAULT_SERVER, isPaneId, killSessionArgs, launchTags, listSessions, resumeArgs, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { tmuxStartCommand } from './core/sessionStart';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
 import { sessionAccount } from './claudeAccounts';
@@ -19,7 +19,7 @@ import {
   sessionsClaudeCommand,
   sessionsRestoreTerminals,
   sessionsTabTitleLength,
-  sessionsClaudeEnv,
+  sessionsEnv,
   sessionsStateDir,
   sessionsTmux,
   sessionsTmuxInstallCommand,
@@ -279,7 +279,7 @@ export async function startClaudeDetached(session: string, dir: string, command 
 function newSessionShell(session: string, dir: string, command: string, detached = false): { shellPath: string; shellArgs: string[] } {
   const { bin = 'tmux', configFile } = sessionsTmuxSetup();
   const server = sessionsTmuxServer();
-  const env = { ...sessionEnv(bin), ...launchTags(session, server) };
+  const env = { ...sessionsEnv(bin), ...launchTags(session, server) };
   const args = attachArgs(session, dir, tmuxCommand(command), env, sessionsTmuxOptions(), detached);
   return { shellPath: bin, shellArgs: serverArgs(server, args, configFile) };
 }
@@ -289,20 +289,7 @@ function newSessionShell(session: string, dir: string, command: string, detached
  * a private temporary directory that the session's shell runs and removes.
  */
 function tmuxCommand(command: string): string {
-  if (fitsTmuxCommandLine(command)) return command;
-  const dir = mkdtempSync(join(tmpdir(), 'devdesk-claude-start-'));
-  const file = join(dir, 'start.sh');
-  const scripted = scriptedCommand(command, dir, file);
-  writeFileSync(file, scripted.script, { mode: 0o600 });
-  return scripted.command;
-}
-
-/**
- * A Claude session's environment. The status hook asks tmux for the session name of a session without DevDesk's tags
- * (`launchTags`), so it is told which tmux when not the one on PATH.
- */
-function sessionEnv(bin: string): Record<string, string> {
-  return bin === 'tmux' ? sessionsClaudeEnv() : { ...sessionsClaudeEnv(), DEVDESK_TMUX: bin };
+  return tmuxStartCommand(command, tmpdir());
 }
 
 /**

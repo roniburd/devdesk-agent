@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { claudeIsWorking, claudePromptIsEmpty, type PaneFlags, paneScreenArgs, parsePaneFlags, parsePaneScreen } from '../src/core/claudePrompt';
+import { claudeIsWorking, claudePromptIsEmpty, claudePromptShown, type PaneFlags, paneScreenArgs, parsePaneFlags, parsePaneScreen } from '../src/core/claudePrompt';
 
 const E = '\x1b';
 const rule = `${E}[38;5;244m${'─'.repeat(40)} devdesk-agents ─`;
@@ -206,5 +206,27 @@ describe('paneScreenArgs and parsePaneScreen', () => {
     expect(parsePaneScreen('x\n1|^||^|3|^|4\n', SEP).flags).toEqual({ inMode: true, bracketPaste: undefined, cursor: { x: 3, y: 4 } });
     expect(parsePaneScreen('x\n0|^|1|^||^|\n', SEP).flags).toEqual({ inMode: false, bracketPaste: true, cursor: undefined });
     expect(parsePaneScreen('x\nnot flags\n', SEP).flags).toBeUndefined();
+  });
+});
+
+describe('claudePromptShown', () => {
+  it('is true with the prompt box on screen, empty or with text typed', () => {
+    expect(claudePromptShown(screen(`${E}[39m❯ ${E}[7m ${E}[0m`))).toBe(true);
+    expect(claudePromptShown(screen(`${E}[39m❯ ytou 1${E}[7m ${E}[0m`))).toBe(true);
+  });
+
+  it('is false while a dialog takes the prompt box’s place', () => {
+    const dialog = [
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again',
+      '   3. No, and tell Claude what to do differently (esc)',
+    ].join('\n');
+    expect(claudePromptShown(dialog)).toBe(false);
+  });
+
+  it('is true with the composer on screen (real captures), false while a dialog takes its place', () => {
+    for (const name of ['empty', 'idle-after-turn', 'working', 'text']) expect(claudePromptShown(capture(name)), name).toBe(true);
+    for (const name of ['permission-dialog', 'question-dialog']) expect(claudePromptShown(capture(name)), name).toBe(false);
   });
 });

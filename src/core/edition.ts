@@ -26,6 +26,22 @@ export function sharedStorageDir(own: string, ownId = EXTENSION_ID): string {
   return basename(own).toLowerCase() === ownId.toLowerCase() ? join(dirname(own), V1_ID) : own;
 }
 
+/**
+ * Web access: v1 and v2 each run a daemon of their own, as both can be installed on one host, each running in its own
+ * windows, and they share the sessions state directory (`devdesk.sessions.stateDir`). So v2 listens on its own default
+ * port, keeps its daemon's files (`web.json`, `config.json`, `seen.json`, the log, the restart lock) in a folder of its
+ * own there, and names its default tunnel apart: a v1 and a v2 daemon run side by side, and neither stops, restarts or
+ * reads the other's.
+ */
+export const WEB_ACCESS = {
+  /** `devdesk.web.port`'s default (v1: 7690). */
+  port: 7691,
+  /** The daemon's folder in the sessions state directory (v1: `web`). */
+  dirName: 'web-v2',
+  /** The name the default tunnel command gives its tunnel (v1: `devdesk`). */
+  tunnelName: 'devdesk-beta',
+} as const;
+
 /** A view v2 contributes; its `.focus` command exists only while VS Code has the view registered. */
 export const PROBE_VIEW = 'devdesk.sessions';
 

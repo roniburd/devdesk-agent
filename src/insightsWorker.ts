@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type * as vscode from 'vscode';
 import {
@@ -11,11 +11,12 @@ import {
   insightDue,
   latestPrompt,
   insightFileName,
+  insightsDir,
   type InsightKind,
   ledgerLine,
   mergeAnswer,
   parseCallOutput,
-  parseInsight,
+  readInsight,
   turnEnd,
 } from './core/insights';
 import { writeFileAtomic } from './core/atomicWrite';
@@ -31,20 +32,9 @@ import { runInShell } from './shellCall';
 import { readHead, readTail } from './core/transcriptTail';
 import { appendLedgerLine } from './usageCount';
 
-/** Where insights live: `<state dir>/insights`, out of the way of the hook records the sessions watcher reads. */
-export const insightsDir = (stateDir: string) => join(stateDir, 'insights');
+export { insightsDir, readInsight };
 /** DevDesk's own token usage, one line per call. */
 export const usageLedger = (stateDir: string) => join(stateDir, 'usage.jsonl');
-
-export async function readInsight(stateDir: string, sessionId: string): Promise<Insight | undefined> {
-  const name = insightFileName(sessionId, 'json');
-  if (!name) return undefined;
-  try {
-    return parseInsight(await readFile(join(insightsDir(stateDir), name), 'utf8'));
-  } catch {
-    return undefined;
-  }
-}
 
 const CALL_TIMEOUT_MS = 30_000;
 /** A lock this old was left by a window that went away mid-call. */

@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, realpathSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
@@ -9,11 +9,14 @@ import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
 import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
-import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
+import { DEFAULT_CLAUDE_PATH, DEFAULT_PASTE_SETTLE_MS, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { scrollLines } from './core/smoothScroll';
 import { claudeConfigFilePath } from './core/trust';
-import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount, withEnv } from './core/accounts';
+import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount } from './core/accounts';
+import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
 import type { TurnReadLimits } from './core/turnChangesRead';
+import { type DaemonConfig, resolveWebSettings, type WebSettings } from './core/web/config';
+import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
@@ -323,11 +326,22 @@ export function sessionsTmuxInstallCommand(): string {
  * Claude runs in `account` (default: the default account): its `CLAUDE_CONFIG_DIR` and `env` are exported first.
  */
 export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode(), account: ClaudeAccount = claudeDefaultAccount()): string {
+  return claudeLaunchCommand(sessionsLaunch(mode, account), extraArgs);
+}
+
+/** How new sessions run Claude in launch mode `mode` and Claude account `account` (see `claudeLaunchCommand`). */
+export function sessionsLaunch(mode: LaunchMode = sessionsDefaultMode(), account: ClaudeAccount = claudeDefaultAccount()): ClaudeLaunch {
   const c = cfg();
   const command = c.get<string>('sessions.command');
   const wrapper = !command?.trim() && sessionsProgramStatus() ? programStatusLaunchWrapper(ambientClaudeConfigDir(), programStatusDir()) : undefined;
-  // The account's environment travels in the command, so a respawned pane (a resume) has it too.
-  return withEnv(claudeShellCommand({ command, path: claudeBinary(), args: c.get<string>('sessions.claudeArgs'), wrapper }, joinArgs(mode.args, extraArgs)), accountEnv(account));
+  const launch: ClaudeLaunch = { modeArgs: mode.args, env: accountEnv(account) };
+  const path = claudeBinary();
+  const args = c.get<string>('sessions.claudeArgs');
+  if (command) launch.command = command;
+  if (path) launch.path = path;
+  if (args) launch.args = args;
+  if (wrapper) launch.wrapper = wrapper;
+  return launch;
 }
 
 /**
@@ -473,6 +487,14 @@ export function sessionsClaudeEnv(): Record<string, string> {
   };
 }
 
+/**
+ * A Claude session's environment. The status hook asks tmux for the session name of a session without DevDesk's tags
+ * (`launchTags`), so it is told which tmux when not the one on PATH.
+ */
+export function sessionsEnv(bin = sessionsTmuxPath()): Record<string, string> {
+  return bin === 'tmux' ? sessionsClaudeEnv() : { ...sessionsClaudeEnv(), DEVDESK_TMUX: bin };
+}
+
 /** Show the "needs you" status bar item (setting `devdesk.sessions.statusBar`). */
 export function sessionsStatusBar(): boolean {
   return bool('sessions.statusBar', true);
@@ -613,8 +635,6 @@ export function boardLaneWidth(): number {
   return numberSetting('board.laneWidth', DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH, Infinity, 'round');
 }
 
-/** Default of `devdesk.board.pasteSettleMs`. */
-export const DEFAULT_PASTE_SETTLE_MS = 500;
 
 /**
  * How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter
@@ -888,5 +908,70 @@ export function ticketsConfig(): TicketsConfig {
     },
     linear: { workspace: cfg().get<string>('tickets.linear.workspace', '').trim(), teams: stringList('tickets.linear.teams') },
     patterns: cfg().get<unknown>('tickets.patterns') ?? [],
+  };
+}
+
+/** `devdesk.web.*` as VS Code gives them, unchecked: resolveWebSettings() checks and fills them. */
+function webSettings(): WebSettings {
+  const c = cfg();
+  return {
+    port: c.get('web.port'),
+    auth: c.get('web.auth'),
+    identityHeader: c.get('web.identityHeader'),
+    allowedUsers: c.get('web.allowedUsers'),
+    publicHost: c.get('web.publicHost'),
+    tunnelCommand: c.get('web.tunnelCommand'),
+    pollMs: c.get('web.pollMs'),
+  };
+}
+
+/** The root as configured and with symlinks resolved (a session's cwd is the real path), as the Claude view scopes it. */
+function scopeDirsOf(root: string): string[] {
+  let real = root;
+  try {
+    real = realpathSync(root);
+  } catch {
+    // A root that is gone scopes by its name.
+  }
+  return real === root ? [root] : [root, real];
+}
+
+/**
+ * Everything the web access daemon runs with (`<stateDir>/web-v2/config.json`): the `devdesk.web.*` settings, with the
+ * workspace kind's tunnel and identity header when `root` is one of its workspaces, and the sessions settings the
+ * Claude view uses, so the phone sees the sessions this window sees. `root` defaults to this window's.
+ */
+export function webAccessConfig(root: string | undefined = workspaceRoot()): DaemonConfig {
+  const user = process.env.USER || userInfo().username;
+  const provider = root && workspaceProvider?.isWorkspace(root) ? workspaceProvider.web : undefined;
+  const stateDir = sessionsStateDir();
+  const { bin = 'tmux', configFile } = sessionsTmuxSetup();
+  return {
+    version: 1,
+    ...resolveWebSettings(webSettings(), { provider, user }),
+    user,
+    stateDir,
+    webDir: webDir(stateDir),
+    ...(root ? { root } : {}),
+    scopeDirs: root ? scopeDirsOf(root) : [],
+    scope: sessionsWorkspaceOnly() ? 'workspace' : 'all',
+    showAll: sessionsShowAll(),
+    discovery: featureDiscovery(),
+    claudeSessionsDirs: claudeSessionsDirs(),
+    stuckMs: sessionsStuckMs(),
+    hooksQuietMs: sessionsHooksQuietMs(),
+    idleMs: sessionsIdleMs(),
+    sort: { mode: sessionsSort(), recentMs: sessionsRecentlyFinishedMs(), unreadFirst: sessionsUnreadFirst() },
+    insights: insightsEnabled(),
+    pasteSettleMs: boardPasteSettleMs(),
+    tmux: {
+      bin,
+      ...(configFile ? { configFile } : {}),
+      server: sessionsTmuxServer(),
+      options: sessionsTmuxOptions(),
+      env: sessionsEnv(bin),
+    },
+    // The default launch mode and Claude account, as a new session from the Claude view starts.
+    claude: sessionsLaunch(),
   };
 }

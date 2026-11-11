@@ -21,5 +21,9 @@
     "test/**/*.ts",
     "e2e/**/*.ts",
     "vitest.config.ts"
+  ],
+  // The web access page runs in the browser: tsconfig.webview.json checks it, with the DOM types.
+  "exclude": [
+    "src/web/page/**"
   ]
 }

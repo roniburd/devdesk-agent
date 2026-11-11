@@ -1,15 +1,11 @@
-import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { claudeIsWorking, claudePromptIsEmpty, paneScreenArgs, parsePaneScreen } from '../core/claudePrompt';
-import { findDescendant, listProcesses } from '../core/processes';
+import { readPromptScreen, typeIntoPane } from '../core/paneScreen';
 import { readCardProgramStatus, screenWithProgramStatus } from '../core/programStatus';
-import { isClaudeCommand, processAlive } from '../core/sessions';
+import { processAlive } from '../core/sessions';
 import type { SessionCard } from '../core/sessions';
 import { currentCard, NEW_SESSION, type PromptScreen, runningSessions, sessionEnded, sessionPicks } from '../core/sessionSend';
-import { commandLine, commandParts, FIELD_SEP, pastedText, isShellCommand, paneTarget, pasteArgs, pasteBufferName, pasteSubmitDelayMs, typeArgs } from '../core/tmux';
+import { paneTarget } from '../core/tmux';
 import { boardPasteSettleMs, programStatusDir, sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
@@ -80,20 +76,8 @@ export class BoardSessions {
   async promptScreen(card: SessionCard): Promise<PromptScreen> {
     const pane = paneOf(card);
     if (!pane) return { empty: false, working: false };
-    // The screen and the pane's flags (tmux mode, bracketed paste, cursor) in one tmux call, so they agree.
-    const out = await pane.tmux(paneScreenArgs(pane.target, FIELD_SEP, ['#{pane_pid}', '#{pane_current_command}']));
-    const { capture, flags, extra } = parsePaneScreen(out, FIELD_SEP);
-    const [pid, command = ''] = extra;
-    const status = await readCardProgramStatus(programStatusDir(), card, processAlive);
-    return screenWithProgramStatus(
-      {
-        empty: claudePromptIsEmpty(capture, flags),
-        working: claudeIsWorking(capture),
-        exited: !(await claudeRunsIn(Number(pid), command.trim())),
-        inMode: flags?.inMode ?? false,
-      },
-      status,
-    );
+    const screen = await readPromptScreen(pane.tmux, pane.target);
+    return screenWithProgramStatus(screen, await readCardProgramStatus(programStatusDir(), card, processAlive));
   }
 
   /**
@@ -105,26 +89,7 @@ export class BoardSessions {
   async typeInto(card: SessionCard, text: string, opts: { multiline?: boolean } = {}): Promise<void> {
     const pane = paneOf(card);
     if (!pane) throw new Error('it does not run in tmux');
-    const keepLines = opts.multiline && !text.trimStart().startsWith('/');
-    const { lead, rest } = keepLines ? { lead: '', rest: pastedText(text).replace(/\\$/, '\\ ') } : commandParts(commandLine(text));
-    // A file only this user reads, gone once loaded: tmux reads it, as an argument this long would be too long for it.
-    const dir = await mkdtemp(join(tmpdir(), 'devdesk-send-'));
-    const { load, paste, drop, submit } = pasteArgs(pane.target, pasteBufferName(randomBytes(8).toString('hex')), join(dir, 'text'));
-    try {
-      await writeFile(load.at(-1)!, rest, { mode: 0o600 });
-      await pane.tmux(load);
-      try {
-        if (lead) await pane.tmux(typeArgs(pane.target, lead));
-        await pane.tmux(paste);
-      } catch (err) {
-        await pane.tmux(drop).catch(() => undefined);
-        throw err;
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-    await new Promise((r) => setTimeout(r, pasteSubmitDelayMs(boardPasteSettleMs(), Buffer.byteLength(rest))));
-    await pane.tmux(submit);
+    await typeIntoPane(pane.tmux, pane.target, text, { tmpDir: tmpdir(), settleMs: boardPasteSettleMs(), multiline: opts.multiline });
   }
 
   /** Whether the session has ended (stopped, or its tmux session gone), as the sessions are just refreshed. */
@@ -141,17 +106,6 @@ export class BoardSessions {
     await this.beforeOpen(latest);
     return openSessionCard(this.tree, latest);
   }
-}
-
-/**
- * Whether Claude runs in a pane whose process is `pid` and whose foreground command tmux names `command`: a Claude
- * process under it (tmux names a `claude; exec $SHELL -l` wrapper shell `sh` while Claude runs), else, when the process
- * list cannot be read, a foreground command that is not a shell.
- */
-async function claudeRunsIn(pid: number, command: string): Promise<boolean> {
-  const procs = Number.isInteger(pid) && pid > 0 ? await listProcesses() : undefined;
-  if (procs) return findDescendant(procs, pid, isClaudeCommand) !== undefined;
-  return isClaudeCommand(command) || (command !== '' && !isShellCommand(command));
 }
 
 /** The session's tmux runner and pane target; undefined outside tmux. */

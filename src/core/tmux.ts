@@ -382,6 +382,9 @@ export function pasteBufferName(unique: string): string {
   return `devdesk-send-${unique}`;
 }
 
+/** Default of `devdesk.board.pasteSettleMs`: how long Claude gets to take in a paste before Enter. */
+export const DEFAULT_PASTE_SETTLE_MS = 500;
+
 /** Bytes a paste is given per millisecond to arrive before Enter, on top of the settle delay. */
 export const PASTE_BYTES_PER_MS = 4096;
 

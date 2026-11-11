@@ -54,6 +54,7 @@ import { TicketLinks } from './ticketLinks';
 import { UsagePanel } from './usagePanel';
 import { UsageScopeState } from './usageScopeState';
 import { UsageService } from './usageService';
+import { registerWebAccess } from './webAccess';
 import { WorktreeTaskStore } from './worktreeSessions';
 import { WorktreeChecks } from './worktreeChecks';
 import { WorkerHub } from './workers';
@@ -153,6 +154,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
   board.setTickets(tickets);
   cli.tickets = tickets;
   ctx.subscriptions.push(cli, review, checks, workers, tickets, ...registerCliCommands(cli));
+  const web = registerWebAccess(ctx);
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
@@ -202,7 +204,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review, checks, workers, tickets, globalState, projectState });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review, checks, workers, tickets, globalState, projectState, web });
 }
 
 export function deactivate(): void {}

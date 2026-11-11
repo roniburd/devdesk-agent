@@ -1,5 +1,6 @@
 import type { ChecksProvider } from './checks';
 import type { TicketProvider } from './tickets';
+import type { WebProviderDefaults } from './web/config';
 
 /**
  * A kind of package workspace, beyond plain git repositories: a root holding git packages under `<root>/src/<package>`
@@ -22,4 +23,6 @@ export interface WorkspaceProvider {
   readonly checks?: ChecksProvider;
   /** Issue trackers DevDesk links tickets of, besides the public ones (see `tickets.ts`), asked before them. */
   readonly tickets?: readonly TicketProvider[];
+  /** Web access defaults: the tunnel command used when `devdesk.web.tunnelCommand` is empty, and the identity header its proxy sets. */
+  readonly web?: WebProviderDefaults;
 }

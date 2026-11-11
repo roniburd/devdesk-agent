@@ -19,8 +19,10 @@ import {
   TranscriptEnds,
   splitRecords,
   transcriptEnd,
+  withClaudeProcesses,
 } from '../src/core/sessions';
 import type { TmuxPane } from '../src/core/tmux';
+import { processTable } from './web/fakes';
 import type { Feature } from '../src/core/worktrees';
 
 const ROOT = '/w/orders';
@@ -459,5 +461,23 @@ describe('cardsInScope', () => {
     expect(cards.map((c) => c.featureName)).toEqual(['main', 'main']);
     expect(cardsInScope(cards, [other.dir], [other]).map((c) => c.tmuxPane)).toEqual(['%8']);
     expect(cardsInScope([{ id: 'x', state: 'unknown', detail: '', attached: false }], [ROOT], features)).toEqual([]);
+  });
+});
+
+describe('withClaudeProcesses', () => {
+  const pane = (paneId: string, pid?: number, command = 'zsh'): TmuxPane => ({ session: 'cc-main', paneId, attached: false, command, ...(pid ? { pid } : {}) });
+
+  it('finds Claude under a wrapper shell', () => {
+    const procs = processTable([[10, 1, 'zsh'], [11, 10, 'sh'], [12, 11, 'claude'], [20, 1, 'zsh']]);
+    expect(withClaudeProcesses([pane('%1', 10), pane('%2', 20), pane('%3')], procs)).toEqual([
+      { ...pane('%1', 10), claude: true, claudePid: 12 },
+      { ...pane('%2', 20), claude: false },
+      pane('%3'),
+    ]);
+  });
+
+  it('leaves the panes as they are without a process table', () => {
+    const panes = [pane('%1', 10)];
+    expect(withClaudeProcesses(panes, undefined)).toBe(panes);
   });
 });

@@ -1,24 +1,22 @@
 import { type FSWatcher, watch } from 'node:fs';
 import { mkdir, readFile, realpath, unlink } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { findDescendant, listProcesses } from './core/processes';
+import { listProcesses } from './core/processes';
 import { EndedRecords, endedDir, listableEnded, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
-import { cardsWithProgramStatus, programStatusDirIn, readProgramStatuses } from './core/programStatus';
-import { cardsWithNotes, notesDirIn, readNotes, staleNotes } from './core/devdeskCli';
-import { cardsWithWorkers, readMailboxes, workersDirIn } from './core/workers';
-import { ChildrenReader, runningBackground } from './core/sessionChildren';
-import { claudeTitle, ForkParentReader, MetaReader, parkedJob, readRegistries, readRegistry, type RegistryEntry, registryFor, userNamed } from './core/sessionInfo';
-import { buildSessionCards, cardsInScope, isClaudeCommand, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds } from './core/sessions';
+import { notesDirIn, staleNotes } from './core/devdeskCli';
+import { addSessionChildren, readCardExtras, readClaudeRegistries, sessionCards } from './core/sessionCards';
+import { ChildrenReader } from './core/sessionChildren';
+import { addSessionInfo, ForkParentReader, MetaReader, type RegistryEntry, registryFor } from './core/sessionInfo';
+import { cardsInScope, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds, withClaudeProcesses } from './core/sessions';
 import { STATE_INFO } from './core/sessionStates';
 import { transitionsToWaiting } from './core/sessionsView';
 import { DEFAULT_SERVER, killSessionArgs, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
 import { discoverFeatures, type Feature } from './core/worktrees';
-import { freshInsights, type Insight, withInsight, withInsights } from './core/insights';
+import { freshInsights, type Insight, insightsDir, readInsight, withInsight, withInsights } from './core/insights';
 import { type PendingTurn, withPendingTurns, withRecords } from './core/livePatches';
 import { type TickLoop, tickLoop } from './core/tickLoop';
-import { insightsDir, readInsight } from './insightsWorker';
 import { log, noteLatency, stepTimer, track } from './log';
 
 /** File events within this long of each other cause one refresh. */
@@ -289,27 +287,8 @@ export class SessionsModel implements vscode.Disposable {
   }
 
   /** Names, recaps and start times from Claude Code's own session registry and transcripts. */
-  private async addInfo(cards: SessionCard[], registry: readonly RegistryEntry[]): Promise<void> {
-    await Promise.all(
-      cards.map(async (card) => {
-        const own = card.sessionId || card.pid !== undefined ? registryFor(registry, card.sessionId, card.pid) : undefined;
-        // Attached to a background job: its conversation (name, recap) is what the terminal shows.
-        const job = parkedJob(registry, own);
-        const entry = job ?? own;
-        const transcript = job && card.transcriptPath ? join(dirname(card.transcriptPath), `${job.sessionId}.jsonl`) : card.transcriptPath;
-        const meta = transcript ? await this.metaReader.read(transcript) : undefined;
-        const name = claudeTitle(entry, meta);
-        if (name) card.name = name;
-        if (userNamed(entry, meta)) card.nameByUser = true;
-        if (meta?.summary) {
-          card.summary = meta.summary;
-          if (meta.summaryAt !== undefined) card.summaryAt = meta.summaryAt;
-        }
-        const startedAt = entry?.startedAt ?? meta?.startedAt;
-        if (startedAt !== undefined) card.startedAt = startedAt;
-      }),
-    );
-    this.metaReader.prune();
+  private addInfo(cards: SessionCard[], registry: readonly RegistryEntry[]): Promise<void> {
+    return addSessionInfo(cards, registry, this.metaReader);
   }
 
   /**
@@ -376,21 +355,8 @@ export class SessionsModel implements vscode.Disposable {
    * and marks every live session that still runs something in the background (`runsInBackground`), which shows as
    * waiting on background work either way.
    */
-  private async addChildren(cards: SessionCard[]): Promise<void> {
-    const shown = this.o.finishedChildren();
-    const finishedLimit = shown ?? 0;
-    await Promise.all(
-      cards.map(async (card) => {
-        if (!card.transcriptPath) return;
-        const live = card.pid !== undefined && STATE_INFO[card.state].live && processAlive(card.pid);
-        // Nothing to list, nor anything that can still run.
-        if (shown === undefined && !live) return;
-        const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live, since: card.sessionStartedAt, roster: card.subagents });
-        if (shown !== undefined && children.length) card.children = children;
-        if (live && runningBackground(children)) card.runsInBackground = true;
-      }),
-    );
-    this.childrenReader.prune();
+  private addChildren(cards: SessionCard[]): Promise<void> {
+    return addSessionChildren(cards, this.childrenReader, this.o.finishedChildren(), processAlive);
   }
 
   /** The workspace root as configured and with symlinks resolved (a session's cwd is the real path); none without a folder. */
@@ -552,29 +518,22 @@ export class SessionsModel implements vscode.Disposable {
       // Showing everything also covers your own (default) tmux server.
       if (showAll && server !== DEFAULT_SERVER) listing.push(listPanes(this.o.tmux(DEFAULT_SERVER), DEFAULT_SERVER));
       const registryDir = this.o.claudeSessionsDir();
-      const [paneLists, records, ended, procs, registry, statuses, notes, mailboxes] = await Promise.all([
+      const [paneLists, records, ended, procs, registry, extras] = await Promise.all([
         Promise.all(listing),
         readHookRecords(dir, this.transcriptEnds),
         this.endedRecords.read(endedDir(dir)),
         listProcesses(),
-        !registryDir ? Promise.resolve([]) : typeof registryDir === 'string' ? readRegistry(registryDir) : readRegistries(registryDir),
+        readClaudeRegistries(registryDir),
         // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without
-        // hooks, and for hooked ones where the hooks lag or went quiet (statusMerge.ts).
-        readProgramStatuses(programStatusDirIn(dir), processAlive),
-        // Notes Claude set on its cards (`devdesk note`), by pane.
-        readNotes(notesDirIn(dir)),
-        // Coordinator and worker sessions (`devdesk worker`): which card works for which.
-        readMailboxes(workersDirIn(dir)),
+        // hooks, and for hooked ones where the hooks lag or went quiet (statusMerge.ts); the notes Claude set on its
+        // cards (`devdesk note`); coordinator and worker sessions (`devdesk worker`).
+        readCardExtras(dir, processAlive),
       ]);
+      const { notes } = extras;
       steps.mark('list');
       const tmuxPanes = paneLists.flat();
       // tmux names the foreground process group leader, so `claude; exec $SHELL` shows as a shell: look at the tree.
-      const panes = procs
-        ? tmuxPanes.map((p) => {
-            const claudePid = p.pid ? findDescendant(procs, p.pid, isClaudeCommand) : undefined;
-            return p.pid ? { ...p, claude: claudePid !== undefined, ...(claudePid !== undefined ? { claudePid } : {}) } : p;
-          })
-        : tmuxPanes;
+      const panes = withClaudeProcesses(tmuxPanes, procs);
       if (generation !== this.generation) return; // stopped or restarted mid-refresh; discard stale result
       steps.mark('processes');
       const features = await this.featuresFor(sessionsOf(panes.filter((p) => serverOf(p) === server)), generation);
@@ -585,16 +544,18 @@ export class SessionsModel implements vscode.Disposable {
       steps.mark('forks');
       const split = splitRecords(records, panes, processAlive);
       const { listed, stale } = listableEnded(ended.records, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])), ended.exists);
-      const all = cardsWithWorkers(
-        cardsWithNotes(
-          cardsWithProgramStatus(buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed), statuses, {
-            now: Date.now(),
-            quietMs: this.o.hooksQuietMs(),
-          }),
-          notes,
-        ),
-        mailboxes,
-      );
+      const all = sessionCards({
+        ...extras,
+        panes,
+        records,
+        features,
+        alive: processAlive,
+        onlyServer: showAll ? undefined : server,
+        forkParents,
+        ended: listed,
+        now: Date.now(),
+        quietMs: this.o.hooksQuietMs(),
+      });
       // The dead record that shows a crash is deleted below: keep the mark while the session stays stopped.
       for (const c of all) if (c.state === 'stopped' && this.crashed.has(c.id)) c.crashed = true;
       this.crashed = new Set(all.filter((c) => c.crashed).map((c) => c.id));
