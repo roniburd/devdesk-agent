@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -1770,7 +1770,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts, with `{port}` and `{user}` filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
+            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts, with `{port}`, `{user}` and `{host}` (this machine's short host name) filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
             "order": 6
           },
           "devdesk.web.pollMs": {

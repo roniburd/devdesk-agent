@@ -1,5 +1,5 @@
 import { mkdir, readFile } from 'node:fs/promises';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { listProcesses } from '../core/processes';
 import { processAlive } from '../core/sessions';
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   let tunnel: { pid?: number; stop(): void } | undefined;
   const startTunnel = () => {
     if (!config.tunnelCommand) return;
-    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user });
+    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user, host: hostname() });
     const run = runTunnel(command, {
       onUrl: (url) => {
         if (tunnel !== run) return;
