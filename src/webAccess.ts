@@ -11,9 +11,11 @@ import { processAlive } from './core/sessions';
 import { execText } from './core/shellRun';
 import { type DaemonConfig, parseDaemonConfig } from './core/web/config';
 import { isDaemonCommand, launchFailure, statusBarText, type WebMenuId, webMenuChoices } from './core/web/launch';
+import { daemonScript, type WebPanelRow } from './core/web/panel';
 import { qrMatrix, qrSvg } from './core/web/qr';
 import { parseWebState, webConfigPath, webDir, webLogPath, webStatePath, type WebState, type WebStatus, webStatus } from './core/web/webState';
 import { log } from './log';
+import { registerWebAccessView } from './webAccessView';
 
 /**
  * Web access (commands `devdesk.web.start`, `stop`, `menu`): runs the daemon (`dist/web.js`) detached, so the phone page
@@ -52,6 +54,9 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 
 export class WebAccess implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem('devdesk.web.status', vscode.StatusBarAlignment.Left, 49);
+  private readonly changed = new vscode.EventEmitter<WebStatus>();
+  /** Fires after each refresh, with the state read (the Web Access view redraws on it). */
+  readonly onDidRefresh = this.changed.event;
   private readonly disposables: vscode.Disposable[] = [];
   private watcher: FSWatcher | undefined;
   private watchedDir: string | undefined;
@@ -59,15 +64,18 @@ export class WebAccess implements vscode.Disposable {
   private refreshing: Promise<WebStatus> | undefined;
   private changeTimer: NodeJS.Timeout | undefined;
   private qrPanel: vscode.WebviewPanel | undefined;
+  /** The Web Access view, once registered. */
+  panel: { rows: () => WebPanelRow[]; view: vscode.TreeView<WebPanelRow>; drawn: () => Promise<void> } | undefined;
   /** Start, Stop and setting-change restarts run one at a time. */
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly script: string) {
+  constructor(readonly script: string) {
     this.item.name = 'DevDesk Web Access';
     this.item.command = 'devdesk.web.menu';
     const timer = setInterval(() => void this.refresh(), CHECK_MS);
     this.disposables.push(
       this.item,
+      this.changed,
       { dispose: () => clearInterval(timer) },
       { dispose: () => this.unwatch() },
       { dispose: () => this.changeTimer && clearTimeout(this.changeTimer) },
@@ -108,6 +116,7 @@ export class WebAccess implements vscode.Disposable {
     this.watchDir(dir);
     const status = await this.status(dir);
     this.current = status;
+    this.changed.fire(status);
     const text = statusBarText(status);
     if (!text || status.kind === 'off') {
       this.item.hide();
@@ -203,6 +212,68 @@ export class WebAccess implements vscode.Disposable {
     });
   }
 
+  /**
+   * Restart Web Access: stops the daemon and starts it again from this extension's `dist/web.js` and the current settings
+   * (so a daemon an older version started serves this version's page). Off: starts it.
+   */
+  restart(): Promise<void> {
+    return this.serial(async () => {
+      const config = webAccessConfig();
+      await mkdir(config.webDir, { recursive: true, mode: 0o700 });
+      await this.hostWide(config.webDir, async () => {
+        const status = await this.status(config.webDir);
+        if (status.kind !== 'off') {
+          log.info(`web access: restarting the daemon (pid ${status.state.pid})`);
+          await this.stopDaemon(status.state, config.webDir);
+        }
+        await rm(webStatePath(config.webDir), { force: true });
+        await this.launch(config);
+      });
+    });
+  }
+
+  /** What the Web Access view shows beyond `web.json`: the running daemon's script and settings. */
+  async details(status: WebStatus): Promise<{ running?: { script: string; version?: string }; settings?: DaemonConfig }> {
+    if (status.kind === 'off') return {};
+    const command = await execText('ps', ['-o', 'command=', '-p', String(status.state.pid)], { timeoutMs: 5000 }).catch(() => '');
+    const parsed = await readFile(status.state.configPath, 'utf8')
+      .then((t) => parseDaemonConfig(JSON.parse(t)))
+      .catch(() => undefined);
+    return { running: daemonScript(command.trim()), settings: parsed && 'config' in parsed ? parsed.config : undefined };
+  }
+
+  /** The daemon's log file in this window's state folder. */
+  logPath(): string {
+    return webLogPath(webDir(sessionsStateDir()));
+  }
+
+  /** Copies the tunnel URL. */
+  async copyUrl(): Promise<void> {
+    const status = await this.refresh();
+    if (status.kind !== 'off' && status.state.url) await vscode.env.clipboard.writeText(status.state.url);
+  }
+
+  /** Copies the loopback URL. */
+  async copyLocal(): Promise<void> {
+    const status = await this.refresh();
+    if (status.kind !== 'off') await vscode.env.clipboard.writeText(`http://${status.state.host}:${status.state.port}/`);
+  }
+
+  /** Opens the tunnel URL in the browser. */
+  async openUrl(): Promise<void> {
+    const status = await this.refresh();
+    if (status.kind !== 'off' && status.state.url) await vscode.env.openExternal(vscode.Uri.parse(status.state.url));
+  }
+
+  /** Shows the tunnel URL's QR code. */
+  async qr(): Promise<void> {
+    const status = await this.refresh();
+    const url = status.kind === 'off' ? undefined : status.state.url;
+    if (!url) return;
+    if (fitsQr(url)) this.showQr(url);
+    else void vscode.window.showWarningMessage('The web access URL is too long for a QR code.');
+  }
+
   /** Restarts the running daemon's tunnel (SIGUSR1). */
   restartTunnel(): Promise<void> {
     return this.serial(async () => {
@@ -230,6 +301,7 @@ export class WebAccess implements vscode.Disposable {
       qr: () => url && this.showQr(url),
       copyLocal: () => vscode.env.clipboard.writeText(local),
       restart: () => this.restartTunnel(),
+      restartAll: () => this.restart(),
       stop: () => this.stop(),
       settings: () => openSettings('devdesk.web'),
     };
@@ -374,7 +446,14 @@ export function registerWebAccess(ctx: vscode.ExtensionContext): WebAccess {
     vscode.commands.registerCommand('devdesk.web.stop', () => web.stop()),
     vscode.commands.registerCommand('devdesk.web.menu', () => web.menu()),
     vscode.commands.registerCommand('devdesk.web.restartTunnel', () => web.restartTunnel()),
+    vscode.commands.registerCommand('devdesk.web.restart', () => web.restart()),
+    vscode.commands.registerCommand('devdesk.web.copyUrl', () => web.copyUrl()),
+    vscode.commands.registerCommand('devdesk.web.copyLocalUrl', () => web.copyLocal()),
+    vscode.commands.registerCommand('devdesk.web.openUrl', () => web.openUrl()),
+    vscode.commands.registerCommand('devdesk.web.showQr', () => web.qr()),
+    vscode.commands.registerCommand('devdesk.web.openLog', () => vscode.window.showTextDocument(vscode.Uri.file(web.logPath()))),
     vscode.commands.registerCommand('devdesk.web.openSettings', () => openSettings('devdesk.web')),
   );
+  web.panel = registerWebAccessView(ctx, web);
   return web;
 }
