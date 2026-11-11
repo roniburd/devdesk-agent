@@ -62,7 +62,12 @@ async function board({
   win.eval(webviewScript('board'));
   const prompt = win.document.getElementById('prompt') as HTMLTextAreaElement;
   const popup = win.document.getElementById('popup')!;
-  const settle = () => new Promise((r) => setTimeout(r, 20));
+  // 20 ms, then a few zero-delay rounds: what the webview does next takes a short chain of timers (its query, this test's
+  // answer, the message), and on a loaded machine the 20 ms timer can come due before the chain's later links.
+  const settle = async () => {
+    await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  };
 
   /** Types `text` at the caret, as the browser does (one input event). */
   async function type(text: string) {

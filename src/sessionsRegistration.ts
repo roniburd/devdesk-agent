@@ -10,6 +10,7 @@ import type { InsightsWorker } from './insightsWorker';
 import { registerLeftArrow } from './leftArrow';
 import { registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
+import { registerSmoothScroll } from './smoothScroll';
 import {
   cardOf,
   cardsOf,
@@ -191,6 +192,7 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     registerTimedCommand('devdesk.sessions.nextWaiting', () => openNextWaiting(sessionsTree)),
     registerTimedCommand('devdesk.sessions.openChild', (file: unknown) => openChildFile(file)),
     ...registerLeftArrow(sessionsTree),
+    ...registerSmoothScroll(),
     ...registerTerminalRestore(parts.projectState, terminalTitles(sessions)),
     registerTimedCommand('devdesk.sessions.openSettings', () => openSettings('devdesk.sessions')),
     registerTimedCommand('devdesk.sessions.installTmux', installTmux),
