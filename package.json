@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.14",
+  "version": "2.1.0-prototype.15",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -61,6 +61,13 @@
           "id": "devdesk.features",
           "name": "Worktrees",
           "icon": "media/worktrees.svg",
+          "when": "devdesk.inWorkspace"
+        },
+        {
+          "id": "devdesk.web",
+          "name": "Web Access",
+          "icon": "$(device-mobile)",
+          "visibility": "collapsed",
           "when": "devdesk.inWorkspace"
         }
       ]
@@ -493,12 +500,14 @@
       {
         "command": "devdesk.web.start",
         "title": "Start Web Access",
-        "category": "DevDesk"
+        "category": "DevDesk",
+        "icon": "$(play)"
       },
       {
         "command": "devdesk.web.stop",
         "title": "Stop Web Access",
-        "category": "DevDesk"
+        "category": "DevDesk",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "devdesk.web.menu",
@@ -508,17 +517,74 @@
       {
         "command": "devdesk.web.restartTunnel",
         "title": "Restart Web Access Tunnel",
-        "category": "DevDesk"
+        "category": "DevDesk",
+        "icon": "$(debug-restart)"
       },
       {
         "command": "devdesk.web.openSettings",
         "title": "Web Access Settings",
         "category": "DevDesk",
         "icon": "$(gear)"
+      },
+      {
+        "command": "devdesk.web.restart",
+        "title": "Restart Web Access",
+        "category": "DevDesk",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "devdesk.web.copyUrl",
+        "title": "Copy Web Access URL",
+        "category": "DevDesk",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "devdesk.web.copyLocalUrl",
+        "title": "Copy Web Access Loopback URL",
+        "category": "DevDesk",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "devdesk.web.openUrl",
+        "title": "Open Web Access URL",
+        "category": "DevDesk",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "devdesk.web.showQr",
+        "title": "Show Web Access QR Code",
+        "category": "DevDesk",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "devdesk.web.openLog",
+        "title": "Open Web Access Log",
+        "category": "DevDesk",
+        "icon": "$(output)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "devdesk.web.start",
+          "when": "view == devdesk.web && !devdesk.web.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devdesk.web.restart",
+          "when": "view == devdesk.web && devdesk.web.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "devdesk.web.stop",
+          "when": "view == devdesk.web && devdesk.web.running",
+          "group": "navigation@2"
+        },
+        {
+          "command": "devdesk.web.openSettings",
+          "when": "view == devdesk.web",
+          "group": "navigation@9"
+        },
         {
           "command": "devdesk.sessions.new",
           "when": "view == devdesk.sessions",
@@ -586,6 +652,26 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "devdesk.web.copyUrl",
+          "when": "view == devdesk.web && viewItem == webUrl",
+          "group": "inline@1"
+        },
+        {
+          "command": "devdesk.web.openUrl",
+          "when": "view == devdesk.web && viewItem == webUrl",
+          "group": "inline@2"
+        },
+        {
+          "command": "devdesk.web.showQr",
+          "when": "view == devdesk.web && viewItem == webUrl",
+          "group": "inline@3"
+        },
+        {
+          "command": "devdesk.web.restartTunnel",
+          "when": "view == devdesk.web && viewItem == webTunnel",
+          "group": "inline@1"
+        },
         {
           "command": "devdesk.sessions.newInWorktree",
           "when": "view == devdesk.sessions && viewItem =~ /\\blaunchable\\b/",

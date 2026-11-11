@@ -99,6 +99,15 @@ export function testApi(
     /** Web access's daemon state (read again from `web.json`), and its status bar item. */
     webStatus: () => web.refresh(),
     webStatusBar: () => web.statusBar,
+    /** The Web Access view's rows, after revealing it (it draws only while visible). */
+    webPanelRows: async () => {
+      await vscode.commands.executeCommand('devdesk.web.focus');
+      await web.refresh();
+      for (let i = 0; i < 50 && !web.panel?.view.visible; i++) await new Promise((r) => setTimeout(r, 100));
+      await web.refresh();
+      await web.panel?.drawn();
+      return web.panel?.rows() ?? [];
+    },
     /** A Claude view session row's decoration (read state and color), with its theme color's id. */
     sessionDecoration: (id: string) => {
       const d = sessionsTree.provideFileDecoration(vscode.Uri.from({ scheme: 'devdesk-session', path: `/${id}` }));

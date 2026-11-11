@@ -54,9 +54,9 @@ describe('webMenuChoices', () => {
     expect(ids({ kind: 'off' })).toEqual(['start', 'settings']);
   });
   it('offers the URL actions only with a tunnel URL', () => {
-    expect(ids({ kind: 'on', state: state({ tunnel: 'up', url: 'https://x.example/' }) })).toEqual(['copy', 'open', 'qr', 'copyLocal', 'restart', 'stop', 'settings']);
-    expect(ids({ kind: 'on', state: state() })).toEqual(['copyLocal', 'stop', 'settings']);
-    expect(ids({ kind: 'tunnel-down', state: state({ tunnel: 'down', tunnelError: 'boom' }) })).toEqual(['copyLocal', 'restart', 'stop', 'settings']);
+    expect(ids({ kind: 'on', state: state({ tunnel: 'up', url: 'https://x.example/' }) })).toEqual(['copy', 'open', 'qr', 'copyLocal', 'restart', 'restartAll', 'stop', 'settings']);
+    expect(ids({ kind: 'on', state: state() })).toEqual(['copyLocal', 'restartAll', 'stop', 'settings']);
+    expect(ids({ kind: 'tunnel-down', state: state({ tunnel: 'down', tunnelError: 'boom' }) })).toEqual(['copyLocal', 'restart', 'restartAll', 'stop', 'settings']);
   });
   it('leaves out the QR code when it cannot be drawn', () => {
     expect(ids({ kind: 'on', state: state({ tunnel: 'up', url: 'https://x.example/' }) }, false)).not.toContain('qr');

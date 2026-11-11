@@ -31,7 +31,7 @@ export function statusBarText(status: WebStatus): string | undefined {
   return status.kind === 'tunnel-down' ? '$(warning) Web: tunnel down' : '$(broadcast) Web: on';
 }
 
-export type WebMenuId = 'start' | 'copy' | 'open' | 'qr' | 'copyLocal' | 'restart' | 'stop' | 'settings';
+export type WebMenuId = 'start' | 'copy' | 'open' | 'qr' | 'copyLocal' | 'restart' | 'restartAll' | 'stop' | 'settings';
 export interface WebMenuChoice {
   id: WebMenuId;
   label: string;
@@ -53,6 +53,6 @@ export function webMenuChoices(status: WebStatus, qr: boolean): WebMenuChoice[] 
   if (s.tunnel !== 'none') {
     out.push({ id: 'restart', label: '$(debug-restart) Restart Tunnel', ...(s.tunnel === 'down' && s.tunnelError ? { description: s.tunnelError } : {}) });
   }
-  out.push({ id: 'stop', label: '$(debug-stop) Stop Web Access' }, settings);
+  out.push({ id: 'restartAll', label: '$(refresh) Restart Web Access' }, { id: 'stop', label: '$(debug-stop) Stop Web Access' }, settings);
   return out;
 }

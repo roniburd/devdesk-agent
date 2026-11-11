@@ -1376,8 +1376,16 @@ It can't show the Claude Board or diffs, make worktrees, resume parked sessions,
    - **Copy URL**, **Open URL** and **Show QR Code**: the URL the tunnel printed, for your phone.
    - **Copy Loopback URL**: `http://127.0.0.1:7691/`.
    - **Restart Tunnel**: runs the tunnel command again. **Start Web Access** does the same while the daemon runs.
+   - **Restart Web Access**: stops the daemon and starts it again, with the current settings and this version's page.
    - **Stop Web Access**: stops the daemon and its tunnel. **DevDesk: Stop Web Access** does the same.
    - **Settings**.
+3. The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off:
+   - whether it runs, since when, and its process; **Started by version 1.6.0** when a daemon an older version started is still running (an update doesn't restart it, so the phone still gets the old page: click the row to restart it);
+   - the **Phone URL** (click to copy; its buttons open it or show its QR code), the **Tunnel** (click to restart it), the **Loopback URL**;
+   - **Access**: who may open the page (`devdesk.web.allowedUsers` and the header it is read from), or *no identity check* with `loopback`;
+   - the **Log** (`daemon.log`).
+
+   Its title bar has **Start** (or **Restart**), **Stop** and the settings gear.
 
 The daemon lists the sessions of the window that started it, as its Claude view does (`devdesk.sessions.scope`, `devdesk.sessions.show`). Changing a `devdesk.web`, `devdesk.sessions` or `devdesk.claude` setting (the Claude accounts) restarts it with the new values. It starts new sessions in the default launch mode and Claude account, as **New Claude Session** does. Its files are in `~/.claude/devdesk/state/web-v2/` (under `devdesk.sessions.stateDir`): `web.json` (its pid, port and URL), `config.json` (the settings it runs with) and `daemon.log`.
 
