@@ -2,7 +2,8 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type ActionDeps, pressKey, sendText, sessionDetail, startSession } from '../../src/core/web/actions';
+import { type ActionDeps, detailTurns, pressKey, sendText, sessionDetail, startSession } from '../../src/core/web/actions';
+import { DETAIL_MAX_TAIL_BYTES } from '../../src/core/web/transcript';
 import type { DaemonConfig } from '../../src/core/web/config';
 import type { SessionCard } from '../../src/core/sessions';
 import type { Feature } from '../../src/core/worktrees';
@@ -267,6 +268,26 @@ describe('sessionDetail', () => {
   it('is ended when Claude exited', async () => {
     const d = deps(fakeTmux(), { listProcesses: async () => processTable([[100, 1, 'zsh']]) });
     expect(await sessionDetail(card(), o, d)).toMatchObject({ status: 200, body: { ended: true } });
+  });
+
+  it('reads further back when tool output leaves too few messages at the end, up to a limit', async () => {
+    const transcript = join(tmp, 'big.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'take a screenshot' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Taking it.' }] } }),
+      // A screenshot's result, longer than the first read: without reading further back, nothing is said.
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x'.repeat(300_000) }] } }),
+    ];
+    await writeFile(transcript, lines.join('\n'));
+    expect(await detailTurns(transcript)).toEqual([
+      { kind: 'user', text: 'take a screenshot' },
+      { kind: 'assistant', text: 'Taking it.' },
+    ]);
+    // Past DETAIL_MAX_TAIL_BYTES of tool output, it stops looking.
+    const huge = join(tmp, 'huge.jsonl');
+    const result = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'y'.repeat(DETAIL_MAX_TAIL_BYTES) }] } });
+    await writeFile(huge, [lines[0], result].join('\n'));
+    expect(await detailTurns(huge)).toEqual([]);
   });
 
   it('has no turns without a transcript', async () => {

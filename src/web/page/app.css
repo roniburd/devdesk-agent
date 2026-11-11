@@ -302,19 +302,43 @@ button, input, textarea { font: inherit; color: inherit; }
 .panel { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
 .turns { list-style: none; margin: 0; padding: 4px var(--pad) 16px; display: flex; flex-direction: column; gap: 14px; }
-.turn { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
-.turn-user {
-  align-self: flex-end;
-  max-width: 88%;
-  padding: 10px 14px;
-  border-radius: 16px 16px 4px 16px;
-  background: var(--primary);
-  color: var(--primary-ink);
-}
+/* Each prompt and reply: its speaker's mark (`>` you, `⏺` Claude, as in Claude Code's terminal) in a column of its own. */
+.turn { display: grid; grid-template-columns: 1.25em minmax(0, 1fr); column-gap: 6px; overflow-wrap: anywhere; }
+.turn-mark { font: 600 15px/1.5 var(--mono); text-align: center; }
+.turn-body { min-width: 0; line-height: 1.5; }
+.turn-user { padding: 8px 12px 8px 6px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line); }
+.turn-user .turn-mark { color: var(--muted); }
+.turn-user .turn-body { white-space: pre-wrap; }
 .turn-assistant { font-size: 16px; }
-.turn-tool { font: 13px/1.4 var(--mono); color: var(--muted); padding-left: 10px; border-left: 2px solid var(--line); }
-.turn-tool + .turn-tool { margin-top: -10px; }
-.turn-none { color: var(--muted); }
+.turn-assistant .turn-mark { color: var(--orange); font-size: 12px; line-height: 2; }
+.turn-tool { display: block; margin: -6px 0; padding-left: calc(1.25em + 6px); font-size: 13px; color: var(--muted); }
+.turn-tool summary { cursor: pointer; padding: 4px 0; list-style-position: inside; }
+.tool-calls { margin: 2px 0 4px; padding-left: 14px; border-left: 2px solid var(--line); list-style: none; font: 12px/1.45 var(--mono); }
+.turn-none { display: block; color: var(--muted); }
+
+/* A reply's Markdown. Headings stay small: they title a part of one reply, not the page. */
+.turn-body > :first-child { margin-top: 0; }
+.turn-body > :last-child { margin-bottom: 0; }
+.md-p, .md-list, .md-quote, .md-code, .md-table-wrap { margin: 0 0 10px; }
+.md-h { margin: 14px 0 6px; font-weight: 700; }
+.md-h1, .md-h2 { font-size: 17px; }
+.md-h3, .md-h4, .md-h5, .md-h6 { font-size: 16px; }
+.md-list { padding-left: 1.3em; }
+.md-list li + li { margin-top: 3px; }
+.md-list .md-list { margin: 3px 0 0; }
+.md-quote { padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
+.md-rule { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md-inline-code { font: 0.88em var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--raised); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.md-code { padding: 10px 12px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line); overflow-x: auto; font: 12.5px/1.45 var(--mono); white-space: pre; }
+.md-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 8px; }
+.md-table { border-collapse: collapse; font-size: 14px; line-height: 1.4; min-width: 100%; }
+.md-table th, .md-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: normal; min-width: 4em; max-width: 22em; }
+.md-table th { background: var(--raised); font-weight: 600; white-space: nowrap; }
+.md-table tr:last-child td { border-bottom: 0; }
+.md-table th + th, .md-table td + td { border-left: 1px solid var(--line); }
+.md-table .md-right { text-align: right; }
+.md-table .md-center { text-align: center; }
+.turn-body a { color: var(--blue); }
 
 .screen { margin: 0 var(--pad) 12px; border-radius: 12px; background: var(--screen-bg); }
 /* The pane is wider than a phone: its lines wrap to the window (spacing kept), and a rule line is clipped instead. */

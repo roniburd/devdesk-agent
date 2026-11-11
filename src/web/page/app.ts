@@ -1,6 +1,6 @@
 // The web access page: the session list, a session's transcript and screen with a reply box or dialog keys, and New.
 // Hash routes `#/`, `#/s/<id>`, `#/new`. It talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
-// All data goes in as text (dom.ts, screen.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
+// All data goes in as text (dom.ts, screen.ts, markdown.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
 import type {
   CardsResponse,
   FoldersResponse,
@@ -10,7 +10,6 @@ import type {
   OkResponse,
   SendRequest,
   SessionDetail,
-  Turn,
   WebCard,
   WebFolder,
   WebGroup,
@@ -18,6 +17,7 @@ import type {
 } from '../../core/web/types';
 import { api } from './api';
 import { h, sentenceCase, sessionHref } from './dom';
+import { turnEls } from './turns';
 import { renderScreen } from './screen';
 
 /** Stream errors in a row before the list falls back to polling `api/sessions`. */
@@ -217,9 +217,6 @@ const KEYS: ReadonlyArray<{ key: WebKey; text: string; label: string; wide?: boo
   { key: 'Enter', text: 'Enter', label: 'Enter', wide: true },
 ];
 
-function turnEl(t: Turn): HTMLElement {
-  return h('li', { class: `turn turn-${t.kind}`, text: t.text, attrs: { 'data-kind': t.kind } });
-}
 
 function sessionView(id: string): View {
   let card: WebCard | undefined = feed.cards?.find((c) => c.id === id);
@@ -348,7 +345,7 @@ function sessionView(id: string): View {
     if (tk !== turnsKey) {
       const stick = turnsKey === '' || nearEnd(panels.transcript);
       turnsKey = tk;
-      turns.replaceChildren(...(d.turns.length ? d.turns.map(turnEl) : [h('li', { class: 'turn turn-none', text: 'Nothing said yet.' })]));
+      turns.replaceChildren(...(d.turns.length ? turnEls(d.turns) : [h('li', { class: 'turn turn-none', text: 'Nothing said yet.' })]));
       if (stick) scrollToEnd(panels.transcript);
     }
     const sk = JSON.stringify(d.screen);
