@@ -50,6 +50,14 @@ describe('parkable', () => {
 });
 
 describe('parkPlan', () => {
+  it('never parks a held session (a window is reattaching its terminal), by any rule', () => {
+    const cards = [own('old'), own('held'), own('a', { updatedAt: NOW - 40 * MIN }), own('b', { updatedAt: NOW - 50 * MIN })];
+    const held = (c: SessionCard) => c.id === 'held';
+    const plan = parkPlan(cards, NOW, { ...POLICY, maxLive: 1, lowMemory: true }, 'devdesk', allRead, held).map((p) => p.card.id);
+    expect(plan).not.toContain('held');
+    expect(plan).toContain('old');
+  });
+
   it('parks by age past parkAfterDays, and turns everything off at 0', () => {
     const cards = [own('old'), own('recent', { updatedAt: NOW - DAY })];
     expect(ids(cards)).toEqual(['old:inactive']);
