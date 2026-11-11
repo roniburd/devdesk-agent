@@ -65,7 +65,7 @@ export class TranscriptScan extends LineScan {
   protected line(line: string): void {
     const o = parseObject(line);
     if (!o) return;
-    const message = o.message as { content?: unknown } | undefined;
+    const message = o.message as { content?: unknown; stop_reason?: unknown } | undefined;
     const content = message?.content;
     const at = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : undefined;
     if (o.type === 'assistant') {
@@ -75,8 +75,9 @@ export class TranscriptScan extends LineScan {
         calls = true;
         this.launch(c as ToolUse, Number.isFinite(at) ? at : undefined);
       }
-      // Claude Code writes one content block per line: a reply after the last tool call means the agent finished.
-      if (calls) this.finished = false;
+      // Claude Code writes one content block per line: a reply after the last tool call means the agent finished, unless
+      // its message stopped for a tool call (whose line comes once streamed, often many seconds later).
+      if (calls || message?.stop_reason === 'tool_use') this.finished = false;
       else if (Array.isArray(content) && content.some((c) => c?.type === 'text')) this.finished = true;
       return;
     }

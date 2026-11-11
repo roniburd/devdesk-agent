@@ -209,6 +209,17 @@ describe('TranscriptScan', () => {
     s.feed(line({ type: 'attachment', attachment: { type: 'hook_success', hookEvent: 'SubagentStop' } }));
     expect(s.finished).toBe(true);
   });
+
+  it('does not take a reply that goes on to a tool call for the end of the agent', () => {
+    const s = new TranscriptScan();
+    // Claude Code writes each content block on its own line: the text, then (once streamed) the tool call.
+    s.feed(line({ type: 'assistant', message: { id: 'm1', stop_reason: 'tool_use', content: [{ type: 'text', text: 'Running the tests' }] } }));
+    expect(s.finished).toBe(false);
+    s.feed(use('t1', 'Bash', { command: 'npm test' }));
+    expect(s.finished).toBe(false);
+    s.feed(result('t1', {}) + line({ type: 'assistant', message: { id: 'm2', stop_reason: 'end_turn', content: [{ type: 'text', text: 'All done' }] } }));
+    expect(s.finished).toBe(true);
+  });
 });
 
 describe('ChildrenReader', () => {
