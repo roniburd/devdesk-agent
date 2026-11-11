@@ -234,7 +234,18 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 
 .glyph { display: inline-block; color: var(--tone); font-size: 20px; line-height: 24px; text-align: center; }
-.glyph.spin { animation: spin 1.6s linear infinite; }
+/* Working: a thin ring with one bright arc, centred where the text glyph would sit. */
+.glyph.spin {
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: 5px auto;
+  border: 2px solid var(--line);
+  border-top-color: var(--tone);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.state .glyph.spin { width: 11px; height: 11px; margin: 0; border-width: 1.5px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .glyph.spin { animation: none; } }
 

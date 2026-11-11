@@ -137,11 +137,18 @@ function showLink(badge: HTMLElement): void {
   badge.textContent = LINK_TEXT[feed.link];
 }
 
+/** The state's glyph; a working state gets a small ring spinner (app.css) instead of a rotating text glyph. */
+function stateGlyph(c: WebCard): HTMLElement {
+  return c.spin
+    ? h('span', { class: 'glyph spin', attrs: { 'aria-hidden': 'true' } })
+    : h('span', { class: 'glyph', text: c.glyph, attrs: { 'aria-hidden': 'true' } });
+}
+
 function cardRow(c: WebCard): HTMLElement {
   return h(
     'a',
     { class: `card tone-${c.tone}`, attrs: { href: sessionHref(c.id) } },
-    h('span', { class: c.spin ? 'glyph spin' : 'glyph', text: c.glyph, attrs: { 'aria-hidden': 'true' } }),
+    stateGlyph(c),
     h(
       'span',
       { class: 'body' },
@@ -329,7 +336,7 @@ function sessionView(id: string): View {
     card = c;
     title.textContent = c.title;
     state.className = `state tone-${c.tone}`;
-    state.replaceChildren(h('span', { class: c.spin ? 'glyph spin' : 'glyph', text: c.glyph, attrs: { 'aria-hidden': 'true' } }), sentenceCase(c.label));
+    state.replaceChildren(stateGlyph(c), sentenceCase(c.label));
   }
 
   function nearEnd(box: HTMLElement): boolean {
