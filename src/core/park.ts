@@ -55,7 +55,7 @@ const live = (c: SessionCard, server: string) => ownSession(c, server) && STATE_
  * 1. by age: past `readMs` if read and finished, else past `anyMs`;
  * 2. over `maxLive` running sessions, the least recently active idle ones, those that need the user last;
  * 3. on low memory, one more of those.
- * `read` says whether the user has read what a session shows.
+ * `read` says whether the user has read what a session shows; `held` ones are never parked (`RestoreHold`).
  */
 export function parkPlan(
   cards: readonly SessionCard[],
@@ -63,9 +63,10 @@ export function parkPlan(
   policy: ParkPolicy,
   server: string,
   read: (c: SessionCard) => boolean,
+  held: (c: SessionCard) => boolean = () => false,
 ): ParkPick[] {
   if (!(policy.anyMs > 0)) return [];
-  const candidates = cards.filter((c) => parkable(c, server));
+  const candidates = cards.filter((c) => parkable(c, server) && !held(c));
   const age = (c: SessionCard) => now - (c.updatedAt ?? now);
   const picks: ParkPick[] = [];
   const rest: SessionCard[] = [];

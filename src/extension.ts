@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import * as vscode from 'vscode';
+import { restoreHold } from './claudeSessions';
 import { refreshHookScript } from './core/hooks';
 import { cardView } from './core/sessionsView';
 import {
@@ -81,6 +82,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     parkPolicy: sessionsParkPolicy,
     parkBelowFreePercent: sessionsParkBelowFreePercent,
     freeMemoryPercent,
+    parkHold: restoreHold,
     insights: insightsEnabled,
   });
   const insights = new InsightsWorker({

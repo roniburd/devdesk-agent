@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { listProcesses } from './core/processes';
 import { EndedRecords, endedDir, listableEnded, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
+import type { RestoreHold } from './core/restoreHold';
 import { ChildrenReader, runningBackground } from './core/sessionChildren';
 import { addSessionInfo, ForkParentReader, MetaReader, readRegistry, type RegistryEntry, registryFor } from './core/sessionInfo';
 import { buildSessionCards, cardsInScope, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds, withClaudeProcesses } from './core/sessions';
@@ -74,6 +75,8 @@ export interface SessionsModelOptions {
   parkBelowFreePercent: () => number;
   /** Percent of memory free now; undefined if unknown. */
   freeMemoryPercent: () => Promise<number | undefined>;
+  /** The sessions a window is reattaching, not parked meanwhile; parking waits while that restore runs. */
+  parkHold?: RestoreHold;
   /** Put DevDesk's Haiku insights (`<state dir>/insights`) on the cards. */
   insights: () => boolean;
 }
@@ -614,6 +617,8 @@ export class SessionsModel implements vscode.Disposable {
    */
   private async park(cards: readonly SessionCard[], records: readonly HookRecord[], server: string): Promise<void> {
     const now = Date.now();
+    // Checked again on the next refresh, not a minute later: the restore takes seconds.
+    if (this.o.parkHold?.parkingWaits(now)) return;
     if (now - this.lastParkCheck < PARK_CHECK_MS) return;
     this.lastParkCheck = now;
     const policy = this.o.parkPolicy();
@@ -622,7 +627,8 @@ export class SessionsModel implements vscode.Disposable {
     const free = below > 0 ? await this.o.freeMemoryPercent() : undefined;
     const { checked, original } = await this.withChildren(cards, server);
     const read = (c: SessionCard) => this.isRead(original.get(c) ?? c);
-    const plan = parkPlan(checked, now, { ...policy, lowMemory: free !== undefined && free < below }, server, read);
+    const held = (c: SessionCard) => !!c.tmuxSession && !!this.o.parkHold?.holds(server, c.tmuxSession, now);
+    const plan = parkPlan(checked, now, { ...policy, lowMemory: free !== undefined && free < below }, server, read, held);
     const dir = this.o.stateDir();
     let parked = 0;
     for (const { card, reason } of plan) {

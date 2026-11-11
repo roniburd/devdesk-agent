@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { sessionLabel, terminalName } from './core/terminalNames';
 import { endedDir, type EndedRecord, readEndedRecords } from './core/ended';
 import { parkedIn } from './core/park';
+import { RestoreHold } from './core/restoreHold';
 import { processAlive, readHookRecords } from './core/sessions';
 import { readRegistry } from './core/sessionInfo';
 import { attachArgs, DEFAULT_SERVER, isPaneId, killSessionArgs, listSessions, resumeArgs, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
@@ -361,6 +362,12 @@ export function registerTerminalRestore(state: vscode.Memento, source: TerminalT
   ];
 }
 
+/**
+ * Sessions a window is reattaching (`restoreTerminals`), which parking leaves alone meanwhile: a restore holds them at
+ * most 2 minutes, and 90 seconds after it, by which time their terminals show as attached in tmux.
+ */
+export const restoreHold = new RestoreHold({ maxMs: 120_000, graceMs: 90_000 });
+
 /** A reopening waits at most this long for the sessions to load, for its tabs' titles. */
 const RESTORE_TITLES_WAIT_MS = 5_000;
 
@@ -371,6 +378,16 @@ const RESTORE_TITLES_WAIT_MS = 5_000;
  * is gone (one that failed to reopen stays, for the next window).
  */
 export async function restoreTerminals(saved: OpenTerminal[]): Promise<void> {
+  // Before any await: the first sessions refresh must not park these while they are detached (see `RestoreHold`).
+  restoreHold.start(saved, Date.now());
+  try {
+    await reopenTerminals(saved);
+  } finally {
+    restoreHold.finish(Date.now());
+  }
+}
+
+async function reopenTerminals(saved: OpenTerminal[]): Promise<void> {
   // VS Code renames only the terminal in front, and these open behind: they get their titles now or when shown.
   if (saved.length && titles) {
     let timer: NodeJS.Timeout | undefined;
