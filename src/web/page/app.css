@@ -195,7 +195,6 @@ button, input, textarea { font: inherit; color: inherit; }
 .button:active { transform: translateY(1px); }
 .button:disabled { opacity: 0.5; cursor: default; transform: none; }
 .button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
-.bar .button.new { min-height: var(--tap-sm); padding: 0 14px; font-size: 0.9375rem; }
 
 /* ---- List ---- */
 
@@ -231,6 +230,8 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .card + .card { border-top: 1px solid var(--line); }
 .card:active { background: var(--raised); }
+/* The session open beside the list (wide screens). */
+.card[aria-current="page"] { background: var(--raised); box-shadow: inset 0 0 0 2px var(--focus); }
 /* The state rail: a bar in the state's colour down the card's edge. */
 .card::before {
   content: "";
@@ -417,34 +418,68 @@ button, input, textarea { font: inherit; color: inherit; }
 .ended { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; text-align: center; color: var(--muted); }
 .ended strong { color: var(--ink); font-size: 1.0625rem; }
 
-/* ---- New ---- */
+/* ---- The prompt box on top of the list ---- */
 
-.new-form { display: flex; flex-direction: column; gap: 20px; padding: 16px var(--pad) calc(24px + var(--safe-bottom)); }
-.field { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.field legend, .field-title { padding: 0; margin-bottom: 8px; font-size: 0.9375rem; font-weight: 700; color: var(--muted); }
-.folders { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
-.folder { display: flex; align-items: center; gap: 12px; min-height: calc(var(--row-h) - 4px); padding: 10px 14px; cursor: pointer; }
-.folder + .folder { border-top: 1px solid var(--line); }
-.folder input { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--primary); }
-.folder:has(input:checked) { background: var(--raised); }
-.folder-text { display: flex; flex-direction: column; min-width: 0; }
-.folder-name { font-weight: 600; }
-.folder-tag { margin-left: 8px; font-size: 0.8125rem; font-weight: 500; color: var(--muted); }
-.folder-dir { font: 0.75rem/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.hint { margin: 0; padding: 14px; color: var(--muted); }
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px var(--pad);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
 .prompt {
   width: 100%;
-  min-height: 140px;
+  min-height: var(--tap-lg);
+  max-height: 40dvh;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--surface);
-  font-size: max(16px, 1rem);
-  resize: vertical;
+  background: var(--raised);
+  font-size: max(16px, 1rem); /* 16 px or more: iOS doesn't zoom on focus. */
+  line-height: 1.4;
+  resize: none;
 }
-.new-form .notice { margin: 0; }
-.form-actions { display: flex; }
-.form-actions .start { flex: 1; min-height: var(--tap-lg); font-size: 1.0625rem; }
+.composer-row { display: flex; gap: 8px; align-items: stretch; }
+/* The folder: a native select (a wheel on a phone), drawn as a chip. */
+.folder-chip { position: relative; flex: 1; min-width: 0; display: flex; }
+.folder-chip::after {
+  content: "▾";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.folder-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--ink);
+  font-size: max(16px, 0.9375rem);
+  text-overflow: ellipsis;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.folder-pick:disabled { color: var(--muted); cursor: default; }
+.composer .start { min-width: 96px; }
+.composer .notice { margin: 0; }
+.hint { margin: 0; color: var(--muted); }
+.empty .hint { font-size: 0.9375rem; }
+.view-pick { align-items: center; justify-content: center; padding: var(--pad); text-align: center; }
+
+/* ---- The shell: the list or a session on a phone, both side by side from 900 px ---- */
+
+@media (max-width: 899.98px) {
+  .shell.has-session .pane-list,
+  .shell:not(.has-session) .pane-detail { display: none; }
+}
 
 /* ---- Wider screens and fine pointers ----
  * Width sets the column; the pointer sets the density. A tablet keeps phone-sized targets in a wider column, and a
@@ -454,10 +489,20 @@ button, input, textarea { font: inherit; color: inherit; }
   .view { max-width: var(--column); margin: 0 auto; }
 }
 @media (min-width: 900px) {
-  :root { --column: 820px; --pad: 20px; }
+  :root { --pad: 20px; }
+  .shell { display: grid; grid-template-columns: minmax(340px, 32%) minmax(0, 1fr); height: 100dvh; }
+  .pane { min-width: 0; height: 100dvh; overflow: auto; overscroll-behavior: contain; }
+  .pane-list { border-right: 1px solid var(--line); }
+  .pane .view { max-width: none; margin: 0; }
+  .pane-list .view { min-height: 100%; }
+  .pane-detail .view { height: 100%; min-height: 0; }
+  /* The list is right there: no way back to it needed. */
+  .pane-detail .back { display: none; }
 }
 @media (min-width: 1400px) {
-  :root { --column: 960px; }
+  .shell { grid-template-columns: 440px minmax(0, 1fr); }
+  /* Long lines get hard to read across a big pane. */
+  .view-session .turns { max-width: 1000px; }
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -471,12 +516,13 @@ button, input, textarea { font: inherit; color: inherit; }
     --bar-h: 48px;
   }
   .button { padding: 0 14px; border-radius: 8px; }
-  .card:hover, .folder:hover { background: var(--raised); }
+  .card:hover { background: var(--raised); }
   .key { border-radius: 10px; font-size: 1.0625rem; }
   .key.arrow { font-size: 1.25rem; }
   .tabs { border-radius: 10px; }
   .tab { border-radius: 7px; }
   .reply-text, .prompt { border-radius: 10px; }
-  .folder input { width: 16px; height: 16px; }
+  .folder-pick { border-radius: 10px; font-size: 0.9375rem; }
+  .composer .start { min-width: 80px; }
   .reply-actions .send { min-width: 88px; }
 }

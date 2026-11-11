@@ -182,7 +182,7 @@ describe('list', () => {
     expect(asks.querySelector('.line')!.textContent).toBe('Bash rm -rf build');
     expect(p.$('a.card[href="#/s/b"] .glyph')!.classList.contains('spin')).toBe(true);
     expect(p.$('a.card[href="#/s/b"] .glyph')!.textContent).toBe('');
-    expect(p.$('button.new')).not.toBeNull();
+    expect(p.$('.view-list form.composer textarea.prompt')).not.toBeNull();
   });
 
   it('renders card text as text, never as markup', async () => {
@@ -263,7 +263,7 @@ describe('session', () => {
     const p = await page(answering(detail(c, { prompt: { empty: false, dialog: false, working: false, inMode: false, exited: false } })), '#/s/s1');
     expect(p.visible(p.$('textarea.reply-text'))).toBe(true);
     expect(p.visible(p.$('.keys'))).toBe(false);
-    expect(p.$('.notice')?.textContent).toMatch(/already typed/);
+    expect(p.$('.view-session .notice')?.textContent).toMatch(/already typed/);
   });
 
   it('sends a key and refreshes', async () => {
@@ -318,7 +318,7 @@ describe('session', () => {
     expect(post.body).toEqual({ text: 'and now the docs' });
     expect(post.credentials).toBe('same-origin');
     expect(text.value).toBe('and now the docs');
-    expect(p.$('.notice')!.textContent).toBe(blocked);
+    expect(p.$('.view-session .notice')!.textContent).toBe(blocked);
   });
 
   it('clears the box after a send', async () => {
@@ -378,7 +378,7 @@ describe('session', () => {
     await p.settle();
     p.win.location.hash = '#/s/' + encodeURIComponent('tmux:devdesk:%1');
     await p.settle();
-    expect(p.$('.notice')!.textContent).toContain('Looking for this session');
+    expect(p.$('.view-session .notice')!.textContent).toContain('Looking for this session');
     p.streams[0].emit('cards', cardsAnswer([renamed]));
     await p.settle();
     expect(p.win.location.hash).toBe('#/s/abc-session');
@@ -388,23 +388,25 @@ describe('session', () => {
 describe('new session', () => {
   const folders: FoldersResponse = {
     folders: [
-      { dir: '/ws/main', name: 'main', isMain: true },
       { dir: '/ws/feat-a', name: 'feat-a', isMain: false },
+      { dir: '/ws/main', name: 'main', isMain: true },
     ],
   };
+  const starts = (m: string, url: string) => {
+    if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
+    if (m === 'POST' && url === 'api/sessions') return { status: 201, body: { tmuxSession: 'cc-feat-a-1', server: 'devdesk' } };
+    return undefined;
+  };
 
-  it('posts {dir, prompt} with JSON headers and opens the new session', async () => {
-    const p = await page((m, url) => {
-      if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
-      if (m === 'POST' && url === 'api/sessions') return { status: 201, body: { tmuxSession: 'cc-feat-a-1', server: 'devdesk' } };
-      return undefined;
-    }, '#/new');
-    const radios = p.$$('input[name="dir"]') as HTMLInputElement[];
-    expect(radios.map((r) => [r.value, r.checked])).toEqual([
-      ['/ws/main', true],
-      ['/ws/feat-a', false],
+  it('starts from the prompt box on top of the list: posts {dir, prompt} with JSON headers and opens the session', async () => {
+    const p = await page(starts);
+    const pick = p.$('.composer select.folder-pick') as HTMLSelectElement;
+    expect([...pick.options].map((o) => [o.value, o.textContent])).toEqual([
+      ['/ws/main', 'main (main repo)'],
+      ['/ws/feat-a', 'feat-a'],
     ]);
-    radios[1].click();
+    expect(pick.value).toBe('/ws/main');
+    pick.value = '/ws/feat-a';
     (p.$('textarea.prompt') as HTMLTextAreaElement).value = '<script>x</script> add docs';
     (p.$('button.start') as HTMLButtonElement).click();
     await p.settle();
@@ -413,20 +415,55 @@ describe('new session', () => {
     expect(post.body).toEqual({ dir: '/ws/feat-a', prompt: '<script>x</script> add docs' });
     expect(post.headers['Content-Type']).toBe('application/json');
     expect(post.credentials).toBe('same-origin');
+    expect((p.$('textarea.prompt') as HTMLTextAreaElement).value).toBe('');
     p.streams[0].emit('cards', cardsAnswer([card({ id: 'new-1', tmuxSession: 'cc-feat-a-1' })]));
     await p.settle();
     expect(p.win.location.hash).toBe('#/s/new-1');
   });
 
+  it('starts with Cmd/Ctrl+Enter', async () => {
+    const p = await page(starts);
+    const prompt = p.$('textarea.prompt') as HTMLTextAreaElement;
+    prompt.value = 'go';
+    prompt.dispatchEvent(new p.win.KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+    await p.settle();
+    expect(p.calls.find((x) => x.method === 'POST')?.body).toEqual({ dir: '/ws/main', prompt: 'go' });
+  });
+
+  it("doesn't open the new session if another one was opened while it started", async () => {
+    const p = await page(starts);
+    (p.$('button.start') as HTMLButtonElement).click();
+    await p.settle();
+    p.win.location.hash = '#/s/s1';
+    await p.settle();
+    p.streams[0].emit('cards', cardsAnswer([card(), card({ id: 'new-1', pane: '%9', tmuxSession: 'cc-feat-a-1' })]));
+    await p.settle();
+    expect(p.win.location.hash).toBe('#/s/s1');
+  });
+
+  it('asks for the folders once, however often the list is shown', async () => {
+    const p = await page(starts);
+    p.win.location.hash = '#/s/s1';
+    await p.settle();
+    p.win.location.hash = '#/';
+    await p.settle();
+    expect(p.calls.filter((x) => x.url === 'api/folders')).toHaveLength(1);
+  });
+
+  it('#/new shows the list with the prompt box focused', async () => {
+    const p = await page(starts, '#/new');
+    expect(p.doc.activeElement).toBe(p.$('textarea.prompt'));
+    expect(p.win.location.hash).toBe('#/');
+    expect(p.visible(p.$('.view-list'))).toBe(true);
+  });
+
   it('polls once every 2 s while the new session has not shown up', async () => {
     const p = await page(
       (m, url) => {
-        if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
-        if (m === 'POST' && url === 'api/sessions') return { status: 201, body: { tmuxSession: 'cc-feat-a-1', server: 'devdesk' } };
         if (m === 'GET' && url === 'api/sessions') return { status: 200, body: cardsAnswer([card()]) };
-        return undefined;
+        return starts(m, url);
       },
-      '#/new',
+      '#/',
       { holdTimers: true },
     );
     (p.$('button.start') as HTMLButtonElement).click();
@@ -448,12 +485,34 @@ describe('new session', () => {
       if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
       if (m === 'POST') return { status: 400, body: { error: 'Not an allowed folder.', code: 'bad-request' } };
       return undefined;
-    }, '#/new');
+    });
     (p.$('textarea.prompt') as HTMLTextAreaElement).value = 'keep me';
     (p.$('button.start') as HTMLButtonElement).click();
     await p.settle();
-    expect(p.$('.notice')!.textContent).toBe('Not an allowed folder.');
+    expect(p.$('.composer .notice')!.textContent).toBe('Not an allowed folder.');
     expect((p.$('textarea.prompt') as HTMLTextAreaElement).value).toBe('keep me');
+  });
+});
+
+describe('list beside a session', () => {
+  it('keeps the list, its prompt box text and the open card marked while a session is open', async () => {
+    const p = await page((m, url) => (m === 'GET' && url === 'api/sessions/s2' ? { status: 200, body: detail(card({ id: 's2' })) } : undefined));
+    p.streams[0].emit('cards', cardsAnswer([card(), card({ id: 's2', title: 'Second' })]));
+    await p.settle();
+    const listEl = p.$('.view-list')!;
+    (p.$('textarea.prompt') as HTMLTextAreaElement).value = 'half typed';
+    p.win.location.hash = '#/s/s2';
+    await p.settle();
+    expect(p.$('.shell')!.classList.contains('has-session')).toBe(true);
+    expect(p.$('.view-list')).toBe(listEl);
+    expect(p.$('.view-session')).not.toBeNull();
+    expect(p.$('a.card[aria-current="page"]')!.getAttribute('href')).toBe('#/s/s2');
+    p.win.location.hash = '#/';
+    await p.settle();
+    expect(p.$('.shell')!.classList.contains('has-session')).toBe(false);
+    expect(p.$('.view-session')).toBeNull();
+    expect(p.$('a.card[aria-current]')).toBeNull();
+    expect((p.$('textarea.prompt') as HTMLTextAreaElement).value).toBe('half typed');
   });
 });
 
