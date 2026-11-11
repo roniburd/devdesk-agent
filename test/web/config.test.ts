@@ -3,6 +3,7 @@ import {
   DEFAULT_WEB_PORT,
   defaultDaemonConfig,
   fillTunnelCommand,
+  shortHostName,
   parseDaemonArgs,
   parseDaemonConfig,
   resolveWebSettings,
@@ -260,16 +261,32 @@ describe('defaultDaemonConfig', () => {
   });
 });
 
+describe('shortHostName', () => {
+  it("is the host name's first label, without what goes up to the user's name", () => {
+    expect(shortHostName('box-roni-2a-d12984e7.region.example.com', 'roni')).toBe('2a-d12984e7');
+    expect(shortHostName('roni-laptop', 'roni')).toBe('laptop');
+    expect(shortHostName('ronin-laptop', 'roni')).toBe('ronin-laptop');
+    expect(shortHostName('Roni-MacBook-Pro.local', 'roni')).toBe('macbook-pro');
+    expect(shortHostName('f8ffc2_ad 99', 'x')).toBe('f8ffc2-ad-99');
+  });
+  it('is at most 24 characters, without a dash at either end, and never empty', () => {
+    expect(shortHostName('a'.repeat(23) + '-bbbb', 'u')).toBe('a'.repeat(23));
+    expect(shortHostName('', 'u')).toBe('host');
+    expect(shortHostName('---', 'u')).toBe('host');
+  });
+});
+
 describe('fillTunnelCommand', () => {
   it('fills in quoted values', () => {
-    expect(fillTunnelCommand('expose {port} --name {user}-x --allow {user}', { port: 7690, user: 'roni' })).toBe("expose 7690 --name 'roni'-x --allow 'roni'");
+    expect(fillTunnelCommand('expose {port} --name {user}-x --allow {user}', { port: 7690, user: 'roni', host: 'mac' })).toBe("expose 7690 --name 'roni'-x --allow 'roni'");
   });
 
   it('quotes a user with a quote', () => {
-    expect(fillTunnelCommand('run {user}', { port: 1, user: "a'b" })).toBe(`run 'a'\\''b'`);
+    expect(fillTunnelCommand('run {user}', { port: 1, user: "a'b", host: 'h' })).toBe(`run 'a'\\''b'`);
   });
 
   it('leaves other text alone', () => {
-    expect(fillTunnelCommand('run {other} $HOME', { port: 1, user: 'u' })).toBe('run {other} $HOME');
+    expect(fillTunnelCommand('t --name devdesk-v1-{host}', { port: 1, user: 'roni', host: 'box-roni-2a-x.example.com' })).toBe('t --name devdesk-v1-2a-x');
+    expect(fillTunnelCommand('run {other} $HOME', { port: 1, user: 'u', host: 'h' })).toBe('run {other} $HOME');
   });
 });

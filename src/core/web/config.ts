@@ -348,7 +348,23 @@ export function parseDaemonArgs(argv: readonly string[]): { configPath?: string;
   return configPath !== undefined ? { configPath, overrides } : { overrides };
 }
 
-/** {port} and {user} replaced: the port as digits, the user shellQuote()d; other text untouched. */
-export function fillTunnelCommand(command: string, v: { port: number; user: string }): string {
-  return command.replace(/\{(port|user)\}/g, (_, k: string) => (k === 'port' ? String(Math.trunc(v.port)) : shellQuote(v.user)));
+/**
+ * This machine in a tunnel name: the host name's first label, lower case, in letters, digits and dashes, without
+ * anything up to and including the user's name, which the tunnel URL already has (`box-roni-2a-d1` -> `2a-d1`), at most
+ * 24 characters; `host` when nothing is left. Each machine then gets a tunnel of its own instead of taking over another's.
+ */
+export function shortHostName(hostname: string, user: string): string {
+  const u = user.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  let h = (hostname.split('.')[0] ?? '').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  const at = u ? `-${h}-`.indexOf(`-${u}-`) : -1;
+  if (at >= 0) h = h.slice(at + u.length + 1);
+  h = h.replace(/-+/g, '-').slice(0, 24).replace(/^-+|-+$/g, '');
+  return h || 'host';
+}
+
+/** {port}, {user} and {host} replaced: the port as digits, the user shellQuote()d, the host as shortHostName(); other text untouched. */
+export function fillTunnelCommand(command: string, v: { port: number; user: string; host: string }): string {
+  return command.replace(/\{(port|user|host)\}/g, (_, k: string) =>
+    k === 'port' ? String(Math.trunc(v.port)) : k === 'user' ? shellQuote(v.user) : shortHostName(v.host, v.user),
+  );
 }

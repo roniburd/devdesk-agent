@@ -1406,7 +1406,7 @@ The daemon also refuses requests for any host but `127.0.0.1`, `localhost` and t
 
 ### Set up a proxy
 
-The tunnel command (`devdesk.web.tunnelCommand`) runs when the daemon starts, with `{port}` and `{user}` filled in. The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. Whatever proxy you pick, the steps are the same:
+The tunnel command (`devdesk.web.tunnelCommand`) runs when the daemon starts, with `{port}`, `{user}` and `{host}` filled in. `{host}` is this machine's short host name (its first part, without anything up to your user name), so each machine can have a tunnel of its own. The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. Whatever proxy you pick, the steps are the same:
 
 1. The proxy signs you in and forwards to `http://127.0.0.1:<devdesk.web.port>` on this host.
 2. It puts who you are in a request header, and drops any value of that header the browser sent.
