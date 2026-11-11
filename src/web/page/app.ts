@@ -530,10 +530,11 @@ function newView(): View {
         },
       },
     },
-    h('fieldset', { class: 'field' }, h('legend', { text: 'Folder' }), list),
+    // Prompt and Start come first: the folder list can be long, and the default folder is already picked.
     h('label', { class: 'field' }, h('span', { class: 'field-title', text: 'Prompt' }), prompt),
-    notice,
     h('div', { class: 'form-actions' }, start),
+    notice,
+    h('fieldset', { class: 'field' }, h('legend', { text: 'Folder' }), list),
   );
 
   const el = h(
