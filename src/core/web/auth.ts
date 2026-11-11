@@ -1,3 +1,4 @@
+import { ACCESS_JWT_HEADER, type AccessKeys, checkAccessToken } from './cfAccess';
 import type { DaemonConfig } from './config';
 
 /**
@@ -8,14 +9,31 @@ import type { DaemonConfig } from './config';
 
 /** node's lower-cased IncomingHttpHeaders. */
 export type Headers = Readonly<Record<string, string | string[] | undefined>>;
-export type AuthDecision = { ok: true; user?: string } | { ok: false; reason: 'not-configured' | 'no-identity' | 'not-allowed' };
+/** `unknownKey`: a Cloudflare token signed by a key not (yet) fetched: the caller refreshes the team's keys. */
+export type AuthDecision = { ok: true; user?: string } | { ok: false; reason: 'not-configured' | 'no-identity' | 'not-allowed'; unknownKey?: true };
 
 /**
- * loopback: ok. header: not-configured when identityHeader or allowedUsers is empty; no-identity when the header is
- * missing, empty or repeated (array); not-allowed unless the value === one of allowedUsers (no trimming, no case folding).
+ * loopback, and tunnel (Dev Tunnels lets in only its owner and names no one): ok. header: not-configured when
+ * identityHeader or allowedUsers is empty; no-identity when the header is missing, empty or repeated (array);
+ * not-allowed unless the value === one of allowedUsers (no trimming, no case folding). cloudflare: not-configured
+ * without a team, audience, allowed users or keys; no-identity unless the Access token checks out (checkAccessToken);
+ * not-allowed unless its email === one of allowedUsers.
  */
-export function authorize(headers: Headers, c: Pick<DaemonConfig, 'auth' | 'identityHeader' | 'allowedUsers'>): AuthDecision {
-  if (c.auth === 'loopback') return { ok: true };
+export function authorize(
+  headers: Headers,
+  c: Pick<DaemonConfig, 'auth' | 'identityHeader' | 'allowedUsers'> & { cloudflare?: DaemonConfig['cloudflare'] },
+  o: { accessKeys?: AccessKeys; nowS?: number } = {},
+): AuthDecision {
+  if (c.auth === 'loopback' || c.auth === 'tunnel') return { ok: true };
+  if (c.auth === 'cloudflare') {
+    const cf = c.cloudflare;
+    if (!cf?.team || !cf.audience || !c.allowedUsers.length || !o.accessKeys) return { ok: false, reason: 'not-configured' };
+    const token = headers[ACCESS_JWT_HEADER];
+    if (typeof token !== 'string' || !token) return { ok: false, reason: 'no-identity' };
+    const check = checkAccessToken(token, { keys: o.accessKeys, team: cf.team, audience: cf.audience, nowS: o.nowS ?? Date.now() / 1000 });
+    if (!check.ok) return check.reason === 'unknown-key' ? { ok: false, reason: 'no-identity', unknownKey: true } : { ok: false, reason: 'no-identity' };
+    return c.allowedUsers.some((u) => u === check.email) ? { ok: true, user: check.email } : { ok: false, reason: 'not-allowed' };
+  }
   if (!c.identityHeader || !c.allowedUsers.length) return { ok: false, reason: 'not-configured' };
   const value = headers[c.identityHeader.toLowerCase()];
   if (typeof value !== 'string' || !value) return { ok: false, reason: 'no-identity' };
@@ -87,7 +105,7 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze(
 
 const DENIED_TEXT: Readonly<Record<'not-configured' | 'no-identity' | 'not-allowed' | 'host', string>> = {
   'not-configured':
-    'Web access is not set up to let anyone in. Set devdesk.web.identityHeader (the header your proxy names the visitor in) and devdesk.web.allowedUsers (who may use it), or set devdesk.web.auth to loopback when only an SSH port forward reaches this host.',
+    'Web access is not set up to let anyone in. Run "DevDesk: Choose Web Access Tunnel" in VS Code, or set devdesk.web.allowedUsers (who may use it) and, for your own proxy, devdesk.web.identityHeader (the header it names the visitor in); with Cloudflare, also devdesk.web.cloudflare.team and devdesk.web.cloudflare.audience.',
   'no-identity':
     'This request did not come through the identity proxy set up for web access (devdesk.web.identityHeader). Open DevDesk through the proxy URL.',
   'not-allowed': 'You are not in devdesk.web.allowedUsers.',

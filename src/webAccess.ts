@@ -4,7 +4,7 @@ import { closeSync, existsSync, type FSWatcher, openSync, watch } from 'node:fs'
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { openSettings, sessionsStateDir, webAccessConfig } from './config';
+import { openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice } from './config';
 import { writeFileAtomic } from './core/atomicWrite';
 import { FileLockBusy, withFileLock } from './core/fileLock';
 import { processAlive } from './core/sessions';
@@ -14,7 +14,9 @@ import { isDaemonCommand, launchFailure, statusBarText, type WebMenuId, webMenuC
 import { daemonScript, type WebPanelRow } from './core/web/panel';
 import { qrMatrix, qrSvg } from './core/web/qr';
 import { parseWebState, webConfigPath, webDir, webLogPath, webStatePath, type WebState, type WebStatus, webStatus } from './core/web/webState';
+import { tunnelHint } from './core/web/tunnelSetup';
 import { log } from './log';
+import { chooseTunnel } from './tunnelSetup';
 import { registerWebAccessView } from './webAccessView';
 
 /**
@@ -68,6 +70,10 @@ export class WebAccess implements vscode.Disposable {
   panel: { rows: () => WebPanelRow[]; view: vscode.TreeView<WebPanelRow>; drawn: () => Promise<void> } | undefined;
   /** Start, Stop and setting-change restarts run one at a time. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** The tunnel links and errors already shown in a notification. */
+  private readonly told = new Set<string>();
+  /** A tunnel was just chosen: show the QR code when its URL comes. */
+  private qrWhenUp = false;
 
   constructor(readonly script: string) {
     this.item.name = 'DevDesk Web Access';
@@ -123,6 +129,7 @@ export class WebAccess implements vscode.Disposable {
       return status;
     }
     const s = status.state;
+    this.tell(s);
     const lines = [`**DevDesk web access** on http://${s.host}:${s.port}/`];
     if (s.url) lines.push(`Tunnel: ${s.url}`);
     if (s.tunnel === 'starting') lines.push('The tunnel is starting.');
@@ -133,6 +140,40 @@ export class WebAccess implements vscode.Disposable {
     this.item.tooltip = tooltip;
     this.item.show();
     return status;
+  }
+
+  /**
+   * Notifications from the tunnel, once each: a link it asks you to open (Tailscale: turn on HTTPS), and why it went
+   * down with what to do. After Choose Tunnel, the QR code when its URL comes.
+   */
+  private tell(s: WebState): void {
+    const once = (key: string) => !this.told.has(key) && !!this.told.add(key);
+    if (s.tunnelAction && once(`action ${s.pid} ${s.tunnelAction}`)) {
+      void vscode.window
+        .showWarningMessage(`The web access tunnel asks you to open a link to finish setting it up: ${s.tunnelAction}`, 'Open Link')
+        .then((b) => b && vscode.env.openExternal(vscode.Uri.parse(s.tunnelAction!)));
+    }
+    if (s.tunnel === 'down' && s.tunnelError && once(`down ${s.pid} ${s.tunnelPid} ${s.tunnelError}`)) {
+      const hint = tunnelHint(webAccessConfig().tunnel, s.tunnelError);
+      if (hint) {
+        void vscode.window.showWarningMessage(`The web access tunnel is down: ${s.tunnelError}. ${hint}`, 'Restart Tunnel', 'Choose Tunnel').then((b) => {
+          if (b === 'Restart Tunnel') void this.restartTunnel();
+          if (b === 'Choose Tunnel') void vscode.commands.executeCommand('devdesk.web.chooseTunnel');
+        });
+      }
+    }
+    if (this.qrWhenUp && s.url) {
+      this.qrWhenUp = false;
+      if (fitsQr(s.url)) this.showQr(s.url);
+    }
+  }
+
+  /** Choose Web Access Tunnel: saves the choice, then starts (or restarts) web access with it. */
+  async chooseTunnel(): Promise<void> {
+    if (!(await chooseTunnel())) return;
+    this.qrWhenUp = true;
+    const status = await this.status();
+    if (status.kind === 'off') await this.start();
   }
 
   /** Watches `dir` for `web.json` changes (when it exists; the timer covers the rest). */
@@ -170,7 +211,12 @@ export class WebAccess implements vscode.Disposable {
   }
 
   /** Start Web Access: starts the daemon, or, when it already runs, restarts only its tunnel (to recover one that went down). */
-  start(): Promise<void> {
+  async start(): Promise<void> {
+    // The first Start with no tunnel set up asks which one to use (off only: a running daemon keeps its tunnel).
+    if (webNeedsTunnelChoice() && (await this.status()).kind === 'off') {
+      if (!(await chooseTunnel({ fromStart: true }))) return;
+      this.qrWhenUp = true;
+    }
     return this.serial(async () => {
       const config = webAccessConfig();
       await mkdir(config.webDir, { recursive: true, mode: 0o700 });
@@ -453,6 +499,7 @@ export function registerWebAccess(ctx: vscode.ExtensionContext): WebAccess {
     vscode.commands.registerCommand('devdesk.web.showQr', () => web.qr()),
     vscode.commands.registerCommand('devdesk.web.openLog', () => vscode.window.showTextDocument(vscode.Uri.file(web.logPath()))),
     vscode.commands.registerCommand('devdesk.web.openSettings', () => openSettings('devdesk.web')),
+    vscode.commands.registerCommand('devdesk.web.chooseTunnel', () => web.chooseTunnel()),
   );
   web.panel = registerWebAccessView(ctx, web);
   return web;

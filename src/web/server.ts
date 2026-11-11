@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { SessionCard } from '../core/sessions';
 import { type ActionDeps, type ActionResult, pressKey, sendText, sessionDetail, startSession } from '../core/web/actions';
+import type { AccessKeys } from '../core/web/cfAccess';
 import { answeredPublicHost, authorize, deniedPage, hostAllowed, mutationCheck, SECURITY_HEADERS } from '../core/web/auth';
 import { webCards, webFolders, type WebView } from '../core/web/cards';
 import { readFile } from 'node:fs/promises';
@@ -29,6 +30,8 @@ export interface WebServerOptions {
   /** config.publicHost || the tunnel's. */
   publicHost: () => string;
   log: (line: string) => void;
+  /** For `cloudflare` auth: the team's keys now, and a refresh for a token signed by a key not fetched yet. */
+  accessKeys?: { current: AccessKeys | undefined; refresh(): Promise<void> };
 }
 
 export interface WebServer {
@@ -232,7 +235,8 @@ export function createWebServer(o: WebServerOptions): WebServer {
     const deny = (html: string, message: string) => (api ? sendError(res, 403, message) : send(res, 403, HTML_TYPE, html));
 
     if (!hostAllowed(req.headers.host, config.port, publicHost)) return deny(deniedPage({ reason: 'host' }), 'This host is not allowed.');
-    const auth = authorize(req.headers, config);
+    const auth = authorize(req.headers, config, { accessKeys: o.accessKeys?.current });
+    if (!auth.ok && auth.unknownKey) void o.accessKeys?.refresh();
     if (!auth.ok) return deny(deniedPage(auth), 'Access denied.');
     const route = parseRoute(method, path);
     if ('status' in route) {

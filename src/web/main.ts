@@ -1,12 +1,14 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { listProcesses } from '../core/processes';
 import { processAlive } from '../core/sessions';
 import { tmuxRunner } from '../core/tmux';
 import { type DaemonConfig, defaultDaemonConfig, fillTunnelCommand, parseDaemonArgs, parseDaemonConfig } from '../core/web/config';
 import { SessionSnapshot } from '../core/web/snapshot';
 import { publicHostOf } from '../core/web/tunnel';
+import { classifyTunnelUrl, ngrokPolicy } from '../core/web/tunnelPresets';
+import { AccessKeyCache } from './accessKeys';
 import { EXIT_BAD_CONFIG, EXIT_PORT_IN_USE, type WebState, webStatePath } from '../core/web/webState';
 import { PAGE } from './pageAssets';
 import { createWebServer, LOOPBACK } from './server';
@@ -56,6 +58,8 @@ async function main(): Promise<void> {
     tmuxRunner(server, { bin: config.tmux.bin, ...(server === config.tmux.server && config.tmux.configFile ? { configFile: config.tmux.configFile } : {}) });
   const snapshot = new SessionSnapshot(config, { tmux: runner, listProcesses, alive: processAlive });
   let tunnelHost = '';
+  const accessKeys = config.auth === 'cloudflare' && config.cloudflare.team ? new AccessKeyCache(config.cloudflare.team, log) : undefined;
+  void accessKeys?.refresh(true);
   const server = createWebServer({
     config,
     snapshot,
@@ -63,6 +67,7 @@ async function main(): Promise<void> {
     page: PAGE,
     publicHost: () => config.publicHost || tunnelHost,
     log,
+    ...(accessKeys ? { accessKeys } : {}),
   });
 
   let port: number;
@@ -73,9 +78,13 @@ async function main(): Promise<void> {
     if (e.code === 'EADDRINUSE') fail(`port ${config.port} is in use: change devdesk.web.port (or --port)`, EXIT_PORT_IN_USE);
     return fail(`cannot listen on ${LOOPBACK}:${config.port}: ${e.message}`, 1);
   }
-  log(`listening on http://${LOOPBACK}:${port}/ (auth: ${config.auth})`);
+  log(`listening on http://${LOOPBACK}:${port}/ (auth: ${config.auth}${config.tunnel ? `, tunnel: ${config.tunnel}` : ''})`);
+  if (config.auth === 'tunnel') log('the tunnel lets in only its owner and names no one: any process on this host can also use web access');
 
   await mkdir(config.webDir, { recursive: true, mode: 0o700 });
+  // ngrok's traffic policy (sign-in, who may pass, the identity header), private like config.json.
+  const ngrokPolicyPath = join(config.webDir, 'ngrok-policy.yml');
+  if (config.tunnel === 'ngrok') await writeFile(ngrokPolicyPath, ngrokPolicy(config.allowedUsers, config.ngrokProvider), { mode: 0o600 });
   const statePath = webStatePath(config.webDir);
   const state: WebState = {
     version: 1,
@@ -98,13 +107,25 @@ async function main(): Promise<void> {
   let tunnel: { pid?: number; stop(): void } | undefined;
   const startTunnel = () => {
     if (!config.tunnelCommand) return;
-    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user, host: hostname() });
+    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user, host: hostname(), publicHost: config.publicHost, ngrokPolicy: ngrokPolicyPath });
+    const spec = { urlHost: config.tunnelUrlHost, actionHost: config.tunnelActionHost };
+    const rules = {
+      classify: (url: string) => classifyTunnelUrl(url, spec, config.publicHost),
+      ...(config.tunnelReadyLine && config.publicHost ? { ready: new RegExp(config.tunnelReadyLine), readyUrl: `https://${config.publicHost}/` } : {}),
+    };
     const run = runTunnel(command, {
+      onAction: (url) => {
+        if (tunnel !== run) return;
+        state.tunnelAction = url;
+        log(`the tunnel asks you to open ${url}`);
+        void save();
+      },
       onUrl: (url) => {
         if (tunnel !== run) return;
         tunnelHost = publicHostOf(url) ?? '';
         Object.assign(state, { tunnel: 'up', url });
         delete state.tunnelError;
+        delete state.tunnelAction;
         log(`tunnel up: ${url}`);
         void save();
       },
@@ -114,14 +135,16 @@ async function main(): Promise<void> {
         state.tunnel = 'down';
         state.tunnelError = error;
         delete state.url;
+        delete state.tunnelAction;
         log(`tunnel down: ${error}`);
         void save();
       },
-    });
+    }, undefined, rules);
     tunnel = run;
     state.tunnel = 'starting';
     delete state.url;
     delete state.tunnelError;
+    delete state.tunnelAction;
     if (run.pid !== undefined) state.tunnelPid = run.pid;
     else delete state.tunnelPid;
     void save();
@@ -145,6 +168,7 @@ async function main(): Promise<void> {
     stopping = true;
     log(`${signal}: stopping`);
     stopTunnel();
+    accessKeys?.dispose();
     await server.close();
     await writing;
     await removeWebState(statePath, process.pid);

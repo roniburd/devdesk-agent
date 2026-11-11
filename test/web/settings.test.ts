@@ -10,7 +10,9 @@ const manual = readFileSync(join(ROOT, 'MANUAL.md'), 'utf8');
 describe('web access settings', () => {
   // Who may use web access and what it runs: a repository's workspace settings must not change them (a
   // `.vscode/settings.json` setting auth to loopback would turn the identity check off behind the tunnel).
-  const MACHINE = ['auth', 'identityHeader', 'allowedUsers', 'publicHost', 'tunnelCommand'].map((k) => `devdesk.web.${k}`);
+  const MACHINE = ['tunnel', 'auth', 'identityHeader', 'allowedUsers', 'publicHost', 'tunnelCommand', 'cloudflare.team', 'cloudflare.audience', 'ngrok.oauthProvider'].map(
+    (k) => `devdesk.web.${k}`,
+  );
 
   it('that decide who may use it or what runs are machine-scoped', () => {
     expect(MACHINE.filter((k) => properties[k]?.scope !== 'machine')).toEqual([]);

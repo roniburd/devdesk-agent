@@ -5,16 +5,22 @@ export const TUNNEL_URL_TIMEOUT_MS = 60_000;
 const ANSI = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b./g;
 const stripAnsi = (s: string) => s.replace(ANSI, '');
 
-/** The first https://… URL in `text` (up to whitespace, quotes or `>`), ANSI stripped; undefined when none. */
-export function firstHttpsUrl(text: string): string | undefined {
+/** The https://… URLs in `text` (each up to whitespace, quotes or `>`), ANSI stripped, in order. */
+export function httpsUrls(text: string): string[] {
+  const out: string[] = [];
   for (const m of stripAnsi(text).matchAll(/https:\/\/[^\s"'<>`]+/g)) {
     try {
-      if (new URL(m[0]).hostname) return m[0];
+      if (new URL(m[0]).hostname) out.push(m[0]);
     } catch {
       // not a URL: look further
     }
   }
-  return undefined;
+  return out;
+}
+
+/** The first https://… URL in `text`; undefined when none. */
+export function firstHttpsUrl(text: string): string | undefined {
+  return httpsUrls(text)[0];
 }
 
 /** Lower-cased host[:port] of an https URL; undefined when not https (or it carries credentials). */

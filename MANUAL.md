@@ -1061,10 +1061,10 @@ It can't show the Claude Board or diffs, make worktrees, resume parked sessions,
 3. The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off:
    - whether it runs, since when, and its process; **Started by version 1.6.0** when a daemon an older version started is still running (an update doesn't restart it, so the phone still gets the old page: click the row to restart it);
    - the **Phone URL** (click to copy; its buttons open it or show its QR code), the **Tunnel** (click to restart it), the **Loopback URL**;
-   - **Access**: who may open the page (`devdesk.web.allowedUsers` and the header it is read from), or *no identity check* with `loopback`;
+   - **Access**: who may open the page (`devdesk.web.allowedUsers` and how it is checked: Tailscale, ngrok sign-in, Cloudflare Access or the header), *the tunnel owner* with Dev Tunnels, or *no identity check* with `loopback`;
    - the **Log** (`daemon.log`).
 
-   Its title bar has **Start** (or **Restart**), **Stop** and the settings gear.
+   Its title bar has **Start** (or **Restart**), **Stop**, **Choose Web Access Tunnel** and the settings gear.
 
 The daemon lists the sessions of the window that started it, as its Claude view does (`devdesk.sessions.scope`, `devdesk.sessions.show`). Changing a `devdesk.web` or `devdesk.sessions` setting restarts it with the new values. Its files are in `~/.claude/devdesk/state/web/` (under `devdesk.sessions.stateDir`): `web.json` (its pid, port and URL), `config.json` (the settings it runs with) and `daemon.log`.
 
@@ -1090,37 +1090,31 @@ The tunnel command (`devdesk.web.tunnelCommand`) runs when the daemon starts, wi
 3. You tell DevDesk that header's name (`devdesk.web.identityHeader`) and your name in it (`devdesk.web.allowedUsers`). If the proxy's hostname isn't in the URL the tunnel command prints, also set `devdesk.web.publicHost`.
 4. You check that a browser that hasn't signed in can't open the URL: it must get the proxy's sign-in page, not the session list.
 
-#### Anywhere else: Tailscale, Cloudflare Access or `ssh -L`
+#### Anywhere else: Tailscale, Dev Tunnels, Cloudflare, ngrok or `ssh -L`
 
-Web access works with any proxy that signs you in and passes your identity in a header it controls. Three that do:
+The first time you run **Start Web Access** with no tunnel set up, DevDesk asks how your phone should reach it. Run **DevDesk for Claude Code: Choose Web Access Tunnel** (or the plug button in the Web Access view's title bar) to change it later. The list says which tools are installed. For the one you pick, DevDesk checks that you are signed in (and opens a terminal to sign in if not), fills in who may use web access, saves `devdesk.web.tunnel` and the settings below, starts web access, and shows the QR code once the tunnel is up.
 
-**Tailscale Serve** (simplest for a machine of your own). Install Tailscale on the host and on your phone, both signed in to your tailnet. Serve the port on your tailnet, then tell DevDesk Tailscale's identity header:
+| `devdesk.web.tunnel` | Who can reach it | Who DevDesk lets in | What you need |
+|---|---|---|---|
+| `tailscale` (recommended) | Devices on your tailnet only; no public URL | The Tailscale login in `devdesk.web.allowedUsers` (from `Tailscale-User-Login`, which Serve sets and strips from what the browser sends) | Tailscale on this host and your phone, signed in to one tailnet, with HTTPS certificates on |
+| `devtunnel` | Only the GitHub or Microsoft account that runs the tunnel | No one checked by DevDesk: Dev Tunnels names no one | The `devtunnel` CLI, signed in |
+| `cloudflare` | Anyone, but Cloudflare Access asks them to sign in first | The email in `devdesk.web.allowedUsers`, from Access's signed token | A domain on Cloudflare, `cloudflared` signed in, and an Access application |
+| `ngrok` | Anyone, but ngrok asks them to sign in first | The email in `devdesk.web.allowedUsers`, which ngrok's sign-in checks too | An ngrok account, its authtoken on this host |
 
-```sh
-tailscale serve --bg --https=443 http://127.0.0.1:7690
-```
+What DevDesk runs for each (you don't type these: they come with the preset, and `devdesk.web.tunnelCommand` and `devdesk.web.identityHeader` don't apply):
 
-```json
-"devdesk.web.identityHeader": "Tailscale-User-Login",
-"devdesk.web.allowedUsers": ["you@example.com"],
-"devdesk.web.publicHost": "<machine>.<tailnet>.ts.net"
-```
+- **Tailscale**: `tailscale serve {port}`, in the foreground, so serving stops with web access. The URL is `https://<machine>.<tailnet>.ts.net/`, and doesn't change. The first time, Tailscale may print a link to turn on HTTPS for your tailnet: DevDesk shows it with an **Open Link** button and waits up to 5 minutes. On Linux, let your user run Serve once with `sudo tailscale set --operator=$USER`. Don't use Tailscale Funnel: it puts the page on the public internet.
+- **Dev Tunnels**: `devtunnel host -p {port}`, a temporary tunnel only you can open, deleted when it stops; its URL changes on each start. Dev Tunnels tells DevDesk nothing about the visitor, so DevDesk can't check again: the tunnel's own sign-in is the only check, and any process on this host can also use the page through `127.0.0.1`. DevDesk asks you to accept that once, and the daemon refuses to run a Dev Tunnels command with `--allow-anonymous`. Use it only on a machine no one else uses.
+- **Cloudflare**: a named tunnel `devdesk-{host}` per machine (created the first time), a DNS record for `devdesk.web.publicHost` pointing at it, then `cloudflared tunnel run --url http://127.0.0.1:{port} devdesk-{host}`. First create a self-hosted [Access application](https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/) for that host name, with a policy that allows only your email. DevDesk asks for your team name (`<team>.cloudflareaccess.com`, saved in `devdesk.web.cloudflare.team`) and the application's AUD tag (`devdesk.web.cloudflare.audience`). The daemon then checks the token Access sends in `Cf-Access-Jwt-Assertion`: signed by one of your team's keys (fetched from `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`), for that application, not expired. It never trusts the `Cf-Access-Authenticated-User-Email` header alone, since without an Access application in front of the tunnel anyone could send it. Until the keys are fetched, or with the team or AUD tag missing, every request is denied.
+- **ngrok**: `ngrok http 127.0.0.1:{port} --traffic-policy-file <policy>` (plus `--url` with `devdesk.web.publicHost`, for a domain you reserved). DevDesk writes the policy to `web/ngrok-policy.yml` (private to you): visitors sign in with `devdesk.web.ngrok.oauthProvider` (Google by default); anyone whose email isn't in `devdesk.web.allowedUsers` is turned away by ngrok; the rest reach DevDesk with their email in `X-DevDesk-User` (any value the browser sent is removed first), which DevDesk checks again.
 
-Run **Start Web Access**, then open `https://<machine>.<tailnet>.ts.net/` on your phone. Use your tailnet login name in `allowedUsers`, exactly as Tailscale shows it. Don't use Tailscale Funnel: it puts the page on the public internet, and its visitors come with no identity header, so the daemon turns them away.
+Check once, from a private window or a phone that isn't signed in, that the URL asks you to sign in (or, for Tailscale, doesn't open off your tailnet) before you rely on it.
 
-**Cloudflare Access** (a hostname of your own on Cloudflare). Create an Access application for a hostname, say `devdesk.example.com`, with a policy that allows only your email. Point a Cloudflare Tunnel for that hostname at `http://127.0.0.1:7690`, and run `cloudflared` yourself (as a service, say): a named tunnel prints no URL, so leave `devdesk.web.tunnelCommand` empty and set `devdesk.web.publicHost`:
+**Your own proxy** (`custom`). Set `devdesk.web.tunnelCommand`, `devdesk.web.identityHeader` and `devdesk.web.allowedUsers` as in [Set up a proxy](#set-up-a-proxy). With `devdesk.web.tunnel` left at `auto`, a tunnel command you set runs as before.
 
-```json
-"devdesk.web.identityHeader": "Cf-Access-Authenticated-User-Email",
-"devdesk.web.allowedUsers": ["you@example.com"],
-"devdesk.web.publicHost": "devdesk.example.com"
-```
+**`ssh -L` from a laptop** (no phone, no proxy). Pick **No tunnel**, or set `"devdesk.web.auth": "loopback"` in your user settings (read the caveat above, and leave `devdesk.web.tunnelCommand` and `devdesk.web.publicHost` empty). Then run `ssh -L 7690:127.0.0.1:7690 <host>` and open `http://127.0.0.1:7690/` on the laptop.
 
-Then open `https://devdesk.example.com/` on your phone and sign in with Access. Check in a private window that the hostname asks you to sign in before you rely on it. A Cloudflare Tunnel with no Access application in front of it serves the page to anyone, and with no identity header the daemon turns them away.
-
-**`ssh -L` from a laptop** (no phone, no proxy). Set `"devdesk.web.auth": "loopback"` in your user settings (read the caveat above, and leave `devdesk.web.tunnelCommand` and `devdesk.web.publicHost` empty). Then run `ssh -L 7690:127.0.0.1:7690 <host>` and open `http://127.0.0.1:7690/` on the laptop.
-
-Don't put the port on the network yourself, with a reverse proxy that doesn't sign you in, a router port forward, or a public tunnel such as ngrok without its own sign-in. The daemon would turn those visitors away anyway (they carry no identity header), but it shouldn't be the only thing standing between your Claude sessions and the internet.
+Don't put the port on the network yourself, with a reverse proxy that doesn't sign you in, a router port forward, or a public tunnel without its own sign-in. The daemon would turn those visitors away anyway (they carry no identity), but it shouldn't be the only thing standing between your Claude sessions and the internet.
 
 ### How the list is ordered
 
@@ -1137,12 +1131,12 @@ node <extension dir>/dist/web.js --port 7690 --root <your repo> \
   --identity-header Tailscale-User-Login --allow-user you@example.com
 ```
 
-`<extension dir>` is where VS Code installed DevDesk for Claude Code (`~/.vscode-server/extensions/roniburd.devdesk-claude-<version>` on a remote host). Without VS Code's settings it uses the defaults: state in `~/.claude/devdesk/state`, tmux server `devdesk`, every session, no tunnel. The flags are `--port`, `--auth header|loopback`, `--identity-header`, `--allow-user` (repeat it for more users), `--public-host`, `--tunnel-command`, `--state-dir`, `--root` and `--poll-ms`. There is no flag for the address: it listens on `127.0.0.1` only. Stop it with Ctrl-C, or with `kill <pid>`; the pid is in `~/.claude/devdesk/state/web/web.json`.
+`<extension dir>` is where VS Code installed DevDesk for Claude Code (`~/.vscode-server/extensions/roniburd.devdesk-claude-<version>` on a remote host). Without VS Code's settings it uses the defaults: state in `~/.claude/devdesk/state`, tmux server `devdesk`, every session, no tunnel. The flags are `--port`, `--auth header|loopback`, `--identity-header`, `--allow-user` (repeat it for more users), `--public-host`, `--tunnel-command`, `--tunnel tailscale|devtunnel|cloudflare|ngrok` (a preset; Cloudflare needs the config file for its team and AUD tag), `--state-dir`, `--root` and `--poll-ms`. There is no flag for the address: it listens on `127.0.0.1` only. Stop it with Ctrl-C, or with `kill <pid>`; the pid is in `~/.claude/devdesk/state/web/web.json`.
 
 ### When it doesn't start
 
 - **Port 7690 is in use**: something else listens there, maybe a web access daemon you started by hand. Change `devdesk.web.port`.
-- **Web: tunnel down**: the tunnel command exited, or printed no URL within 60 s. The status bar item's tooltip shows its last line. Loopback still works. Fix the cause, then **Restart Tunnel**.
+- **Web: tunnel down**: the tunnel command exited, or printed no URL within 60 s. The status bar item's tooltip shows its last line, and for a preset a notification says what to do (sign in, add the ngrok authtoken, let your user run Tailscale Serve). Loopback still works. Fix the cause, then **Restart Tunnel**, or **Choose Tunnel** to pick another.
 - Anything else: the error offers **Open Log** (`daemon.log`). A daemon that crashed leaves a stale `web.json`; the next Start replaces it.
 
 ## 17. Troubleshooting
@@ -1333,13 +1327,17 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 
 | Setting | Default |
 |---|---|
+| `devdesk.web.tunnel` | *machine*, `auto`: `devdesk.web.tunnelCommand` when set, else Start asks. `tailscale`, `devtunnel`, `cloudflare`, `ngrok`: that preset ([Anywhere else](#anywhere-else-tailscale-dev-tunnels-cloudflare-ngrok-or-ssh--l)); `custom`: the tunnel command; `none`: no tunnel |
 | `devdesk.web.port` | `7690` (the daemon listens on `127.0.0.1` only) |
 | `devdesk.web.auth` | *machine*, `header` (`loopback`: no identity check, so any process on this host can drive Claude; no tunnel or public host with it) |
-| `devdesk.web.identityHeader` | *machine*, empty: none, so every request is denied |
-| `devdesk.web.allowedUsers` | *machine*, `[]`: no one, so every request is denied |
+| `devdesk.web.identityHeader` | *machine*, empty: none, so every request is denied. Not used by the presets |
+| `devdesk.web.allowedUsers` | *machine*, `[]`: no one, so every request is denied. Your Tailscale login, or your email for `cloudflare` and `ngrok` (Choose Web Access Tunnel fills it in) |
 | `devdesk.web.publicHost` | *machine*, empty (the host of the URL the tunnel command prints) |
 | `devdesk.web.tunnelCommand` | *machine*, empty: no tunnel |
 | `devdesk.web.pollMs` | `2000` (how often the open page's list refreshes; 500 to 60000) |
+| `devdesk.web.cloudflare.team` | *machine*, empty: for the `cloudflare` tunnel, your team name (`<team>.cloudflareaccess.com`); empty denies every request |
+| `devdesk.web.cloudflare.audience` | *machine*, empty: for the `cloudflare` tunnel, the Access application's AUD tag; empty denies every request |
+| `devdesk.web.ngrok.oauthProvider` | *machine*, `google` (`github`, `microsoft`, `gitlab`): what visitors sign in with for the `ngrok` tunnel |
 
 ### Advanced
 

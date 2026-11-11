@@ -9,7 +9,7 @@ import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } fr
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { scrollLines } from './core/smoothScroll';
 import { claudeConfigFilePath } from './core/trust';
-import { type DaemonConfig, resolveWebSettings, type WebSettings } from './core/web/config';
+import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type WebSettings } from './core/web/config';
 import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -661,7 +661,17 @@ function webSettings(): WebSettings {
     publicHost: c.get('web.publicHost'),
     tunnelCommand: c.get('web.tunnelCommand'),
     pollMs: c.get('web.pollMs'),
+    tunnel: c.get('web.tunnel'),
+    cloudflareTeam: c.get('web.cloudflare.team'),
+    cloudflareAudience: c.get('web.cloudflare.audience'),
+    ngrokProvider: c.get('web.ngrok.oauthProvider'),
   };
+}
+
+/** Start asks which tunnel to use first (needsTunnelChoice) for a window whose root is `root`. */
+export function webNeedsTunnelChoice(root: string | undefined = workspaceRoot()): boolean {
+  const provider = !!(root && workspaceProvider?.isWorkspace(root) && workspaceProvider.web);
+  return needsTunnelChoice(webSettings(), provider);
 }
 
 /** The root as configured and with symlinks resolved (a session's cwd is the real path), as the Claude view scopes it. */
