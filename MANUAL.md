@@ -257,7 +257,7 @@ Each level lists the running items and the last 10 finished ones (`devdesk.sessi
 
 ### See what a turn changed
 
-To see what Claude's last reply changed, right-click a session row (or a card on the Claude Board) and pick one of:
+To see what Claude's last reply changed, right-click a session row (or a card on the Claude Board), then **Changes ▸** and one of:
 
 - **Show Last Turn's Changes** opens what Claude changed in its last turn.
 - **Show Changes by Turn…** lists the session's recent turns, newest first. Each shows its prompt, how many files it changed and when. Pick one to open its changes. Its fork button (**Fork from Here**) forks the session from that turn instead (see [Fork from a turn](#fork-from-a-turn)).
@@ -284,11 +284,11 @@ DevDesk reads the transcript backward from its end, so a long session costs only
 
 ### Fork from a turn
 
-**Fork Claude Session** copies the whole conversation. To go back to an earlier point instead, fork from a turn: the new session remembers the conversation up to the end of that turn, and nothing after it. The original session and its transcript stay as they are.
+**Fork ▸ Fork** copies the whole conversation. To go back to an earlier point instead, fork from a turn: the new session remembers the conversation up to the end of that turn, and nothing after it. The original session and its transcript stay as they are.
 
 There are three ways to start:
 
-- Right-click a session row (or a card on the Claude Board) and pick **Fork from a Turn…**. It lists the recent turns like **Show Changes by Turn…**. Pick the turn to fork after. Each turn's diff button shows its changes first.
+- Right-click a session row (or a card on the Claude Board) and pick **Fork ▸ Fork from a Turn…** (on a board card, **Fork from a Turn…**). It lists the recent turns like **Show Changes by Turn…**. Pick the turn to fork after. Each turn's diff button shows its changes first.
 - In **Show Changes by Turn…**, click a turn's fork button (**Fork from Here**).
 - In a turn's diff editor, click the fork button in the editor title (**Fork from This Turn…**).
 
@@ -359,7 +359,7 @@ Click a row, or press Enter on it. Its terminal opens in the editor area and get
 - The new session runs in the folder the original is in now.
 - It is named after its worktree: `cc-<worktree>-<n>`.
 
-To fork from an earlier point of the conversation, optionally with the files as they were then, use **Fork from a Turn…** in the row's right-click menu (see [Fork from a turn](#fork-from-a-turn)).
+To fork from an earlier point of the conversation, optionally with the files as they were then, use **Fork ▸ Fork from a Turn…** in the row's right-click menu (see [Fork from a turn](#fork-from-a-turn)).
 
 ### End a session
 
@@ -372,7 +372,7 @@ To fork from an earlier point of the conversation, optionally with the files as 
 To pick a mode for one session, use:
 
 - **New Claude Session with Mode…** in the Claude view's **…** menu, or
-- **Fork Claude Session with Mode…** in a row's right-click menu.
+- **Fork ▸ Fork with Mode…** in a row's right-click menu.
 
 The shipped modes:
 
@@ -456,7 +456,7 @@ DevDesk saves what you have read. A reload or a reconnect keeps it. Sessions tha
 
 ### Mark sessions read or unread by hand
 
-Right-click a session and pick **Mark Claude Session as Read** or **Mark Claude Session as Unread**, like an email. This works in the Claude view, the Worktrees view and on the board.
+Right-click a session and pick **Mark as Read** or **Mark as Unread** (at the top of the menu), like an email. This works in the Claude view, the Worktrees view and on the board.
 
 To mark several at once in the Claude view, select them with Cmd/Ctrl-click or Shift-click, then right-click.
 
@@ -464,9 +464,9 @@ Note: if you mark a session unread while its terminal is in front, it stays unre
 
 ### Color sessions
 
-![Right-click a session, then Color: No Color, then six colors, with a ✓ on the current one](images/manual-color-menu.png)
+![Right-click a session, then Tag 🏷: No Color, then six colors, with a ✓ on the current one](images/manual-color-menu.png)
 
-Right-click a session in the Claude view or a card on the Claude Board and pick **Color ▸**, then a color: red, orange, yellow, green, blue or purple. Its title is drawn in that color, for example to tell apart what each session is for. The current color has a ✓; pick **No Color** to take it away. In the Claude view, select several sessions first to color them all at once.
+Right-click a session in the Claude view or a card on the Claude Board and pick **Tag 🏷 ▸**, then a color: red, orange, yellow, green, blue or purple. Its title is drawn in that color, for example to tell apart what each session is for. The current color has a ✓; pick **No Color** to take it away. In the Claude view, select several sessions first to color them all at once.
 
 A color wins over the grey of a read session; the unread dot still shows. Colors are kept per host, in every window, across reloads.
 
@@ -662,7 +662,7 @@ Link a worktree, or a session, to the ticket it is for: an issue of GitHub, Jira
 How a ticket gets linked:
 
 - **Found by DevDesk** (`devdesk.tickets.autoDetect`): in a worktree's branch or name (`feat/ABC-123-login`, `issue-42`, `42-fix-login`), and in a session's first prompt (`Fix ABC-123`, `closes #42`, a ticket URL). The workspace itself (`main`) is never linked this way. Once you unlink a ticket, DevDesk doesn't link it again.
-- **By hand**: **Link Ticket…** on a worktree row, a session row or a board card (right-click). Paste a key or a URL. Any other web page is linked as it is. For a ticket DevDesk can't read, it asks for a title (optional) to show on the chip. **Open Ticket** and **Unlink Ticket** are next to it.
+- **By hand**: **Link Ticket…** on a worktree row, a session row or a board card (right-click ▸ **Ticket**). Paste a key or a URL. Any other web page is linked as it is. For a ticket DevDesk can't read, it asks for a title (optional) to show on the chip. **Open Ticket** and **Unlink Ticket** are in the same **Ticket** submenu.
 - **By Claude**: `devdesk ticket <key|url>` (see [The devdesk command](#16-the-devdesk-command)).
 
 A session's own ticket goes first on its card; else the card shows its worktree's. Links are kept per host and shared by DevDesk Claude v1 and v2.
