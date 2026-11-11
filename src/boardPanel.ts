@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { RedrawLog } from './core/boardRedraws';
-import { type BacklogItem, besideBoardWidth, buildBoard, type BoardData, legacyPrompt } from './core/board';
+import { type BacklogItem, besideBoardWidth, buildBoard, type BoardData, launchKey, legacyPrompt } from './core/board';
 import { missingWorktree, parseCompose } from './core/composer';
 import type { SessionCard } from './core/sessions';
 import { truncate } from './core/sessionsView';
@@ -33,8 +33,12 @@ import {
   sessionsRecentlyFinishedMs,
   sessionsSort,
   workspaceRoot,
+  claudeAccountOf,
+  claudeAccounts,
+  claudeDefaultAccount,
 } from './config';
 import { isClaudeTerminalTab, liveCardTerminal } from './claudeSessions';
+import type { TicketLinks } from './ticketLinks';
 import { log, noteLatency } from './log';
 import { savePastedImage } from './pastedImages';
 import type { SessionsModel } from './sessionsModel';
@@ -71,6 +75,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   private panelSubscriptions: vscode.Disposable[] = [];
   private postTimer: NodeJS.Timeout | undefined;
   private checks: { hint(dir: string): string } | undefined;
+  private tickets: TicketLinks | undefined;
   /** Holds the model while the board is visible. */
   private readonly hold: { set(want: boolean): void };
   /** The session the last posted board marked as in front (`BoardSession.focused`). */
@@ -161,6 +166,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         if (e.affectsConfiguration('devdesk.sessions')) {
           this.schedulePost();
           // The Claude CLI (or its arguments) may be another one now: ask it again for its `/` list.
+          this.composer.clearCommands();
+        }
+        // The account pill and the cards' account labels (devdesk.claude.accounts, defaultAccount).
+        if (e.affectsConfiguration('devdesk.claude')) {
+          this.schedulePost();
           this.composer.clearCommands();
         }
         if (!e.affectsConfiguration('devdesk.board')) return;
@@ -277,6 +287,20 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     if (this.viewState.frontCard()?.id !== this.postedFocused) this.schedulePost();
   }
 
+  /**
+   * The Claude account of a card's session when there are several accounts and it is not the default one: from its
+   * transcript, else the one the board started it in.
+   */
+  private accountOf(): ((card: SessionCard) => string | undefined) | undefined {
+    if (claudeAccounts().length < 2) return undefined;
+    const fallback = claudeDefaultAccount().name;
+    const launched = this.composer.launchedAccountNames(this.model.current);
+    return (card) => {
+      const account = claudeAccountOf(card.transcriptPath)?.name ?? (card.tmuxSession ? launched.get(launchKey(card.tmuxServer, card.tmuxSession)) : undefined);
+      return account && account !== fallback ? account : undefined;
+    };
+  }
+
   /** The board as the webview shows it (`focused`: the session whose Claude terminal is in front). */
   data(focused = this.viewState.frontCard()?.id): BoardData {
     return buildBoard(this.model.current, this.backlog.all(), {
@@ -288,12 +312,21 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       starting: this.starting,
       models: this.composer.modelRows(),
       launchedModels: this.composer.launchedModels(this.model.current),
+      accountOf: this.accountOf(),
       parkedLimit: sessionsFinishedSessions(),
       sort: sessionsSort(),
       recentMs: sessionsRecentlyFinishedMs(),
       cardTitle: boardCardTitle(),
       checks: (dir) => this.checks?.hint(dir) ?? '',
+      ticket: (card) => this.tickets?.chip(this.tickets.forCard(card)),
     });
+  }
+
+  /** Where the cards' ticket chips come from (`TicketLinks`). */
+  setTickets(tickets: TicketLinks): void {
+    this.tickets = tickets;
+    this.composer.ticketPrompt = (dir, prompt) => tickets.promptFor(dir, prompt);
+    this.subscriptions.push(tickets.onDidChange(() => this.schedulePost()));
   }
 
   /** Where the cards' checks hints come from (`WorktreeChecks`): a card whose worktree has failing checks offers Fix checks. */
@@ -455,6 +488,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
           return void (await setGlobalSetting('board.cardLine', !boardCardLine()));
         case 'sidebar':
           return void (await this.tree.focus(m.id ? this.model.find(m.id) : undefined));
+        case 'openTicket':
+          return void (await vscode.commands.executeCommand('devdesk.tickets.open', { sessionId: m.id }));
         case 'fixChecks': {
           const dir = this.model.find(m.id)?.featureDir;
           if (dir) await vscode.commands.executeCommand('devdesk.checks.askClaude', dir);

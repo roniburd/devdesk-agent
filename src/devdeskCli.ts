@@ -23,7 +23,7 @@ import {
 import type { DiffMode } from './core/git';
 import { featureForCwd, processAlive } from './core/sessions';
 import { featureDirs } from './core/worktrees';
-import { claudeConfigDir, cliEnabled, sessionsStateDir, workspaceRoot } from './config';
+import { ambientClaudeConfigDir, claudeAccounts, cliEnabled, sessionsStateDir, workspaceRoot } from './config';
 import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { changedFiles, openChanges, openDiff } from './worktreeDiffs';
@@ -74,6 +74,8 @@ export class CliBridge implements vscode.Disposable {
   handled = 0;
   /** Takes `devdesk worker` requests (set once it exists). */
   workers: { handle(req: CliRequest): Promise<CliAnswer> } | undefined;
+  /** Takes `devdesk ticket` requests (set once it exists). */
+  tickets: { handleCli(req: CliRequest): Promise<CliAnswer> } | undefined;
 
   constructor(
     private readonly sessions: SessionsModel,
@@ -106,12 +108,12 @@ export class CliBridge implements vscode.Disposable {
 
   /** The `devdesk` command's path. */
   get command(): string {
-    return cliPaths(claudeConfigDir()).command;
+    return cliPaths(ambientClaudeConfigDir()).command;
   }
 
   private async start(): Promise<void> {
     if (this.paths) return;
-    const paths = cliPaths(claudeConfigDir());
+    const paths = cliPaths(ambientClaudeConfigDir());
     await mkdir(dirname(paths.script), { recursive: true });
     const wroteScript = await writeIfChanged(paths.script, CLI_SCRIPT, 0o755);
     const wroteCommand = await writeIfChanged(paths.command, cliWrapper('python3'), 0o755);
@@ -224,6 +226,8 @@ export class CliBridge implements vscode.Disposable {
         return this.note(req);
       case 'worker':
         return this.workers ? this.workers.handle(req) : { ok: false, message: 'this VS Code window does not run workers' };
+      case 'ticket':
+        return this.tickets ? this.tickets.handleCli(req) : { ok: false, message: 'this VS Code window does not link tickets' };
     }
   }
 
@@ -272,49 +276,63 @@ async function openFile(req: CliRequest): Promise<CliAnswer> {
   return { ok: true, message: `Opened ${path}${req.line ? `:${req.line}${req.column ? `:${req.column}` : ''}` : ''} in VS Code.` };
 }
 
-/** The skill file that tells Claude about the command: `skills/devdesk/SKILL.md` in Claude's config directory. */
-const skillFile = () => join(claudeConfigDir(), 'skills', SKILL_NAME, 'SKILL.md');
+/**
+ * The skill files that tell Claude about the command: `skills/devdesk/SKILL.md` in each Claude account's config
+ * directory (`devdesk.claude.accounts`; Claude's own when none is listed), so sessions in every account know it.
+ */
+const skillFiles = (): string[] => [...new Set(claudeAccounts().map((a) => join(a.configDir, 'skills', SKILL_NAME, 'SKILL.md')))];
 
-/** Rewrites DevDesk's skill file when it is there and this version's text differs (the command's path, its options). */
-export async function refreshSkill(command: string): Promise<boolean> {
-  const current = await readFile(skillFile(), 'utf8').catch(() => undefined);
-  if (current === undefined || !isOurSkill(current)) return false;
+/** Rewrites DevDesk's skill files that are there when this version's text differs (the command's path, its options); the ones rewritten. */
+export async function refreshSkill(command: string): Promise<string[]> {
   const text = skillText(command);
-  if (current === text) return false;
-  await writeFile(skillFile(), text);
-  return true;
+  const changed: string[] = [];
+  for (const file of skillFiles()) {
+    const current = await readFile(file, 'utf8').catch(() => undefined);
+    if (current === undefined || !isOurSkill(current) || current === text) continue;
+    await writeFile(file, text);
+    changed.push(file);
+  }
+  return changed;
 }
 
 /** The commands that add DevDesk's skill to Claude Code (opt-in), and remove it. */
 export function registerCliCommands(bridge: CliBridge): vscode.Disposable[] {
   void refreshSkill(bridge.command).then(
-    (changed) => changed && log.info(`updated the devdesk skill: ${skillFile()}`),
+    (changed) => changed.length && log.info(`updated the devdesk skill: ${changed.join(', ')}`),
     (err: Error) => log.warn(`cannot update the devdesk skill: ${err.message}`),
   );
   return [
     registerTimedCommand('devdesk.cli.installSkill', async () => {
-      const file = skillFile();
-      const current = await readFile(file, 'utf8').catch(() => undefined);
-      if (current !== undefined && !isOurSkill(current)) {
-        void vscode.window.showWarningMessage(`${file} is not DevDesk's: remove it first, or keep it.`);
-        return false;
+      const written: string[] = [];
+      for (const file of skillFiles()) {
+        const current = await readFile(file, 'utf8').catch(() => undefined);
+        if (current !== undefined && !isOurSkill(current)) {
+          void vscode.window.showWarningMessage(`${file} is not DevDesk's: remove it first, or keep it.`);
+          continue;
+        }
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, skillText(bridge.command));
+        log.info(`wrote the devdesk skill: ${file}`);
+        written.push(file);
       }
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, skillText(bridge.command));
-      log.info(`wrote the devdesk skill: ${file}`);
-      void vscode.window.showInformationMessage(`Claude sessions started from now on know the devdesk command (${file}).`);
+      if (!written.length) return false;
+      void vscode.window.showInformationMessage(`Claude sessions started from now on know the devdesk command (${written.join(', ')}).`);
       return true;
     }),
     registerTimedCommand('devdesk.cli.removeSkill', async () => {
-      const file = skillFile();
-      const current = await readFile(file, 'utf8').catch(() => undefined);
-      if (current === undefined || !isOurSkill(current)) {
+      const removed: string[] = [];
+      for (const file of skillFiles()) {
+        const current = await readFile(file, 'utf8').catch(() => undefined);
+        if (current === undefined || !isOurSkill(current)) continue;
+        await unlink(file);
+        await rmdir(dirname(file)).catch(() => undefined);
+        log.info(`removed the devdesk skill: ${file}`);
+        removed.push(file);
+      }
+      if (!removed.length) {
         void vscode.window.showInformationMessage('The devdesk skill is not installed.');
         return false;
       }
-      await unlink(file);
-      await rmdir(dirname(file)).catch(() => undefined);
-      log.info(`removed the devdesk skill: ${file}`);
       void vscode.window.showInformationMessage('Removed the devdesk skill: new Claude sessions no longer know the devdesk command.');
       return true;
     }),

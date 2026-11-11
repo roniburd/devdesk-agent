@@ -1,0 +1,40 @@
+[32m/tmp/proj[39m $ claude --settings '{"disableAllHooks
+":true}'
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [1mClaude[0m [1mCode[0m [38;5;246mv2.1.319[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mOpus[39m [38;5;246m(1M[39m [38;5;246mcontext)[39m [38;5;246m·[39m [38;5;246mClaude[39m [38;5;246mAPI[39m
+[38;5;174m ▝▝[39m   [38;5;174m▝▝[39m   [38;5;246m/tmp/proj[39m
+
+[38;5;174m▎[39m Welcome to Claude Code.
+[38;5;174m▎[39m Run /help for help.
+[38;5;174m▎[39m Read more: https://code.claude.com/docs
+
+[38;5;246m[48;5;237m❯ [38;5;231mReply with only the word hi, after thinking about it for a few seconds.[39m
+
+[38;5;231m[49m⏺[39m hi
+
+[38;5;246m✻[39m [38;5;246mBaked for 5s · done 1:52 PM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mRun this exact bash command and nothing else: touch /tmp/proj/made-by-claude.txt[39m
+
+[38;5;211m[49m⏺[39m [1mBash[0m(touch /tmp/proj/made-by-claude.txt)
+[38;5;246m  ⎿  Interrupted · What should Claude do instead?[39m
+
+[38;5;246m✻[39m [38;5;246mChurned for 2s · done 1:53 PM[39m
+
+[38;5;246m[48;5;237m❯ [38;5;231mUse the AskUserQuestion tool to ask me one question: red or blue? Do nothing else.[39m
+[38;5;246m[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[38;5;16m[48;5;153m ☐ Color [39m[49m
+
+[1m[38;5;231mRed or blue?[0m
+
+[38;5;153m❯[39m [38;5;246m1.[39m [38;5;153mRed[39m
+     [38;5;246mChoose red[39m
+  [38;5;246m2.[39m Blue
+     [38;5;246mChoose[39m [38;5;246mblue[39m
+  [38;5;246m3.[39m [38;5;246mType[39m [38;5;246msomething.[39m
+[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  4. Chat about this
+
+[38;5;246mEnter[39m [38;5;246mto[39m [38;5;246mselect[39m [38;5;246m·[39m [38;5;246m↑/↓[39m [38;5;246mto[39m [38;5;246mnavigate[39m [38;5;246m·[39m [38;5;246mEsc[39m [38;5;246mto[39m [38;5;246mcancel[39m
+
+

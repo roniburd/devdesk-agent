@@ -68,6 +68,15 @@ describe('parseHookRecord', () => {
     const [card] = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [rec({ sessionStartedAt: 900 })], features, alive);
     expect(card.sessionStartedAt).toBe(900);
   });
+  it('keeps the subagent roster the hooks wrote, without its malformed or empty fields, and puts it on the card', () => {
+    const subagents = { a1: { type: 'Explore', name: null, startedAt: 5, runningSince: 5, stoppedAt: null, idleAt: 9, resumed: false }, bad: 'x' };
+    const parsed = parseHookRecord(JSON.stringify({ ...rec({}), subagents }));
+    expect(parsed?.subagents).toEqual({ a1: { type: 'Explore', startedAt: 5, runningSince: 5, idleAt: 9 } });
+    expect(parseHookRecord(JSON.stringify({ ...rec({}), subagents: null }))).not.toHaveProperty('subagents');
+    expect(parseHookRecord(JSON.stringify({ ...rec({}), subagents: { bad: 1 } }))).not.toHaveProperty('subagents');
+    const [card] = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [rec({ subagents: parsed?.subagents })], features, alive);
+    expect(card.subagents).toEqual(parsed?.subagents);
+  });
   it("lists one card after a /clear: the new session's record wins the Claude process", () => {
     const old = rec({ sessionId: 'old', state: 'waiting', updatedAt: 1000 });
     const cleared = rec({ sessionId: 'new', state: 'idle', detail: 'Ready', updatedAt: 2000 });

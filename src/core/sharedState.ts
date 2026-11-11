@@ -19,10 +19,11 @@ export interface SharedState {
 
 /**
  * `globalState` keys kept in the host's shared file: what the user has read of each session and the colors given to
- * them, per host (`hostKey`), and the read state saved for every host together by versions before that.
+ * them, per host (`hostKey`), and the read state saved for every host together by versions before that; and the
+ * tickets linked to worktrees and sessions (`tickets.ts`).
  */
 export function isSharedGlobalKey(key: string): boolean {
-  return /^devdesk\.sessions\.(seen|colors)(@|$)/.test(key);
+  return /^devdesk\.sessions\.(seen|colors)(@|$)/.test(key) || key === 'devdesk.tickets.links';
 }
 
 /** `workspaceState` keys kept in the project folder's shared file. */

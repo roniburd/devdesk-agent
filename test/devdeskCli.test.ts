@@ -28,6 +28,11 @@ describe('parseCliRequest', () => {
   it('reads a request with the window token', () => {
     expect(parseCliRequest(JSON.stringify(base), 't0k')).toEqual({ id: 'abcdef012345', action: 'open', cwd: '/w', path: '/w/a.ts', line: 3, column: 2, focus: true, server: 'devdesk', pane: '%4' });
   });
+  it('reads devdesk ticket, in tmux or not, and refuses a text too long', () => {
+    const ticket = { id: 'abcdef012345', token: 't0k', action: 'ticket', cwd: '/w', text: 'ABC-1' };
+    expect(parseCliRequest(JSON.stringify(ticket), 't0k')).toEqual({ id: 'abcdef012345', action: 'ticket', cwd: '/w', text: 'ABC-1', focus: false });
+    expect(parseCliRequest(JSON.stringify({ ...ticket, text: 'x'.repeat(3000) }), 't0k')).toEqual({ error: 'the ticket is longer than 2000 characters' });
+  });
   it('refuses another token, unknown actions, relative paths and a note outside tmux', () => {
     expect(parseCliRequest(JSON.stringify(base), 'other')).toEqual({ error: 'wrong token' });
     expect(parseCliRequest(JSON.stringify({ ...base, action: 'rm' }), 't0k')).toEqual({ error: 'unknown action rm' });

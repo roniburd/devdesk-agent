@@ -83,7 +83,7 @@ Notes:
 Which events get a hook:
 
 - Always: SessionStart, UserPromptSubmit, PreToolUse, PermissionRequest, PostToolUse, PostToolUseFailure, Notification, Stop, StopFailure and SessionEnd.
-- Elicitation and ElicitationResult (an MCP server's input form), only when `claude --version` says 2.1.63 or newer, PostCompact from 2.1.76, and PostToolBatch from 2.1.118. An older Claude Code rejects a settings file that names an event it doesn't know, and that would turn off your own hooks too.
+- Elicitation and ElicitationResult (an MCP server's input form), only when `claude --version` says 2.1.63 or newer, PostCompact from 2.1.76, PostToolBatch from 2.1.118, TeammateIdle from 2.1.290, and SubagentStart and SubagentStop from 2.1.311 (before that, SubagentStop also ran for subagents still running). An older Claude Code rejects a settings file that names an event it doesn't know, and that would turn off your own hooks too.
 - If you later upgrade Claude Code, the Claude view offers to install the hooks again (in a new or reloaded window), to add the newer events.
 - Not PreCompact: it also fires for a compaction that is then cancelled.
 
@@ -242,7 +242,9 @@ With `devdesk.sessions.showChildren` on, the view lists under each session what 
 - **Background shell commands**: `run_in_background`, and `!` commands you typed once they move to the background.
 - **Workflows**, grouped by phase, with their agents.
 
-Running items spin. Their session shows `N running` and starts expanded. Finished items show green (done), red (failed) or gray (stopped). Once a session's Claude exits, nothing it started shows as running.
+Running items spin. Their session shows `N running` and starts expanded. Finished items show green (done), red (failed) or gray (stopped). An agent team teammate waiting for a message shows blue (idle). Once a session's Claude exits, nothing it started shows as running.
+
+With Claude Code 2.1.311 or newer, the hooks also keep each session's subagents (SubagentStart, SubagentStop, and TeammateIdle from 2.1.290). A subagent then shows done as soon as it stops, without waiting for its transcript, and a subagent you resumed shows running again. Teammates show idle. A state the transcript shows as failed or stopped stays. Without these hooks (an older Claude Code, or hooks installed before this version), DevDesk goes by the transcripts alone. A new Claude process for the session (started, resumed or `/clear`) starts the list over. A compaction keeps it.
 
 Click an item to open it, scrolled to the end:
 
@@ -257,7 +259,7 @@ Each level lists the running items and the last 10 finished ones (`devdesk.sessi
 To see what Claude's last reply changed, right-click a session row (or a card on the Claude Board) and pick one of:
 
 - **Show Last Turn's Changes** opens what Claude changed in its last turn.
-- **Show Changes by Turn…** lists the session's recent turns, newest first. Each shows its prompt, how many files it changed and when. Pick one to open its changes.
+- **Show Changes by Turn…** lists the session's recent turns, newest first. Each shows its prompt, how many files it changed and when. Pick one to open its changes. Its fork button (**Fork from Here**) forks the session from that turn instead (see [Fork from a turn](#fork-from-a-turn)).
 
 Both are in the command palette too (**Worktrees: …**), for the session selected in the Claude view.
 
@@ -278,6 +280,28 @@ How DevDesk gets each file's text before and after the turn:
 3. **Only the edited parts.** When neither works, the diff shows just the edited lines with a little context, or the old and new text of each edit. This happens when the file changed since, or an edit's new text appears more than once. A Write over a file whose earlier text is unknown shows an empty "before". A notebook edit shows only the new cell.
 
 DevDesk reads the transcript backward from its end, so a long session costs only its last turns. It reads the last 30 turns (`devdesk.sessions.turnChangesTurns`), and at most 64 MB from the end of the transcript and of each subagent's (`devdesk.sessions.turnChangesMaxMB`). A turn that started before that, or has a line over 16 MB, is marked **partly read** and may miss changes.
+
+### Fork from a turn
+
+**Fork Claude Session** copies the whole conversation. To go back to an earlier point instead, fork from a turn: the new session remembers the conversation up to the end of that turn, and nothing after it. The original session and its transcript stay as they are.
+
+There are three ways to start:
+
+- Right-click a session row (or a card on the Claude Board) and pick **Fork from a Turn…**. It lists the recent turns like **Show Changes by Turn…**. Pick the turn to fork after. Each turn's diff button shows its changes first.
+- In **Show Changes by Turn…**, click a turn's fork button (**Fork from Here**).
+- In a turn's diff editor, click the fork button in the editor title (**Fork from This Turn…**).
+
+Then pick what happens to the files:
+
+- **Keep Current Files.** The files stay as they are now. Claude remembers the code as it was after that turn, not as it is now, so tell it what changed since, or ask it to look again.
+- **Rewind Files Too.** The files Claude changed after that turn go back to how they were then, and files Claude created after it are deleted. This changes the folder the original session works in, so the original session sees the change too. A dialog lists the files first, and nothing is written until you confirm.
+- **In a New Worktree.** DevDesk makes a Claude Code worktree from the HEAD of the session's worktree, puts in it the files Claude changed in the turns read, as they were after that turn, and starts the fork there. The original session and its files stay as they are. This is offered in a git repository, and in a workspace whose New Worktree Session makes Claude Code worktrees.
+
+Rewinding never overwrites your work. A file is put back only when it still holds what Claude last wrote. A file changed since, by you or another program, is left as it is, and so is a file whose earlier text the transcript doesn't have (for example a notebook). The dialog and the notification name those files. The rewind uses the same transcript DevDesk reads to show a turn's changes (the last 30 turns, see above), and Claude's edits only: changes made by shell commands aren't undone.
+
+The fork runs in the original session's Claude account (see [Claude accounts](#claude-accounts)), on its model unless the launch mode or `devdesk.sessions.claudeArgs` picks one, in the default launch mode. Its name, which the Claude view and the board show, is *forked from “session title” at turn N*, with N counted from the session's first turn.
+
+How it works: DevDesk writes a copy of the transcript up to the next turn's prompt as a new session beside the original's (and copies Claude's file checkpoints for it, so `/rewind` works in the fork), then starts `claude --resume <new id> --name <name>`. Claude Code's own `--resume-session-at` would cut the conversation, but works only with `-p`. Its `--rewind-files` would restore the files, but overwrites files changed since, and can't write into another worktree.
 
 ### Other places that show urgency
 
@@ -334,6 +358,8 @@ Click a row, or press Enter on it. Its terminal opens in the editor area and get
 - The new session runs in the folder the original is in now.
 - It is named after its worktree: `cc-<worktree>-<n>`.
 
+To fork from an earlier point of the conversation, optionally with the files as they were then, use **Fork from a Turn…** in the row's right-click menu (see [Fork from a turn](#fork-from-a-turn)).
+
 ### End a session
 
 **✕** on a row (**End** on the board) ends a session. DevDesk asks first, naming the session by its title. Then it kills the session's tmux session.
@@ -373,6 +399,43 @@ A new session runs this, in order:
 To replace the whole command, set `devdesk.sessions.command`. DevDesk inserts the mode and Fork arguments right after the program name (the first word of the command).
 
 With `devdesk.sessions.programStatus` on, DevDesk puts `python3 -I ~/.claude/devdesk/devdesk_status.py <state dir>/status` before the binary. The relay passes every byte through unchanged. It answers Claude's status probe (OSC 7501), which tmux can't, and writes Claude's latest state to a file DevDesk reads. A session without status hooks then shows working, waiting (for an approval, an answer or a sign-in) or idle instead of no status. When hooks are installed they mostly win; see [When Claude's own status goes first](#when-claudes-own-status-goes-first) for when Claude's report goes first. When `python3` doesn't run, sessions start without the relay.
+
+With `devdesk.claude.disableAutoUpdater` on, the sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1`, so Claude Code doesn't update itself under them.
+
+### Claude accounts
+
+Claude Code keeps its login, settings, transcripts and sessions in one config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. To use more than one Claude account (for example a work and a personal subscription), give each its own directory in `devdesk.claude.accounts`:
+
+```json
+"devdesk.claude.accounts": [
+  { "name": "personal", "configDir": "~/.claude" },
+  { "name": "work", "configDir": "~/.claude-work", "env": { "AWS_PROFILE": "work" } }
+]
+```
+
+Sign in once in each: `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`. Each session then runs in one account:
+
+- **New sessions** use the default account: `devdesk.claude.defaultAccount`, else the first one listed. A folder's workspace settings can set its own default.
+- **Picking one.** With more than one account, the prompt box has an account pill next to the model pill. The box remembers the pick for this project folder, as it remembers the model. **New Claude Session**, **New Worktree Session** and **+** on a worktree row ask which account. A prompt for later keeps the account it was saved with.
+- **Cards.** A card names its account when it isn't the default one.
+- **Resume, Fork and parked sessions** keep the session's account: DevDesk tells it from where the session's transcript is (`<configDir>/projects/…`), so DevDesk v1 and v2 agree. Workers (`devdesk worker start`) run in their coordinator's account.
+
+DevDesk starts a session in an account by exporting `CLAUDE_CONFIG_DIR` and the account's `env` before the command. An account whose `configDir` is Claude's own directory starts without `CLAUDE_CONFIG_DIR`, so Claude keeps reading `~/.claude.json` as before. Don't put secrets in `env`: they're on the session's command line. Claude keeps its own credentials per config directory.
+
+What follows the account:
+
+| What | Where |
+|---|---|
+| Status hooks | `settings.json` of every account. The Claude view's **Install Claude status hooks…** row shows until each has them, and installs them where they're missing. Each account gets its own copy of the hook script. |
+| Folder trust | `<configDir>/.claude.json` of the session's account (`devdesk.board.claudeConfigFile` for Claude's own directory). |
+| Transcripts | Token usage and the board's past sessions read `projects` of every account. |
+| Session names | `sessions` of every account (unless `devdesk.sessions.claudeSessionsDir` is set). |
+| Fork parents | `jobs` of the session's account (unless `devdesk.sessions.claudeJobsDir` is set). |
+| The devdesk skill | **DevDesk: Install devdesk Skill** writes it into every account. |
+| `/` list | The default account's skills and commands. |
+| Plan limits | The status line goes in the default account only, so 📊 shows its limits. |
+
+The sessions state directory (`devdesk.sessions.stateDir`) is shared by all accounts.
 
 ## 5. Read and unread
 
@@ -498,6 +561,19 @@ DevDesk works in any git repository (and `git worktree`s, including Claude Code'
 
 **New Worktree Session** starts Claude with its own `--worktree` flag, so Claude Code makes the worktree (`.claude/worktrees/<name>` in the repository) and starts in it.
 
+### Trust for new worktrees
+
+The first time Claude starts in a folder, it may ask *Do you trust the files in this folder?*. A session waiting on that question can't start in the background. So when DevDesk makes a worktree (**New Worktree Session**, the board, `devdesk worker start`), it answers yes for it in Claude's config file (`devdesk.board.claudeConfigFile`), as if you had. It does so only when:
+
+- Claude already trusts the workspace or repository the worktree is made in, and
+- Claude would ask in the new folder: the worktree, or a git package in it.
+
+It never trusts any other folder. Claude already trusts a git worktree of a repository it trusts, so there DevDesk writes nothing.
+
+`claude --worktree` refuses to start in a package Claude hasn't trusted, even when it trusts the workspace. Then DevDesk makes the Claude Code worktree itself, with `git worktree add` from the package's `HEAD`, and starts Claude in it.
+
+Setting: `devdesk.worktrees.autoTrust` (`true`). Off: Claude asks, and the session opens so you can answer.
+
 ### Open a worktree's session
 
 The robot icon on a Worktrees row opens that worktree's own session, `cc-<worktree>`.
@@ -578,6 +654,31 @@ How it reads them:
 - With the [GitHub CLI](https://cli.github.com) (`gh`, setting `devdesk.checks.ghPath`), signed in (`gh auth login`), for each package of the worktree whose git remote is on GitHub. It only reads: `gh pr view --json`, a GraphQL query for the review threads, and `gh run view --log-failed`. Without `gh`, or signed out, there are no hints, and the command says why.
 - While the Worktrees view is visible, on its refresh (`devdesk.worktrees.refreshSeconds`), for the worktrees it lists, each at most every `devdesk.checks.refreshMinutes` (5). After a failure the next try waits twice as long each time, up to `devdesk.checks.maxBackoffMinutes`. **Ask Claude to Fix Checks** and *Worktrees: Refresh Pull Request Checks* read them at once.
 - Merged and closed pull requests have nothing to fix. A check still running isn't counted.
+### Link a ticket
+
+Link a worktree, or a session, to the ticket it is for: an issue of GitHub, Jira, Linear, or any tracker you describe in a setting. Its key and status show as a chip on the worktree's row (🎫 `ABC-123 · In progress`) and on the board cards of its sessions. Hover the chip for the title, status and assignee. Click it on a card, or the link icon on a row, to open the ticket in the browser.
+
+How a ticket gets linked:
+
+- **Found by DevDesk** (`devdesk.tickets.autoDetect`): in a worktree's branch or name (`feat/ABC-123-login`, `issue-42`, `42-fix-login`), and in a session's first prompt (`Fix ABC-123`, `closes #42`, a ticket URL). The workspace itself (`main`) is never linked this way. Once you unlink a ticket, DevDesk doesn't link it again.
+- **By hand**: **Link Ticket…** on a worktree row, a session row or a board card (right-click). Paste a key or a URL. Any other web page is linked as it is. For a ticket DevDesk can't read, it asks for a title (optional) to show on the chip. **Open Ticket** and **Unlink Ticket** are next to it.
+- **By Claude**: `devdesk ticket <key|url>` (see [The devdesk command](#16-the-devdesk-command)).
+
+A session's own ticket goes first on its card; else the card shows its worktree's. Links are kept per host and shared by DevDesk Claude v1 and v2.
+
+With `devdesk.tickets.includeInPrompt` on, a session the board starts in a worktree gets a line after your prompt: `Ticket: ABC-123 "Fix the login" (In progress) https://…`. A prompt that already names the ticket stays as it is.
+
+What each tracker recognises, and what DevDesk reads (only reads; it keeps no tokens):
+
+| Tracker | Recognises | Title and status |
+|---|---|---|
+| GitHub issues | issue URLs; `owner/repo#42`; `#42` and `GH-42` for the worktree's GitHub repository (in a prompt, only after *issue*, *fixes*, *closes* or *resolves*) | read with `gh issue view --json` (the `gh` of `devdesk.checks.ghPath`, signed in) |
+| Jira | with `devdesk.tickets.jira.baseUrl` set: its `/browse/ABC-123` links, and keys like `ABC-123` (only the projects in `devdesk.tickets.jira.projects` when set; never `UTF-8` or `SHA-256`) | read with `devdesk.tickets.jira.command` when set, such as `jira issue view "$DEVDESK_TICKET" --raw`; else link only |
+| Linear | `linear.app/<workspace>/issue/ENG-12` links; keys like `ENG-12` with `devdesk.tickets.linear.workspace` set (Jira takes a key first when both could) | link only |
+| Your own | each entry of `devdesk.tickets.patterns`: `{ "name", "regex", "url" }`, the regex's first group being the key, `{key}` (or `{1}`…) in the URL | link only |
+
+`devdesk.tickets.providers` picks the trackers on (`github`, `jira`, `linear`, `patterns`); empty is all. A title and status are read again at most every `devdesk.tickets.refreshMinutes` (10), a failed read too; **Claude: Refresh Tickets** reads them all now.
+
 ### Show sessions under worktrees
 
 Each worktree lists its sessions above its packages, like the Claude view does. The comment button in the Worktrees title bar turns this off and on. Setting: `devdesk.worktrees.showSessions`.
@@ -634,6 +735,8 @@ A card is kept short. It shows:
 In *Working*, a card also says what Claude is doing now, in one line (the insights live status, else the latest status).
 
 A card also shows the note Claude set on it with `devdesk note` (📌), in any lane (see [The devdesk command](#16-the-devdesk-command)).
+
+A card shows the ticket linked to its session or its worktree as a chip (🎫 `ABC-123 · In progress`) next to the worktree: click it to open the ticket (see [Link a ticket](#link-a-ticket)).
 
 A worker session's card says whose worker it is and how it stands (👥 `worker "lint" · working · of Split the refactor`), and its coordinator's card counts its workers (👥 `3 workers: 1 done, 2 working`); see [Coordinator and worker sessions](#coordinator-and-worker-sessions).
 
@@ -954,7 +1057,7 @@ Ultracode applies only to prompts and skills. It never applies to a command the 
 
 ### Untrusted folders
 
-Before a session starts in a folder Claude hasn't trusted yet, the box says Claude will ask first. The session opens so you can answer. DevDesk reads trust from `devdesk.board.claudeConfigFile` and never writes it.
+Before a session starts in a folder Claude hasn't trusted yet, the box says Claude will ask first. The session opens so you can answer. DevDesk reads trust from `devdesk.board.claudeConfigFile`. It writes there only to trust a worktree it just made (see [Trust for new worktrees](#trust-for-new-worktrees)).
 
 ## 11. Prompts for later
 
@@ -1199,11 +1302,14 @@ devdesk open <file>[:<line>[:<column>]] [--focus]   # open a file, at a line and
 devdesk diff [<file>] [--focus]                      # diff a file against the Worktrees view's base; no file: every changed file of this worktree
 devdesk note <text>                                  # a one-line note on this session's card on the board
 devdesk note --clear                                 # remove it
+devdesk ticket <key|url>                             # link the ticket this session works on (and its worktree, if it has none)
+devdesk ticket                                       # print the linked ticket; --clear unlinks it
 ```
 
 - What opens leaves the keyboard focus where it was, in Claude's terminal, unless `--focus`. `devdesk diff` with no file opens one multi-file diff editor, which VS Code puts in front.
 - The diff compares against the base the Worktrees view uses (mainline or uncommitted), and you can leave notes for Claude on it (see [Leave notes for Claude on a diff](#leave-notes-for-claude-on-a-diff)).
 - A note shows under the card's title (📌) and in its hover, and the board's search finds it. It belongs to the session's tmux pane, so it works only in a tmux session, and goes when the pane does.
+- `devdesk ticket` links the ticket to the session (in a tmux session) and to its worktree when that has none, the way **Link Ticket…** does (see [Link a ticket](#link-a-ticket)).
 - The command prints what it did. When it can't, it says why on stderr and exits with status 1: for example, no VS Code window running DevDesk Claude v2 has that folder open.
 
 ### Tell Claude about it
@@ -1344,6 +1450,9 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.claudeArgs` | none (for example `--model opus`; added to every mode) |
 | `devdesk.sessions.claudePath` | `$HOME/.toolbox/bin/claude` when it exists, else `claude` on PATH |
 | `devdesk.sessions.command` | empty: `<claudePath> <claudeArgs>; exec $SHELL -l` (set it to replace the whole command) |
+| `devdesk.claude.accounts` | *machine*, none (one account, Claude's own config directory; see [Claude accounts](#claude-accounts)) |
+| `devdesk.claude.defaultAccount` | empty (the first account listed; a folder's workspace settings can set its own) |
+| `devdesk.claude.disableAutoUpdater` | `false` (sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1`) |
 | `devdesk.sessions.programStatus` | *machine*, `true` (new sessions run Claude under a small Python relay that answers its status probe, OSC 7501, so sessions without hooks show working, waiting or idle, and sending to a session trusts Claude's own report; not with `devdesk.sessions.command`) |
 
 ### Terminals
@@ -1373,6 +1482,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.worktrees.cleanupBaseBranches` | `[]` (branches a worktree's commits must be in, any of them; empty: each package's mainline) |
 | `devdesk.worktrees.cleanupDeleteBranch` | `false` (also delete a cleaned-up git worktree's branch) |
 | `devdesk.worktrees.cleanupSuggestCount` | `5` (offer **Clean Up Worktrees…** when a window opens and this many are ready; 0: never) |
+| `devdesk.worktrees.autoTrust` | *machine*, `true` (accept Claude's trust dialog for a worktree DevDesk makes, and its packages, when Claude trusts the workspace or repository it is made in; see [Trust for new worktrees](#trust-for-new-worktrees)) |
 
 ### Pull request checks
 
@@ -1386,6 +1496,24 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.checks.logLines` | `40` (lines of a failing check's failed log in the prompt; 0: its link only) |
 | `devdesk.checks.maxLogs` | `3` (failed logs read for one prompt; the other failing checks get their link only) |
 | `devdesk.checks.ghPath` | *machine*, `gh` on PATH |
+
+### Tickets
+
+| Setting | Default |
+|---|---|
+| `devdesk.tickets.enabled` | `true` (link tickets to worktrees and sessions; chips on worktree rows and board cards) |
+| `devdesk.tickets.autoDetect` | `true` (find a worktree's ticket in its branch and name, a session's in its first prompt) |
+| `devdesk.tickets.includeInPrompt` | `false` (add the worktree's ticket after the prompt of a session the board starts there) |
+| `devdesk.tickets.fetch` | `true` (read titles and statuses where DevDesk can: `gh`, the Jira command) |
+| `devdesk.tickets.refreshMinutes` | `10` (a ticket is read again at most this often, a failure too) |
+| `devdesk.tickets.timeoutSeconds` | `15` (a slower read is stopped) |
+| `devdesk.tickets.providers` | `[]` (the trackers on, by id; empty: all) |
+| `devdesk.tickets.jira.baseUrl` | empty (no Jira) |
+| `devdesk.tickets.jira.projects` | `[]` (any project key) |
+| `devdesk.tickets.jira.command` | *machine*, empty (Jira is link only) |
+| `devdesk.tickets.linear.workspace` | empty (Linear links only, no bare keys) |
+| `devdesk.tickets.linear.teams` | `[]` (any team key) |
+| `devdesk.tickets.patterns` | `[]` (trackers of your own: `{ "name", "regex", "url" }`) |
 
 ### Claude Board
 
@@ -1403,7 +1531,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.board.models` | empty (the Claude CLI's model picker rows, else `Default`, `opus`, `sonnet`, `haiku`, `fable`, `opus[1m]`, `sonnet[1m]`, `fable[1m]`: the prompt box's model choices) |
 | `devdesk.board.specPrompt` | empty (**Spec**: the brainstorming skill when installed, else a write-a-spec-first instruction) |
 | `devdesk.board.pastedImagesDir` | empty (`~/.claude/devdesk/pasted-images`: where images pasted into the prompt box are saved; ones older than 30 days are deleted) |
-| `devdesk.board.claudeConfigFile` | empty (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`: read, never written, to warn before starting a session in a folder Claude has not trusted) |
+| `devdesk.board.claudeConfigFile` | empty (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`: read to warn before starting a session in a folder Claude has not trusted; written only by `devdesk.worktrees.autoTrust`) |
 | `devdesk.board.pasteSettleMs` | `500` (ms the board waits after pasting a command into a running session before it presses Enter, 1 ms more per 4 KB; raise it if a sent command stays typed instead of running) |
 
 ### Insights
@@ -1428,7 +1556,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.boardSearch.historyDays` | `90` (transcripts not changed for this many days are not searched; 1-3650) |
 | `devdesk.boardSearch.historyMaxSessions` | *machine*, `5000` (at most this many past sessions, the newest, are searched; 100-100000) |
 | `devdesk.boardSearch.historySaveMinutes` | `5` (how often the index file is saved while transcripts grow; other windows see new text once it is; 0-60, 0: every check) |
-| `devdesk.boardSearch.historyDir` | empty (`projects` in Claude's config directory) |
+| `devdesk.boardSearch.historyDir` | empty (`projects` in every Claude account's config directory) |
 
 ### Usage history
 
@@ -1463,8 +1591,8 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | Setting | Default |
 |---|---|
 | `devdesk.sessions.stateDir` | `~/.claude/devdesk/state` |
-| `devdesk.sessions.claudeSessionsDir` | empty (`~/.claude/sessions`) |
-| `devdesk.sessions.claudeJobsDir` | empty (`~/.claude/jobs`) |
+| `devdesk.sessions.claudeSessionsDir` | empty (`sessions` in every Claude account's config directory, `~/.claude/sessions` with none) |
+| `devdesk.sessions.claudeJobsDir` | empty (`jobs` in the session's Claude account, `~/.claude/jobs` with none) |
 | `devdesk.diagnostics.debugLog` | `false` (debug lines in the DevDesk output at info level) |
 | `devdesk.diagnostics.slowOperationSeconds` | `60` (0 disables) |
 | `devdesk.diagnostics.latencyOutlierFactor` | `3` (logs a command, sessions refresh, board render or tmux call that took 3× its usual time, with what DevDesk was doing; 0 disables) |

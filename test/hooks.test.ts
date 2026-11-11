@@ -75,6 +75,17 @@ describe('settings merge', () => {
     expect(addHooks(newer, CMD)).toEqual(addHooks(existing, CMD));
   });
 
+  it('installs the subagent roster events only from the Claude Code versions DevDesk relies on', () => {
+    const roster = ['SubagentStart', 'SubagentStop', 'TeammateIdle'];
+    for (const e of roster) expect(HOOK_EVENTS as readonly string[]).not.toContain(e);
+    expect(hookEvents('2.1.289').filter((e) => roster.includes(e))).toEqual([]);
+    expect(hookEvents('2.1.290').filter((e) => roster.includes(e))).toEqual(['TeammateIdle']);
+    // Before 2.1.311 SubagentStop also ran for subagents still running.
+    expect(hookEvents('2.1.310').filter((e) => roster.includes(e))).toEqual(['TeammateIdle']);
+    expect(hookEvents('2.1.311').filter((e) => roster.includes(e))).toEqual(['SubagentStart', 'SubagentStop', 'TeammateIdle']);
+    expect(hookEvents(parseClaudeVersion('2.1.319.1689 (Claude Code, channel stable)'))).toEqual(expect.arrayContaining(roster));
+  });
+
   it('upgrades an old-format install in place, keeping user hooks', () => {
     const old = addHooks(existing, OLD_CMD);
     expect(hasHooks(old, CMD)).toBe(false);
@@ -584,6 +595,141 @@ describe('hook script session boundaries', () => {
   it('a compaction of a session it has no record of starts one', async () => {
     send('SessionStart', { source: 'compact' });
     expect(await record()).toMatchObject({ state: 'idle', detail: 'Ready' });
+  });
+});
+
+describe('hook script subagent roster', () => {
+  let dir: string;
+  let script: string;
+  let state: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'devdesk-roster-'));
+    script = join(dir, 'devdesk_hook.py');
+    state = join(dir, 'state');
+    await writeFile(script, HOOK_SCRIPT);
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const send = (event: string, extra: Record<string, unknown> = {}) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, DEVDESK_STATE_DIR: state };
+    delete env.TMUX;
+    delete env.TMUX_PANE;
+    const input = JSON.stringify({ session_id: 'abc', hook_event_name: event, cwd: '/w/x', ...extra });
+    const r = spawnSync('python3', ['-I', script], { input, env, encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  };
+  const record = async () => JSON.parse(await readFile(join(state, 'abc.json'), 'utf8'));
+  // Payloads as Claude Code 2.1.319 sends them (captured from a real session).
+  const start = (agent: string, type = 'general-purpose') => send('SubagentStart', { agent_id: agent, agent_type: type });
+  const stop = (agent: string, type = 'general-purpose') =>
+    send('SubagentStop', { agent_id: agent, agent_type: type, stop_hook_active: false, agent_transcript_path: `/t/abc/subagents/agent-${agent}.jsonl`, background_tasks: [], session_crons: [] });
+  const launched = async () => {
+    send('SessionStart', { source: 'startup' });
+    send('UserPromptSubmit', { prompt: 'look around' });
+    send('PreToolUse', { tool_name: 'Agent', tool_use_id: 'toolu_a', tool_input: { description: 'count', run_in_background: true } });
+  };
+
+  it('records a subagent from its start to its stop, leaving what the session shows alone', async () => {
+    await launched();
+    const before = await record();
+    expect(before.subagents).toBeNull();
+    start('afd7e6000820d38a8');
+    const started = await record();
+    const { subagents, ...rest } = started;
+    const { subagents: _none, ...was } = before;
+    expect(rest).toEqual(was);
+    const a = subagents.afd7e6000820d38a8;
+    expect(a).toMatchObject({ type: 'general-purpose', name: null, stoppedAt: null, idleAt: null, resumed: false });
+    expect(a.startedAt).toBe(a.runningSince);
+    // Stop while the background subagent still runs: done, and the roster still has it running.
+    send('Stop', { last_assistant_message: 'launched', background_tasks: [{ id: 'afd7e6000820d38a8', type: 'subagent', status: 'running' }] });
+    expect(await record()).toMatchObject({ state: 'done', subagents: { afd7e6000820d38a8: { stoppedAt: null } } });
+    stop('afd7e6000820d38a8');
+    const stopped = await record();
+    expect(stopped).toMatchObject({ state: 'done', event: 'Stop' });
+    expect(stopped.subagents.afd7e6000820d38a8.stoppedAt).toBeGreaterThanOrEqual(a.startedAt);
+    // Later events keep the roster.
+    send('UserPromptSubmit', { prompt: '<agent-message from="afd7e6000820d38a8">report</agent-message>' });
+    expect((await record()).subagents.afd7e6000820d38a8.stoppedAt).toBe(stopped.subagents.afd7e6000820d38a8.stoppedAt);
+  });
+
+  it('marks a resumed subagent, and one still at work after its SubagentStop, running again', async () => {
+    await launched();
+    start('a1');
+    stop('a1');
+    // Another hook kept it going: its next tool call shows it runs, even after the session's own turn ended.
+    send('Stop', {});
+    send('PreToolUse', { tool_name: 'Read', tool_use_id: 'toolu_r', agent_id: 'a1', agent_type: 'general-purpose', tool_input: { file_path: '/w/x/a' } });
+    expect(await record()).toMatchObject({ state: 'done', subagents: { a1: { stoppedAt: null, resumed: false } } });
+    stop('a1');
+    // Resumed (SendMessage to a finished subagent): it starts again.
+    start('a1');
+    expect((await record()).subagents.a1).toMatchObject({ stoppedAt: null, resumed: true });
+  });
+
+  it("records a teammate's idle state and name, until it takes a new message", async () => {
+    await launched();
+    start('abb2ec9a960f545ee');
+    send('TeammateIdle', { agent_id: 'abb2ec9a960f545ee', teammate_name: 'helper', team_name: 'session-abc' });
+    const idle = (await record()).subagents.abb2ec9a960f545ee;
+    expect(idle).toMatchObject({ name: 'helper', stoppedAt: null });
+    expect(typeof idle.idleAt).toBe('number');
+    start('abb2ec9a960f545ee');
+    expect((await record()).subagents.abb2ec9a960f545ee).toMatchObject({ name: 'helper', idleAt: null, resumed: true });
+    // Before Claude Code 2.1.290 TeammateIdle names no agent: nothing to record.
+    const before = await record();
+    send('TeammateIdle', { teammate_name: 'helper', team_name: 'session-abc' });
+    expect(await record()).toEqual(before);
+  });
+
+  it("ignores Claude Code's own agents, and writes nothing for a session it has no record of", async () => {
+    start('a1');
+    stop('a1');
+    await expect(readdir(state)).rejects.toThrow();
+    await launched();
+    const before = await record();
+    // A prompt suggestion or /btw: a SubagentStop with no type and no start.
+    stop('internal', '');
+    send('SubagentStart', { agent_type: 'Explore' });
+    expect(await record()).toEqual(before);
+  });
+
+  it('starts the roster over when a new Claude process starts the session, and keeps it through a compaction', async () => {
+    await launched();
+    start('a1');
+    send('SessionStart', { source: 'compact' });
+    expect(Object.keys((await record()).subagents)).toEqual(['a1']);
+    for (const source of ['startup', 'resume', 'clear']) {
+      start('a1');
+      send('SessionStart', { source });
+      expect((await record()).subagents).toBeNull();
+    }
+  });
+
+  it('keeps at most 64 subagents, the running ones first', async () => {
+    await launched();
+    const r = await record();
+    const subagents: Record<string, unknown> = { keep: { startedAt: 1, runningSince: 1 } };
+    for (let i = 0; i < 70; i++) subagents[`s${i}`] = { startedAt: 10 + i, runningSince: 10 + i, stoppedAt: 100 + i };
+    await writeFile(join(state, 'abc.json'), JSON.stringify({ ...r, subagents }));
+    start('new');
+    const ids = Object.keys((await record()).subagents);
+    expect(ids).toHaveLength(64);
+    expect(ids).toEqual(expect.arrayContaining(['keep', 'new', 's8', 's69']));
+    expect(ids).not.toContain('s7');
+  });
+
+  it('drops malformed roster entries an older or broken writer left', async () => {
+    await launched();
+    const r = await record();
+    await writeFile(join(state, 'abc.json'), JSON.stringify({ ...r, subagents: { ok: { startedAt: 5, type: 'Plan' }, bad: 'x', '': {} } }));
+    start('new');
+    const roster = (await record()).subagents;
+    expect(Object.keys(roster).sort()).toEqual(['new', 'ok']);
+    expect(roster.ok).toMatchObject({ startedAt: 5, type: 'Plan', stoppedAt: null });
   });
 });
 

@@ -35,6 +35,12 @@ export const VERSIONED_HOOK_EVENTS: readonly { event: string; since: string }[] 
   { event: 'PostCompact', since: '2.1.76' },
   // It lists each settled tool call, so it ends a permission wait Claude denied itself (no Post hook runs for those).
   { event: 'PostToolBatch', since: '2.1.118' },
+  // The live subagent roster (`subagents` in the record). SubagentStart is in 2.0.43 and SubagentStop much older, but
+  // before 2.1.311 SubagentStop also ran about twice a minute for each subagent still running, so both start there.
+  { event: 'SubagentStart', since: '2.1.311' },
+  { event: 'SubagentStop', since: '2.1.311' },
+  // A teammate of an agent team going idle: in 2.1.33, with the teammate's agent_id from 2.1.290.
+  { event: 'TeammateIdle', since: '2.1.290' },
 ];
 
 /** The `x.y.z` in `claude --version`'s output, or undefined. */
@@ -61,7 +67,7 @@ export function hookEvents(version?: string): string[] {
  * v1's script over v2's. Bump it with every change to the script: v1 (`main`) counts in the 100s, v2 (`v2_experiment`)
  * in the 200s, as v2's script handles every event and record v1's does.
  */
-export const HOOK_SCRIPT_VERSION = 200;
+export const HOOK_SCRIPT_VERSION = 201;
 
 const HOOK_VERSION_LINE = /^# devdesk-hook-version: (\d+)$/m;
 
@@ -82,7 +88,7 @@ export function replacesHookScript(installed: string | undefined, ours = HOOK_SC
  * path; always exits 0 and prints nothing.
  */
 export const HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
-# devdesk-hook-version: 200
+# devdesk-hook-version: 201
 """DevDesk Agents: records Claude Code session state for the VS Code Claude Sessions panel."""
 import json
 import os
@@ -329,6 +335,87 @@ def settled_ids(data, event, tool_use):
     return set()
 
 
+# The events that only change the subagent roster, never what the session itself shows.
+ROSTER_EVENTS = ('SubagentStart', 'SubagentStop', 'TeammateIdle')
+# How many subagents a roster keeps: past that, the longest stopped go first.
+MAX_ROSTER = 64
+
+
+def ms_or_none(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def roster_of(prev):
+    """
+    The session's live subagents by agent_id, as the subagent hooks saw them: type, teammate name, when it first started
+    and last started (runningSince), and when it stopped or (a teammate) went idle since. resumed: it started again
+    after it had stopped. Malformed entries are dropped.
+    """
+    value = prev.get('subagents')
+    out = {}
+    if not isinstance(value, dict):
+        return out
+    for key, entry in value.items():
+        if not short_id(key) or not isinstance(entry, dict):
+            continue
+        clean = {k: ms_or_none(entry.get(k)) for k in ('startedAt', 'runningSince', 'stoppedAt', 'idleAt')}
+        for k in ('type', 'name'):
+            clean[k] = str(entry[k])[:100] if isinstance(entry.get(k), str) and entry[k] else None
+        clean['resumed'] = entry.get('resumed') is True
+        out[key] = clean
+    return out
+
+
+def trimmed(roster):
+    if len(roster) <= MAX_ROSTER:
+        return roster
+    # Running ones stay; of the rest, the most recently active.
+    def rank(item):
+        e = item[1]
+        return (e['stoppedAt'] is None and e['idleAt'] is None, max(e['stoppedAt'] or 0, e['idleAt'] or 0, e['runningSince'] or 0))
+    return dict(sorted(roster.items(), key=rank, reverse=True)[:MAX_ROSTER])
+
+
+def roster_event(path, prev, data, event, sid):
+    """
+    A subagent started (or a teammate took a new message), stopped, or a teammate went idle: updates the roster and
+    keeps everything else the record says. Without a record yet, nothing: the session's next event writes one.
+    """
+    if prev.get('sessionId') != sid or prev.get('state') not in RECORD_STATES + ('waiting',):
+        return
+    agent = short_id(data.get('agent_id'))
+    if not agent:
+        return
+    roster = roster_of(prev)
+    now = int(time.time() * 1000)
+    kind = str(data.get('agent_type') or '')[:100] or None
+    entry = roster.get(agent)
+    if event == 'SubagentStart':
+        if entry is None:
+            entry = {'type': kind, 'name': None, 'startedAt': now, 'resumed': False}
+        else:
+            # Started again: resumed after it stopped, or a teammate taking a new message after it went idle.
+            entry['resumed'] = entry['resumed'] or entry['stoppedAt'] is not None or entry['idleAt'] is not None
+            entry['type'] = kind or entry['type']
+        entry.update({'runningSince': now, 'stoppedAt': None, 'idleAt': None})
+    elif event == 'SubagentStop':
+        if entry is None:
+            if not kind:
+                # One of Claude Code's own agents (a prompt suggestion, /btw) it did not start a subagent for.
+                return
+            entry = {'type': kind, 'name': None, 'startedAt': None, 'runningSince': None, 'idleAt': None, 'resumed': False}
+        entry['stoppedAt'] = now
+    else:
+        name = str(data.get('teammate_name') or '')[:100] or None
+        if entry is None:
+            entry = {'type': kind, 'name': name, 'startedAt': None, 'runningSince': None, 'stoppedAt': None, 'resumed': False}
+        entry['name'] = name or entry['name']
+        entry['idleAt'] = now
+    roster[agent] = entry
+    prev['subagents'] = trimmed(roster)
+    write_json(path, prev)
+
+
 def main():
     data = json.load(sys.stdin)
     sid = str(data.get('session_id') or '')
@@ -352,8 +439,21 @@ def main():
             pass
         return
     prev = previous(path)
+    if event in ROSTER_EVENTS:
+        roster_event(path, prev, data, event, sid)
+        return
+    worker = short_id(data.get('agent_id'))
+    if event == 'PreToolUse' and worker and prev.get('sessionId') == sid:
+        roster = roster_of(prev)
+        if roster.get(worker, {}).get('stoppedAt') is not None:
+            # A new tool call of a subagent after its SubagentStop (another hook kept it going): it still runs. Written at
+            # once, as this event may change nothing else.
+            roster[worker]['stoppedAt'] = None
+            prev['subagents'] = roster
+            write_json(path, prev)
     # A new Claude process (started, resumed, or a /clear's new session) starts clean: no waits, turn or prompt left
-    # from before, and what an earlier process started cannot still run (sessionStartedAt). A compaction keeps all.
+    # from before, what an earlier process started cannot still run (sessionStartedAt), and no subagent of it is in the
+    # roster. A compaction keeps all.
     boundary = event == 'SessionStart' and data.get('source') in SESSION_BOUNDARIES
     if event == 'SessionStart':
         if short_id(data.get('agent_id')):
@@ -563,6 +663,8 @@ def main():
         'turnEndedAt': turn_ended if state == 'done' else None,
         # When this Claude process started the session (SessionStart): what the transcript shows started before is over.
         'sessionStartedAt': now if boundary else prev.get('sessionStartedAt') if isinstance(prev.get('sessionStartedAt'), int) else None,
+        # The live subagent roster (see roster_of); kept until a new Claude process starts the session.
+        'subagents': roster_of(prev) or None,
         'updatedAt': now,
     }
     write_json(path, record)

@@ -89,7 +89,7 @@ file when Claude exits. The relay answers the probe and nothing else. It leaves 
   `src/core/statusMerge.ts` lets the report go first: a wait (or a sign-in) the hooks haven't reported yet, and a
   working or waiting record unchanged for `devdesk.sessions.hooksQuietMinutes` while Claude reports another state.
 - "Send to session" and ←: a `working` or `blocked` report says Claude is busy, or a dialog is open, without reading the
-  screen. When there is no report, or it says idle or done, the screen scraping in `claudePrompt.ts` still decides
+  screen. When there is no report, or it says idle or done, `claudePrompt.ts` still decides from the pane (its tmux flags and its screen)
   whether anything is typed.
 
 Costs and limits:

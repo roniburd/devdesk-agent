@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.8",
+  "version": "2.1.0-prototype.9",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -318,6 +318,18 @@
         "icon": "$(history)"
       },
       {
+        "command": "devdesk.sessions.forkFromTurn",
+        "title": "Fork from a Turn…",
+        "category": "Worktrees",
+        "icon": "$(repo-forked)"
+      },
+      {
+        "command": "devdesk.sessions.forkFromShownTurn",
+        "title": "Fork from This Turn…",
+        "category": "Worktrees",
+        "icon": "$(repo-forked)"
+      },
+      {
         "command": "devdesk.sessions.openSettings",
         "title": "Claude Sessions Settings",
         "category": "Worktrees",
@@ -449,6 +461,34 @@
         "command": "devdesk.cli.removeSkill",
         "title": "Remove the devdesk Skill",
         "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.link",
+        "title": "Link Ticket…",
+        "category": "Claude",
+        "icon": "$(link)"
+      },
+      {
+        "command": "devdesk.tickets.open",
+        "title": "Open Ticket",
+        "category": "Claude",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "devdesk.tickets.unlink",
+        "title": "Unlink Ticket",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.refresh",
+        "title": "Refresh Tickets",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.openSettings",
+        "title": "Ticket Settings",
+        "category": "Claude",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -586,6 +626,11 @@
           "group": "changes@2"
         },
         {
+          "command": "devdesk.sessions.forkFromTurn",
+          "when": "view == devdesk.sessions && viewItem =~ /\\bforkable\\b/",
+          "group": "changes@3"
+        },
+        {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b.*\\bunread$/",
           "group": "read@1"
@@ -681,6 +726,11 @@
           "group": "changes@2"
         },
         {
+          "command": "devdesk.sessions.forkFromTurn",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/ && viewItem =~ /\\bforkable\\b/",
+          "group": "changes@3"
+        },
+        {
           "command": "devdesk.sessions.markRead",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\bunread$/",
           "group": "read@1"
@@ -704,6 +754,46 @@
           "command": "devdesk.checks.askClaude",
           "when": "view == devdesk.features && viewItem =~ /^feature.*\\bchecks\\b/",
           "group": "review@3"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bticket\\b/",
+          "group": "inline@9"
+        },
+        {
+          "command": "devdesk.tickets.link",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "ticket@1"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bticket\\b/",
+          "group": "ticket@2"
+        },
+        {
+          "command": "devdesk.tickets.unlink",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bticket\\b/",
+          "group": "ticket@3"
+        },
+        {
+          "command": "devdesk.tickets.link",
+          "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b/",
+          "group": "ticket@1"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b/",
+          "group": "ticket@2"
+        },
+        {
+          "command": "devdesk.tickets.unlink",
+          "when": "view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b/",
+          "group": "ticket@3"
+        },
+        {
+          "command": "devdesk.tickets.link",
+          "when": "view == devdesk.features && viewItem =~ /^session\\b/",
+          "group": "ticket@1"
         }
       ],
       "webview/context": [
@@ -716,6 +806,11 @@
           "command": "devdesk.sessions.turnChanges",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
           "group": "changes@2"
+        },
+        {
+          "command": "devdesk.sessions.forkFromTurn",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "changes@3"
         },
         {
           "command": "devdesk.sessions.markRead",
@@ -736,6 +831,21 @@
           "command": "devdesk.sessions.seeDiff",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
           "group": "session@1"
+        },
+        {
+          "command": "devdesk.tickets.link",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "ticket@1"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "ticket@2"
+        },
+        {
+          "command": "devdesk.tickets.unlink",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "ticket@3"
         }
       ],
       "commandPalette": [
@@ -774,6 +884,10 @@
         {
           "command": "devdesk.sessions.forkWithMode",
           "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.forkFromShownTurn",
+          "when": "devdesk.sessions.turnDiffActive"
         },
         {
           "command": "devdesk.sessions.kill",
@@ -952,6 +1066,11 @@
           "command": "devdesk.board.openFromEditorTitle",
           "group": "navigation@100",
           "when": "config.devdesk.board.editorTitleButton && activeWebviewPanelId != devdesk.board"
+        },
+        {
+          "command": "devdesk.sessions.forkFromShownTurn",
+          "group": "navigation@90",
+          "when": "devdesk.sessions.turnDiffActive"
         }
       ],
       "comments/commentThread/context": [
@@ -1271,26 +1390,69 @@
             "markdownDescription": "Extra arguments for Claude Code in every new Claude session, whatever its mode, in shell syntax, for example `--model opus`. The launch mode's arguments (`#devdesk.sessions.defaultMode#`) come after these. Empty: none. Applies to sessions started after the change; `#devdesk.sessions.command#`, when set, replaces the whole command.",
             "order": 3
           },
+          "devdesk.claude.accounts": {
+            "type": "array",
+            "default": [],
+            "scope": "machine",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "configDir"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The account's name, shown in the board's account pill and on its sessions' cards."
+                },
+                "configDir": {
+                  "type": "string",
+                  "description": "Claude Code's config directory for the account (CLAUDE_CONFIG_DIR): its login, settings, transcripts. A leading ~ is your home directory."
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "More environment variables the account's sessions start with."
+                }
+              }
+            },
+            "markdownDescription": "Claude accounts (profiles): each a `name` and a Claude Code config directory (`configDir`, given to Claude as `CLAUDE_CONFIG_DIR`), with optional `env` for its sessions. With more than one, the Claude Board's composer has an account pill and **New Claude Session** asks which; a resumed or forked session keeps its account. An account whose `configDir` is Claude's own (`$CLAUDE_CONFIG_DIR`, else `~/.claude`) starts without `CLAUDE_CONFIG_DIR`. Empty: one account, Claude's own config directory.",
+            "order": 4
+          },
+          "devdesk.claude.defaultAccount": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "The Claude account (a `name` in `#devdesk.claude.accounts#`) new sessions use unless you pick another. A folder's workspace settings can set its own. Empty: the first account listed.",
+            "order": 5
+          },
+          "devdesk.claude.disableAutoUpdater": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Claude sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1`, so Claude Code does not update itself.",
+            "order": 6
+          },
           "devdesk.sessions.claudePath": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Claude Code binary DevDesk starts in new Claude sessions. Empty: `$HOME/.toolbox/bin/claude` when it exists, else `claude` on PATH.",
-            "order": 4
+            "order": 7
           },
           "devdesk.sessions.command": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Full shell command tmux runs when it creates a feature's Claude session, overriding `#devdesk.sessions.claudePath#` and `#devdesk.sessions.claudeArgs#`. Empty: `<claudePath> <claudeArgs>; exec $SHELL -l`.",
-            "order": 5
+            "order": 8
           },
           "devdesk.sessions.programStatus": {
             "type": "boolean",
             "default": true,
             "scope": "machine",
             "markdownDescription": "Start new Claude sessions under DevDesk's Program Status relay (`python3`, `~/.claude/devdesk/devdesk_status.py`). It answers Claude Code's status probe (OSC 7501, Claude Code 2.1.295 or later), which tmux can't, so Claude reports whether it is working, waiting for an approval or an answer, or at its prompt. Sessions without status hooks then show that state, and sending to a session checks it instead of only reading the screen. Not used with `#devdesk.sessions.command#`. Applies to sessions started after you change it.",
-            "order": 6
+            "order": 9
           }
         }
       },
@@ -1461,6 +1623,13 @@
             "minimum": 0,
             "markdownDescription": "When a window opens and at least this many worktrees are ready to clean up, DevDesk offers **Clean Up Worktrees…** (it never deletes on its own). `0`: never offer.",
             "order": 18
+          },
+          "devdesk.worktrees.autoTrust": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Accept Claude's *Do you trust the files in this folder?* for a worktree DevDesk makes (New Worktree Session, the board, `devdesk worker start`), so its session starts without asking. Only when Claude already trusts the workspace (or repository) it is made in, and only for the worktree and its packages: DevDesk writes `hasTrustDialogAccepted` for them in Claude's config file (`#devdesk.board.claudeConfigFile#`). In a package Claude has not trusted, DevDesk then makes a Claude Code worktree with `git worktree add` from `HEAD` (`claude --worktree` refuses to start there). Off: Claude asks, and the session opens so you can answer.",
+            "order": 19
           }
         }
       },
@@ -1585,7 +1754,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Claude Code's global config file, read (never written) before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
+            "markdownDescription": "Claude Code's global config file, read before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Written only by `#devdesk.worktrees.autoTrust#`, to trust a new worktree. Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
             "order": 13
           },
           "devdesk.board.pasteSettleMs": {
@@ -1997,6 +2166,126 @@
             "scope": "machine",
             "description": "The GitHub CLI to run. Empty: `gh` on PATH.",
             "order": 8
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude-beta.tickets",
+        "title": "Tickets",
+        "order": 13,
+        "properties": {
+          "devdesk.tickets.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Link tickets (issues) to worktrees and sessions, and show a chip with the ticket's key and status (`ABC-123 · In progress`) on the worktree's Worktrees view row and on its sessions' board cards. A click opens the ticket. Link one with Link Ticket… on a row or card.",
+            "order": 1
+          },
+          "devdesk.tickets.autoDetect": {
+            "type": "boolean",
+            "default": true,
+            "description": "Find a worktree's ticket in its name and branch (`feat/ABC-123-login`, `issue-42`), and a session's in its first prompt, and link it. A ticket you unlink is not linked again automatically.",
+            "order": 2
+          },
+          "devdesk.tickets.includeInPrompt": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add the worktree's ticket (key, title, status, URL) after the prompt of each new session the board starts in that worktree.",
+            "order": 3
+          },
+          "devdesk.tickets.fetch": {
+            "type": "boolean",
+            "default": true,
+            "description": "Read the title and status of linked tickets, read-only, where DevDesk can: GitHub issues with the `gh` CLI (`devdesk.checks.ghPath`), Jira with `devdesk.tickets.jira.command`. DevDesk keeps no tokens: the other trackers are link only.",
+            "order": 4
+          },
+          "devdesk.tickets.refreshMinutes": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "description": "Read a linked ticket's title and status again at most this many minutes after the last time (a failure waits as long).",
+            "order": 5
+          },
+          "devdesk.tickets.timeoutSeconds": {
+            "type": "number",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 120,
+            "description": "A ticket read (`gh issue view`, the Jira command) that takes longer is stopped.",
+            "order": 6
+          },
+          "devdesk.tickets.providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "The trackers whose keys and links DevDesk recognises, by id: `github`, `jira`, `linear`, and `patterns` for every entry of `#devdesk.tickets.patterns#`. Empty: all of them.",
+            "order": 7
+          },
+          "devdesk.tickets.jira.baseUrl": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your Jira site, such as `https://example.atlassian.net`. Set, keys like `ABC-123` and its `/browse/` links are Jira tickets. Empty: no Jira.",
+            "order": 8
+          },
+          "devdesk.tickets.jira.projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "The Jira project keys (`ABC`) bare keys are taken for, in any case (branch names are often lowercase). Empty: any uppercase `ABC-123`, except words like `UTF-8` or `SHA-256`.",
+            "order": 9
+          },
+          "devdesk.tickets.jira.command": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "A command that prints a Jira issue as JSON, to show its title and status: the key is in `$DEVDESK_TICKET`. For example `jira issue view \"$DEVDESK_TICKET\" --raw` (jira-cli), signed in on its own. Jira's REST fields (`fields.summary`, `fields.status.name`) or flat `title` and `status` are read. Empty: Jira tickets are link only.",
+            "order": 10
+          },
+          "devdesk.tickets.linear.workspace": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your Linear workspace (the part after `linear.app/`). Set, keys like `ENG-123` link to its issues when Jira does not take them. Linear issue URLs are recognised either way. Link only.",
+            "order": 11
+          },
+          "devdesk.tickets.linear.teams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "The Linear team keys (ENG) bare keys are taken for. Empty: any uppercase key.",
+            "order": 12
+          },
+          "devdesk.tickets.patterns": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "regex",
+                "url"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The tracker's name, shown in hovers."
+                },
+                "regex": {
+                  "type": "string",
+                  "description": "A JavaScript regular expression for its keys or URLs; the first group is the key (else the whole match)."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "The ticket's URL: {key} is the key, {0} to {9} the regex's groups."
+                }
+              }
+            },
+            "markdownDescription": "Trackers of your own, link only: each `{ \"name\", \"regex\", \"url\" }`, such as `{ \"name\": \"Bugzilla\", \"regex\": \"\\\\bbug ?(\\\\d{4,})\\\\b\", \"url\": \"https://bugs.example.com/show_bug.cgi?id={key}\" }`. They are asked before the built-in trackers.",
+            "order": 13
           }
         }
       }

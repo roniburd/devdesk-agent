@@ -35,9 +35,10 @@ import { sessionName } from './core/tmux';
 import { MementoValue } from './state/mementoState';
 import { trustNotice } from './core/trust';
 import { prefillArg, promptArg } from './core/shell';
-import { boardModels, boardOpensSession, boardPromptPlacement, boardSpecPrompt, sessionsClaudeCommand, sessionsDefaultMode, sessionsModes, sessionsTmuxServer, workspaceRoot } from './config';
+import { claudeAccount, claudeAccounts, claudeDefaultAccount, shownPath, boardModels, boardOpensSession, boardPromptPlacement, boardSpecPrompt, sessionsClaudeCommand, sessionsDefaultMode, sessionsModes, sessionsTmuxServer, workspaceRoot } from './config';
 import type { SessionCard } from './core/sessions';
 import type { SessionsModel } from './sessionsModel';
+import type { ClaudeAccount } from './core/accounts';
 import { hooksInstalled } from './hooksCommands';
 import { startNumbered, type SessionRowSelector } from './sessionsCommands';
 import type { SessionViewState } from './sessionViewState';
@@ -84,6 +85,13 @@ export interface ComposerInfo {
   unstackable: readonly string[];
   /** How many skills a message can stack: `MAX_STACKED`. */
   maxStacked: number;
+  /**
+   * The Claude accounts (`devdesk.claude.accounts`), the default first: the account pill shows only with more than one.
+   * `description` is its config directory, as shown.
+   */
+  accounts: { name: string; description: string }[];
+  /** The account a session starts in when none is picked (`devdesk.claude.defaultAccount`). */
+  defaultAccount: string;
 }
 
 /** A row in the composer's `/` or `@` popup: what it shows, and what picking it puts in the prompt (`@` rows use some fields). */
@@ -136,10 +144,14 @@ export class BoardComposer implements vscode.Disposable {
    * window adds and forgets them too. The extension's own state, never Claude's settings.
    */
   private readonly customModels: MementoValue<string[]>;
+  /** The Claude accounts (not the default one) the board started sessions in, by `launchKey` (`model` holds the account's name; see `launchedAccountNames`). */
+  private launchedAccounts = new Map<string, Launch>();
   /** The models the board started sessions with, until their session is gone (see `launchedModels`). */
   private launches = new Map<string, Launch>();
   /** Added with `/add-dir`: the next session started gets `--add-dir` for each, then they are gone. */
   private launchDirs: string[] = [];
+  /** A prompt for a session in an existing worktree, with its ticket line (`TicketLinks.promptFor`), set once it exists. */
+  ticketPrompt: ((dir: string, prompt: string) => string) | undefined;
   private readonly files = new FileMentions();
   private readonly changed = new vscode.EventEmitter<void>();
   /** What `info` returns changed: the CLI answered, or a model was added. */
@@ -186,7 +198,15 @@ export class BoardComposer implements vscode.Disposable {
       commandsVersion: this.listings.version,
       unstackable: UNSTACKABLE,
       maxStacked: MAX_STACKED,
+      ...this.accountsInfo(),
     };
+  }
+
+  /** The account pill's rows, the default first. */
+  private accountsInfo(): Pick<ComposerInfo, 'accounts' | 'defaultAccount'> {
+    const fallback = claudeDefaultAccount();
+    const accounts = [fallback, ...claudeAccounts().filter((a) => a.name !== fallback.name)];
+    return { accounts: accounts.map((a) => ({ name: a.name, description: shownPath(a.configDir) })), defaultAccount: fallback.name };
   }
 
   /** Gives the next session started `--add-dir dir`; false when it already has it. */
@@ -270,6 +290,7 @@ export class BoardComposer implements vscode.Disposable {
       defaultMode: sessionsDefaultMode().name,
       ...allowedModels(this.allowedRows()),
       worktrees: this.worktrees().map((f) => f.dir),
+      accounts: claudeAccounts().map((a) => a.name),
     };
   }
 
@@ -315,6 +336,9 @@ export class BoardComposer implements vscode.Disposable {
     if (missing) throw new Error(`The worktree ${missing} is not there any more: Edit the prompt to pick where it starts.`);
     // Nor on another model than the one saved.
     if (saved && !allowed.models.includes(saved)) throw new Error(`The model ${saved} is not offered any more: Edit the prompt to pick its model.`);
+    // Nor in another Claude account than the one saved.
+    const account = item.choice?.account;
+    if (account && (allowed.accounts?.length ?? 0) > 1 && !allowed.accounts?.includes(account)) throw new Error(`The Claude account ${account} is not listed any more: Edit the prompt to pick its account.`);
     const choice = parseChoice(item.choice ?? {}, allowed);
     // A draft is text to edit at Claude's prompt, whatever it holds (a command too): typed in as saved, not run.
     if (how === 'draft') return this.start(item.prompt.trim(), choice, { draft: true, ui });
@@ -374,24 +398,28 @@ export class BoardComposer implements vscode.Disposable {
     // Code worktree), which is known only once the worktree is made.
     // Claude asks to trust the folder first, and reports no turn until answered: its card shows as it is meanwhile.
     let asksTrust = false;
-    const untrusted = async (dir: string) => (asksTrust = await this.warnIfUntrusted(dir, options.ui));
+    // The Claude account picked in the account pill, else the default one (devdesk.claude.accounts).
+    const account = claudeAccount(choice.account);
+    const untrusted = async (dir: string) => (asksTrust = await this.warnIfUntrusted(dir, options.ui, account));
     const open = options.draft || (options.open ?? boardOpensSession());
     const launchMode = options.mode ?? pickMode(sessionsModes(), choice.mode);
     // The directories added with /add-dir go to this launch only.
     const dirs = this.launchDirs;
     const extraArgs = joinArgs(choiceArgs(choice), addDirArgs(dirs), options.extraArgs ?? '');
-    const text = launchPrompt(prompt, { ultracode: options.ultracode === true, prefix: options.prefix });
-    const launched = this.launched(choice.model, options.turn === false || options.draft ? undefined : prompt, () => asksTrust);
+    // devdesk.tickets.includeInPrompt: the worktree's linked ticket after the prompt (a new worktree has none yet).
+    const ticketed = choice.where === 'new' || !this.ticketPrompt ? prompt : this.ticketPrompt(feature.dir, prompt);
+    const text = launchPrompt(ticketed, { ultracode: options.ultracode === true, prefix: options.prefix });
+    const launched = this.launched(choice.model, account, options.turn === false || options.draft ? undefined : prompt, () => asksTrust);
     let started = true;
     if (choice.where === 'new') {
       const noWorktrees = noWorktreesReason(root);
       if (noWorktrees) throw new Error(noWorktrees);
       if (open) await this.beforeOpen();
-      started = await newWorktreeSession(this.model, this.tree, this.tasks, prompt, { name: choice.worktreeName, prompt: text, draft: options.draft, mode: launchMode, extraArgs, open, started: launched, untrusted });
+      started = await newWorktreeSession(this.model, this.tree, this.tasks, prompt, { name: choice.worktreeName, prompt: text, draft: options.draft, mode: launchMode, extraArgs, open, account, started: launched, untrusted });
     } else {
       const opens = (await untrusted(feature.dir)) || open;
       if (opens) await this.beforeOpen();
-      await startNumbered(this.model, this.tree, sessionName(feature), feature.dir, sessionsClaudeCommand(joinArgs(extraArgs, options.draft ? prefillArg(text) : promptArg(text)), launchMode), opens, launched);
+      await startNumbered(this.model, this.tree, sessionName(feature), feature.dir, sessionsClaudeCommand(joinArgs(extraArgs, options.draft ? prefillArg(text) : promptArg(text)), launchMode, account), opens, launched);
     }
     if (started && dirs.length) {
       this.launchDirs = this.launchDirs.filter((d) => !dirs.includes(d));
@@ -405,16 +433,27 @@ export class BoardComposer implements vscode.Disposable {
    * shows its card as working on `prompt` (a first turn) while Claude starts, when DevDesk's hooks will report the turn
    * and Claude does not ask to trust the folder first.
    */
-  private launched(model: string, prompt: string | undefined, asksTrust: () => boolean): (session: string) => void {
+  private launched(model: string, account: ClaudeAccount, prompt: string | undefined, asksTrust: () => boolean): (session: string) => void {
     const server = sessionsTmuxServer();
     const label = this.modelRows().find((r) => r.value === model)?.label ?? model;
-    const reported = prompt?.trim() ? hooksInstalled().catch(() => false) : Promise.resolve(false);
+    // Its card names its account (not the default one) until the transcript says where it runs.
+    const accountLabel = account.name !== claudeDefaultAccount().name ? account.name : undefined;
+    const reported = prompt?.trim() ? hooksInstalled(account).catch(() => false) : Promise.resolve(false);
     return (session) => {
       if (!asksTrust()) void reported.then((yes) => yes && this.model.expectTurn(server, session, prompt!));
       const key = launchKey(server, session);
+      if (accountLabel) this.launchedAccounts.set(key, { model: accountLabel, at: Date.now() });
+      else this.launchedAccounts.delete(key);
       if (model === DEFAULT_CHOICE) this.launches.delete(key);
       else this.launches.set(key, { model: label, at: Date.now() });
     };
+  }
+
+  /** The Claude accounts the board started the `cards`' sessions in (not the default), by `launchKey`; forgets sessions that are gone. */
+  launchedAccountNames(cards: readonly SessionCard[]): Map<string, string> {
+    const listed = new Set(cards.filter((c) => c.tmuxSession).map((c) => launchKey(c.tmuxServer, c.tmuxSession!)));
+    this.launchedAccounts = liveLaunches(this.launchedAccounts, listed, Date.now());
+    return new Map([...this.launchedAccounts].map(([key, l]) => [key, l.model]));
   }
 
   /** The models the board started the `cards`' sessions with (by `launchKey`); forgets sessions that are gone. */
@@ -428,8 +467,8 @@ export class BoardComposer implements vscode.Disposable {
    * When Claude has not trusted `dir` yet, says so in the box (or a VS Code warning without one) and returns true: the
    * session asks first, so it must open for the user to answer (the board never answers for them).
    */
-  private async warnIfUntrusted(dir: string, ui: BoardUi | undefined): Promise<boolean> {
-    if (!(await claudeNeedsTrust(dir))) return false;
+  private async warnIfUntrusted(dir: string, ui: BoardUi | undefined, account?: ClaudeAccount): Promise<boolean> {
+    if (!(await claudeNeedsTrust(dir, account))) return false;
     const text = trustNotice(dir);
     if (ui) ui.notice({ text, tone: 'warning' });
     else void vscode.window.showWarningMessage(text);

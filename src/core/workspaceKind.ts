@@ -1,4 +1,5 @@
 import type { ChecksProvider } from './checks';
+import type { TicketProvider } from './tickets';
 
 /**
  * A kind of package workspace, beyond plain git repositories: a root holding git packages under `<root>/src/<package>`
@@ -19,4 +20,6 @@ export interface WorkspaceProvider {
   readonly deleteDescription: string;
   /** Where the change requests and checks of its packages come from, besides GitHub (see `checks.ts`). */
   readonly checks?: ChecksProvider;
+  /** Issue trackers DevDesk links tickets of, besides the public ones (see `tickets.ts`), asked before them. */
+  readonly tickets?: readonly TicketProvider[];
 }

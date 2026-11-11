@@ -11,6 +11,7 @@ import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { claudeConfigFilePath } from './core/trust';
+import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount, withEnv } from './core/accounts';
 import type { TurnReadLimits } from './core/turnChangesRead';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -122,6 +123,14 @@ export function worktreesIdleReloadMs(): number {
   return numberSetting('worktrees.idleReloadMinutes', 10, 0) * 60_000;
 }
 
+/**
+ * Accept Claude's trust dialog for a worktree DevDesk makes, when Claude trusts the workspace it is made in (setting
+ * `devdesk.worktrees.autoTrust`).
+ */
+export function worktreesAutoTrust(): boolean {
+  return bool('worktrees.autoTrust', true);
+}
+
 /** Pause the Worktrees view's refresh while the VS Code window is in the background (setting `devdesk.worktrees.pauseWhenUnfocused`). */
 export function worktreesPauseWhenUnfocused(): boolean {
   return bool('worktrees.pauseWhenUnfocused', true);
@@ -132,30 +141,82 @@ export function sessionsStateDir(): string {
   return pathSetting('sessions.stateDir', () => join(homedir(), '.claude', 'devdesk', 'state'));
 }
 
-/** Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
-export function claudeConfigDir(): string {
+/** Claude Code's own config directory, whatever the account: `$CLAUDE_CONFIG_DIR` (VS Code's), else `~/.claude`. */
+export function ambientClaudeConfigDir(): string {
   return process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude');
 }
 
-/** Where Claude Code keeps its transcripts: `projects` in its config directory. */
-export function claudeProjectsDir(): string {
-  return join(claudeConfigDir(), 'projects');
+/** The Claude accounts (setting `devdesk.claude.accounts`); one, `default` (Claude's own config directory), when none is listed. */
+export function claudeAccounts(): ClaudeAccount[] {
+  return parseAccounts(cfg().get<unknown>('claude.accounts'), ambientClaudeConfigDir(), homedir());
+}
+
+/**
+ * The account new sessions use unless another is picked (setting `devdesk.claude.defaultAccount`, which a folder's
+ * workspace settings may set; empty or unknown: the first listed).
+ */
+export function claudeDefaultAccount(): ClaudeAccount {
+  return defaultAccount(claudeAccounts(), text('claude.defaultAccount'));
+}
+
+/** The account `name` names, else the default one. */
+export function claudeAccount(name?: string): ClaudeAccount {
+  return pickAccount(claudeAccounts(), name, text('claude.defaultAccount'));
+}
+
+/** `path` with the home directory shown as `~`, for messages. */
+export function shownPath(path: string): string {
+  const home = homedir();
+  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+/**
+ * The account a session runs in, from its transcript's config directory (`<dir>/projects/…`): a listed one, else one
+ * named after the directory. Undefined without a transcript (not started yet, or no hook record).
+ */
+export function claudeAccountOf(transcriptPath: string | undefined): ClaudeAccount | undefined {
+  return accountOfTranscript(claudeAccounts(), transcriptPath, ambientClaudeConfigDir(), shownPath);
+}
+
+/**
+ * Claude Code's config directory for `account` (default: the default account, which with no accounts listed is
+ * `$CLAUDE_CONFIG_DIR`, else `~/.claude`). What DevDesk derives from Claude's config directory resolves it here.
+ */
+export function claudeConfigDir(account: ClaudeAccount = claudeDefaultAccount()): string {
+  return account.configDir;
+}
+
+/** Every Claude config directory DevDesk reads: each account's, and Claude's own. */
+export function claudeConfigDirs(): string[] {
+  return accountDirs(claudeAccounts(), ambientClaudeConfigDir());
+}
+
+/** Where Claude Code keeps its transcripts: `projects` in each config directory (`claudeConfigDirs`). */
+export function claudeProjectsDirs(): string[] {
+  return claudeConfigDirs().map((d) => join(d, 'projects'));
 }
 
 /**
  * Where Claude Code lists its running sessions and their names (setting `devdesk.sessions.claudeSessionsDir`).
- * Empty means `sessions` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+ * Empty means `sessions` in each Claude config directory (`claudeConfigDirs`).
  */
-export function claudeSessionsDir(): string {
-  return pathSetting('sessions.claudeSessionsDir', () => join(claudeConfigDir(), 'sessions'));
+export function claudeSessionsDirs(): string[] {
+  const explicit = expandHome(cfg().get<string>('sessions.claudeSessionsDir'));
+  return explicit ? [explicit] : claudeConfigDirs().map((d) => join(d, 'sessions'));
 }
 
 /**
  * Where Claude Code keeps its background jobs, read for the session each /fork was forked from (setting
- * `devdesk.sessions.claudeJobsDir`). Empty means `jobs` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+ * `devdesk.sessions.claudeJobsDir`). Empty means `jobs` in the config directory of the session's transcript, else
+ * the default account's.
  */
-export function claudeJobsDir(): string {
-  return pathSetting('sessions.claudeJobsDir', () => join(claudeConfigDir(), 'jobs'));
+export function claudeJobsDir(transcriptPath?: string): string {
+  return pathSetting('sessions.claudeJobsDir', () => join(configDirOfTranscript(transcriptPath) ?? claudeConfigDir(), 'jobs'));
+}
+
+/** Sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1` (setting `devdesk.claude.disableAutoUpdater`). */
+export function claudeDisableAutoUpdater(): boolean {
+  return bool('claude.disableAutoUpdater', false);
 }
 
 /** List packages without changes in the Worktrees view (setting `devdesk.worktrees.showCleanPackages`). */
@@ -248,12 +309,23 @@ export function sessionsTmuxInstallCommand(): string {
  * `devdesk.sessions.claudePath` (empty: the toolbox Claude) with `devdesk.sessions.claudeArgs`, then a login shell.
  * The launch mode's arguments (the default mode unless `mode` is given), then `extraArgs` (for example a fork's
  * `--resume <id> --fork-session`), follow `claudeArgs`; with a full command they go right after its first word, except a prompt (`-- 'text'`), which goes after the command's own options.
+ * Claude runs in `account` (default: the default account): its `CLAUDE_CONFIG_DIR` and `env` are exported first.
  */
-export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode()): string {
+export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode(), account: ClaudeAccount = claudeDefaultAccount()): string {
   const c = cfg();
   const command = c.get<string>('sessions.command');
-  const wrapper = !command?.trim() && sessionsProgramStatus() ? programStatusLaunchWrapper(claudeConfigDir(), programStatusDir()) : undefined;
-  return claudeShellCommand({ command, path: claudeBinary(), args: c.get<string>('sessions.claudeArgs'), wrapper }, joinArgs(mode.args, extraArgs));
+  const wrapper = !command?.trim() && sessionsProgramStatus() ? programStatusLaunchWrapper(ambientClaudeConfigDir(), programStatusDir()) : undefined;
+  // The account's environment travels in the command, so a respawned pane (a resume) has it too.
+  return withEnv(claudeShellCommand({ command, path: claudeBinary(), args: c.get<string>('sessions.claudeArgs'), wrapper }, joinArgs(mode.args, extraArgs)), accountEnv(account));
+}
+
+/**
+ * What `sessionsClaudeCommand` gives Claude before its extra arguments, as shell text: `devdesk.claudeCommand` or
+ * `devdesk.sessions.claudeArgs`, and the launch mode's arguments (to tell whether they already pick a model).
+ */
+export function sessionsLaunchArgs(mode: LaunchMode = sessionsDefaultMode()): string {
+  const c = cfg();
+  return joinArgs(c.get<string>('sessions.command'), c.get<string>('sessions.claudeArgs'), mode.args);
 }
 
 /**
@@ -379,9 +451,15 @@ export function sessionsTabTitleLength(): number {
   return numberSetting('sessions.tabTitleLength', 24, 0, 80, true);
 }
 
-/** Environment DevDesk adds to the Claude sessions it starts: without agent view while ← opens the sidebar instead. */
+/**
+ * Environment DevDesk adds to the Claude sessions it starts: without agent view while ← opens the sidebar instead, and
+ * without Claude's auto-updater with `devdesk.claude.disableAutoUpdater`.
+ */
 export function sessionsClaudeEnv(): Record<string, string> {
-  return sessionsLeftArrowOpensSidebar() ? { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } : {};
+  return {
+    ...(sessionsLeftArrowOpensSidebar() ? { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } : {}),
+    ...(claudeDisableAutoUpdater() ? { DISABLE_AUTOUPDATER: '1' } : {}),
+  };
 }
 
 /** Show the "needs you" status bar item (setting `devdesk.sessions.statusBar`). */
@@ -559,11 +637,20 @@ export function boardPastedImagesDir(): string {
 }
 
 /**
- * Claude Code's global config file, read (never written) for the folders Claude trusts (setting
- * `devdesk.board.claudeConfigFile`); empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.
+ * Claude Code's global config file, read for the folders Claude trusts, and written only to trust new worktrees
+ * (`devdesk.worktrees.autoTrust`) (setting `devdesk.board.claudeConfigFile`); empty: `$CLAUDE_CONFIG_DIR/.claude.json`,
+ * else `~/.claude.json`.
  */
 export function boardClaudeConfigFile(): string {
   return pathSetting('board.claudeConfigFile', () => claudeConfigFilePath(process.env, homedir()));
+}
+
+/**
+ * Claude Code's global config file for `account` (default: the default account), where it keeps the folders it
+ * trusts: `boardClaudeConfigFile()` for Claude's own config directory, else `<config dir>/.claude.json`.
+ */
+export function claudeConfigFile(account: ClaudeAccount = claudeDefaultAccount()): string {
+  return accountConfigFile(account, boardClaudeConfigFile());
 }
 
 /** Extension host memory diagnostics (`devdesk.diagnostics.*`). */
@@ -661,9 +748,10 @@ export function boardSearchHistoryMaxSessions(): number {
   return numberSetting('boardSearch.historyMaxSessions', 5000, 100, 100_000, true);
 }
 
-/** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in Claude's config directory). */
-export function boardSearchHistoryDir(): string {
-  return pathSetting('boardSearch.historyDir', () => claudeProjectsDir());
+/** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in each Claude config directory). */
+export function boardSearchHistoryDirs(): string[] {
+  const explicit = expandHome(cfg().get<string>('boardSearch.historyDir'));
+  return explicit ? [explicit] : claudeProjectsDirs();
 }
 
 /** How long a ✨ search may take (setting `devdesk.boardSearch.timeoutSeconds`, 5–300). */
@@ -742,5 +830,52 @@ export function workersConfig(): { maxConcurrent: number; nudge: boolean; escala
     maxConcurrent: numberSetting('workers.maxConcurrent', 4, 1, 32, true),
     nudge: bool('workers.nudge', true),
     escalationMs: numberSetting('workers.escalationMinutes', 3, 0, 24 * 60) * 60_000,
+  };
+}
+
+/** Tickets linked to worktrees and sessions (settings `devdesk.tickets.*`, see `core/tickets.ts`). */
+export interface TicketsConfig {
+  enabled: boolean;
+  /** `devdesk.tickets.providers`: the providers on (empty: all). */
+  providers: string[];
+  /** Find a worktree's ticket in its name and branch, and a session's in its first prompt. */
+  autoDetect: boolean;
+  /** Read titles and statuses (with the providers that can). */
+  fetch: boolean;
+  /** How long a ticket's title and status are kept before they are read again. */
+  refreshMs: number;
+  timeoutMs: number;
+  includeInPrompt: boolean;
+  /** The GitHub CLI (`devdesk.checks.ghPath`). */
+  gh: string;
+  jira: { baseUrl: string; projects: string[]; command: string };
+  linear: { workspace: string; teams: string[] };
+  /** `devdesk.tickets.patterns` as set (checked by `validPatterns`). */
+  patterns: unknown;
+}
+
+const stringList = (key: string): string[] => {
+  const v = cfg().get<unknown>(key);
+  return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && !!s.trim()).map((s) => s.trim()) : [];
+};
+
+/** The `devdesk.tickets.*` settings, with their defaults. */
+export function ticketsConfig(): TicketsConfig {
+  return {
+    enabled: bool('tickets.enabled', true),
+    providers: stringList('tickets.providers'),
+    autoDetect: bool('tickets.autoDetect', true),
+    fetch: bool('tickets.fetch', true),
+    refreshMs: numberSetting('tickets.refreshMinutes', 10, 1) * 60_000,
+    timeoutMs: numberSetting('tickets.timeoutSeconds', 15, 1, 120) * 1000,
+    includeInPrompt: bool('tickets.includeInPrompt', false),
+    gh: checksConfig().gh,
+    jira: {
+      baseUrl: cfg().get<string>('tickets.jira.baseUrl', '').trim(),
+      projects: stringList('tickets.jira.projects'),
+      command: cfg().get<string>('tickets.jira.command', '').trim(),
+    },
+    linear: { workspace: cfg().get<string>('tickets.linear.workspace', '').trim(), teams: stringList('tickets.linear.teams') },
+    patterns: cfg().get<unknown>('tickets.patterns') ?? [],
   };
 }

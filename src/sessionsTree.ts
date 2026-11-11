@@ -47,7 +47,7 @@ function worktreeRows(groupKey: string, cards: readonly SessionCard[]): SessionN
 }
 
 const CHILD_ICONS: Record<SessionChild['kind'], string> = { agent: 'hubot', shell: 'terminal', workflow: 'type-hierarchy', phase: 'list-tree', more: 'ellipsis' };
-const CHILD_COLORS: Record<SessionChild['state'], string | undefined> = { running: undefined, done: 'charts.green', failed: 'charts.red', stopped: 'disabledForeground' };
+const CHILD_COLORS: Record<SessionChild['state'], string | undefined> = { running: undefined, done: 'charts.green', failed: 'charts.red', stopped: 'disabledForeground', idle: 'charts.blue' };
 const CHILD_KIND_TEXT: Record<SessionChild['kind'], string> = { agent: 'agent', shell: 'shell', workflow: 'workflow', phase: 'phase', more: '' };
 
 /** How long a just-started session may take to show up before the view stops waiting to select it. */

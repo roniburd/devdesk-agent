@@ -3,7 +3,7 @@ import type { CardTeam } from './workers';
 import { readTailText } from './transcriptTail';
 import { isFiniteNumber, parseObject, readJsonFiles } from './json';
 import { DEFAULT_SERVER, isNumberedSession, isShellCommand, serverOf, sessionName, type TmuxPane } from './tmux';
-import type { SessionChild } from './sessionChildren';
+import { parseRoster, type SessionChild, type SubagentRoster } from './sessionChildren';
 import { featureDirs, type Feature } from './worktrees';
 import { isWithin, trimSlashes } from './paths';
 import type { EndedRecord, EndReason } from './ended';
@@ -71,6 +71,8 @@ export interface HookRecord {
    * scripts. A subagent or background shell the transcript shows started before it ran in an earlier process.
    */
   sessionStartedAt?: number;
+  /** The live subagents, from the SubagentStart, SubagentStop and TeammateIdle hooks; missing from older hook scripts. */
+  subagents?: SubagentRoster;
 }
 
 export interface SessionCard {
@@ -116,6 +118,8 @@ export interface SessionCard {
   turnEndedAt?: number;
   /** When the running Claude process started the session (see `HookRecord.sessionStartedAt`). */
   sessionStartedAt?: number;
+  /** Its hook record's subagent roster (see `HookRecord.subagents`), which `children` follows. */
+  subagents?: SubagentRoster;
   /** What Claude is doing right now, from DevDesk's Haiku insight for this turn (working sessions only). */
   liveStatus?: string;
   /** A short name for the session's task, from DevDesk's Haiku insight. */
@@ -197,6 +201,8 @@ export function parseHookRecord(text: string): HookRecord | undefined {
   if (isFiniteNumber(r.turnStartedAt)) record.turnStartedAt = r.turnStartedAt;
   if (isFiniteNumber(r.turnEndedAt)) record.turnEndedAt = r.turnEndedAt;
   if (isFiniteNumber(r.sessionStartedAt)) record.sessionStartedAt = r.sessionStartedAt;
+  const subagents = parseRoster(r.subagents);
+  if (subagents) record.subagents = subagents;
   return record;
 }
 
@@ -509,6 +515,7 @@ export function buildSessionCards(
       ...(r.asksQuestion ? { asksQuestion: true } : {}),
       ...turnTimes(r),
       ...(r.sessionStartedAt !== undefined ? { sessionStartedAt: r.sessionStartedAt } : {}),
+      ...(r.subagents ? { subagents: r.subagents } : {}),
     });
   }
 

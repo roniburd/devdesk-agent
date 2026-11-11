@@ -19,7 +19,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
    * What the box keeps for this project folder: the extension saves it (`keep` messages, in its `workspaceState`) and
    * posts it back when the webview loads (`restore`), so it outlasts the tab, a reload and the webview. Until then (and
    * for what this project has not saved), the defaults: the posted default mode, the first model row, Default effort.
-   * @type {{ filter: string, query: string, mode?: string, model?: string, effort?: string, ultracode: boolean, history: string[], draft: string }}
+   * @type {{ filter: string, query: string, mode?: string, model?: string, effort?: string, ultracode: boolean, account?: string, history: string[], draft: string }}
    */
   const state = {
     filter: '',
@@ -28,6 +28,8 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     model: undefined,
     effort: undefined,
     ultracode: false,
+    /** The Claude account picked in the account pill (devdesk.claude.accounts), else the default one. */
+    account: undefined,
     history: [],
     /** The text typed in the box and not sent yet, so the box opened again (a reload, the tab closed) shows it again. */
     draft: '',
@@ -297,8 +299,21 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const wt = el('span', 'wt');
     wt.append(icon(ICONS.branch), document.createTextNode(s.worktree));
     meta.append(wt);
+    // The ticket linked to the session or its worktree: a click opens it in the browser.
+    if (s.ticket) {
+      const chip = button('ticket', `\u{1F3AB} ${s.ticket.text}`, (ev) => {
+        ev.stopPropagation();
+        send('openTicket', { id: s.id });
+      });
+      chip.title = `${s.ticket.hover}\n\nClick to open it.`;
+      chip.setAttribute('aria-label', `Ticket ${s.ticket.text}: open it`);
+      chip.dataset.key = `ticket:${s.id}`;
+      meta.append(chip);
+    }
     // The model the board started it with (not Default).
     if (s.model) meta.append(el('span', 'model', s.model));
+    // The Claude account it runs in (devdesk.claude.accounts), when not the default one.
+    if (s.account) meta.append(el('span', 'account', s.account));
     const right = el('span', ask ? `when ${color}` : 'when');
     if (!ask) {
       // The lane says the state; the glyph tells apart the looks a lane shares (done, error, crashed, parked…).
@@ -933,6 +948,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
   const whereBtn = $('where');
   const nameInput = /** @type {HTMLInputElement} */ ($('wtname'));
   const modelBtn = $('model');
+  const accountBtn = $('account');
   const modeBtn = $('mode');
   const laterBtn = /** @type {HTMLButtonElement} */ ($('later'));
   const sendBtn = /** @type {HTMLButtonElement} */ ($('send'));
@@ -994,6 +1010,10 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const effort = () => /** @type {string} */ (efforts().includes(/** @type {string} */ (state.effort)) ? state.effort : DEFAULT);
     const modelLabel = (r) => (r.value === DEFAULT ? 'Default model' : r.label);
     const worktree = () => info.worktrees.find((w) => w.dir === where);
+    /** The Claude accounts (devdesk.claude.accounts), the default first; the pill shows only with more than one. */
+    const accounts = () => info.accounts || [];
+    /** The account picked (an unlisted one, removed from the setting, is the default). */
+    const account = () => ((accounts().find((a) => a.name === state.account) || { name: info.defaultAccount }).name);
 
     /** Ends the `/` or `@` completion in progress and closes its menu. */
     function stopCompleting() {
@@ -1097,6 +1117,9 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       if (effort() !== DEFAULT) parts.push(effort());
       if (state.ultracode) parts.push('Ultracode');
       modelBtn.replaceChildren(el('span', 'label', parts.join(' · ')), icon(ICONS.chevron));
+      accountBtn.hidden = accounts().length < 2;
+      accountBtn.replaceChildren(el('span', 'label', account() || 'default'), icon(ICONS.chevron));
+      accountBtn.title = `Runs in Claude account ${account()}. Click to change.`;
       const off = busy || !prompt.value.trim() || !!info.notReady;
       sendBtn.disabled = off;
       laterBtn.disabled = off;
@@ -1173,6 +1196,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         model: model(),
         effort: effort(),
         ultracode: state.ultracode,
+        account: account(),
         later: asLater,
         replaces: editing,
       });
@@ -1204,6 +1228,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     function restore(kept) {
       const choices = beforeEdit || state;
       const choice = kept.choice || pick(legacy, ['mode', 'model', 'effort', 'ultracode']);
+      if (choice.account !== undefined) choices.account = choice.account;
       if (choice.mode !== undefined) choices.mode = choice.mode;
       if (choice.model !== undefined) choices.model = choice.model;
       if (choice.effort !== undefined) choices.effort = choice.effort;
@@ -1310,6 +1335,17 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         });
       }
       popup.open({ anchor: modelBtn, header: 'Model', items, close: () => prompt.focus(), active: at });
+    }
+
+    /** The Claude accounts, the default one marked; picking one is remembered for this project folder, as the model is. */
+    function accountMenu() {
+      const items = accounts().map((a) => ({
+        label: a.name,
+        description: `${a.name === info.defaultAccount ? '(default) ' : ''}${a.description}`,
+        checked: a.name === account(),
+        pick: () => pickChoice({ account: a.name }),
+      }));
+      popup.open({ anchor: accountBtn, header: 'Claude account', items, close: () => prompt.focus() });
     }
 
     /** Opens the model list (`effort`: with the effort row highlighted, when the model has one). */
@@ -1621,6 +1657,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     $('slash').addEventListener('click', () => insertTrigger('/'));
     whereBtn.addEventListener('click', toggle(whereBtn, whereMenu));
     modelBtn.addEventListener('click', toggle(modelBtn, modelMenu));
+    accountBtn.addEventListener('click', toggle(accountBtn, accountMenu));
     modeBtn.addEventListener('click', toggle(modeBtn, modeMenu));
     sendBtn.addEventListener('click', () => submit(later));
     laterBtn.addEventListener('click', () => {
@@ -1657,10 +1694,11 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         editing = id;
         if (choice) {
           // Its choices apply while editing only: the remembered ones come back afterwards.
-          beforeEdit ??= { mode: state.mode, model: state.model, effort: state.effort, ultracode: state.ultracode };
+          beforeEdit ??= { mode: state.mode, model: state.model, effort: state.effort, ultracode: state.ultracode, account: state.account };
           if (choice.mode) state.mode = choice.mode;
           if (choice.model) state.model = choice.model;
           if (choice.effort) state.effort = choice.effort;
+          if (choice.account) state.account = choice.account;
           state.ultracode = !!choice.ultracode;
           where = choice.where === 'new' ? 'new' : choice.where || 'main';
           nameInput.value = choice.worktreeName || '';

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { claudeIsWorking, claudePromptIsEmpty } from '../core/claudePrompt';
+import { claudeIsWorking, claudePromptIsEmpty, paneScreenArgs, parsePaneScreen } from '../core/claudePrompt';
 import { findDescendant, listProcesses } from '../core/processes';
 import { readCardProgramStatus, screenWithProgramStatus } from '../core/programStatus';
 import { isClaudeCommand, processAlive } from '../core/sessions';
@@ -80,16 +80,17 @@ export class BoardSessions {
   async promptScreen(card: SessionCard): Promise<PromptScreen> {
     const pane = paneOf(card);
     if (!pane) return { empty: false, working: false };
-    const capture = await pane.tmux(['capture-pane', '-p', '-e', '-t', pane.target]);
-    const format = `#{pane_pid}${FIELD_SEP}#{pane_in_mode}${FIELD_SEP}#{pane_current_command}`;
-    const [pid, inMode, command = ''] = (await pane.tmux(['display-message', '-p', '-t', pane.target, format])).trim().split(FIELD_SEP);
+    // The screen and the pane's flags (tmux mode, bracketed paste, cursor) in one tmux call, so they agree.
+    const out = await pane.tmux(paneScreenArgs(pane.target, FIELD_SEP, ['#{pane_pid}', '#{pane_current_command}']));
+    const { capture, flags, extra } = parsePaneScreen(out, FIELD_SEP);
+    const [pid, command = ''] = extra;
     const status = await readCardProgramStatus(programStatusDir(), card, processAlive);
     return screenWithProgramStatus(
       {
-        empty: claudePromptIsEmpty(capture),
+        empty: claudePromptIsEmpty(capture, flags),
         working: claudeIsWorking(capture),
-        exited: !(await claudeRunsIn(Number(pid), command)),
-        inMode: inMode === '1',
+        exited: !(await claudeRunsIn(Number(pid), command.trim())),
+        inMode: flags?.inMode ?? false,
       },
       status,
     );

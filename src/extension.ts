@@ -8,9 +8,9 @@ import { refreshStatusLineScript } from './core/statusLine';
 import { installStatusLineCommand, removeStatusLineCommand } from './statusLineCommands';
 import { cardView } from './core/sessionsView';
 import {
-  claudeConfigDir,
+  claudeConfigDirs,
   claudeJobsDir,
-  claudeSessionsDir,
+  claudeSessionsDirs,
   diagnosticsConfig,
   featureDiscovery,
   insightsClaude,
@@ -50,6 +50,7 @@ import { registerSessions } from './sessionsRegistration';
 import { SessionsTree } from './sessionsTree';
 import { SessionViewState } from './sessionViewState';
 import { testApi } from './testApi';
+import { TicketLinks } from './ticketLinks';
 import { UsagePanel } from './usagePanel';
 import { UsageScopeState } from './usageScopeState';
 import { UsageService } from './usageService';
@@ -86,7 +87,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
     workspaceOnly: sessionsWorkspaceOnly,
     finishedChildren: () => (sessionsShowChildren() ? sessionsFinishedChildren() : undefined),
     discovery: featureDiscovery,
-    claudeSessionsDir,
+    claudeSessionsDir: claudeSessionsDirs,
     tmux: sessionsTmux,
     claudeJobsDir,
     parkPolicy: sessionsParkPolicy,
@@ -146,22 +147,30 @@ export async function activate(ctx: vscode.ExtensionContext) {
   // Coordinator and worker sessions (`devdesk worker`): starts workers, keeps their mailboxes, tells coordinators.
   const workers = new WorkerHub(sessions, sessionsTree, worktreeTasks, () => cli.command);
   cli.workers = workers;
-  ctx.subscriptions.push(cli, review, checks, workers, ...registerCliCommands(cli));
+  // Tickets linked to worktrees and sessions: chips on their rows and cards, kept in the state both versions share.
+  const tickets = new TicketLinks(globalState, sessions);
+  worktrees.setTickets(tickets);
+  board.setTickets(tickets);
+  cli.tickets = tickets;
+  ctx.subscriptions.push(cli, review, checks, workers, tickets, ...registerCliCommands(cli));
 
   log.info(`activated; workspace root ${workspaceRoot() ?? 'none'}`);
   board.openIfEmpty();
   // A sidebar already showing when the window started was not opened by the user: only a later showing opens the board.
   ctx.subscriptions.push(sessionsTree.onDidChangeVisibility((e) => e.visible && board.sidebarShown()));
   applyCrashDiagnostics(diagnosticsConfig());
-  // An upgraded extension brings an upgraded hook script; running sessions pick it up on their next hook event.
-  void refreshHookScript(claudeConfigDir()).then(
-    (changed) => changed && log.info('updated the Claude status hook script'),
-    (err) => log.warn(`cannot update the Claude status hook script: ${(err as Error).message}`),
-  );
-  void refreshStatusLineScript(claudeConfigDir()).then(
-    (changed) => changed && log.info("updated DevDesk's Claude status line script"),
-    (err) => log.warn(`cannot update DevDesk's Claude status line script: ${(err as Error).message}`),
-  );
+  // An upgraded extension brings an upgraded hook script; running sessions pick it up on their next hook event. Each
+  // Claude account (devdesk.claude.accounts) has its own copy, in its config directory.
+  for (const dir of claudeConfigDirs()) {
+    void refreshHookScript(dir).then(
+      (changed) => changed && log.info(`updated the Claude status hook script in ${dir}`),
+      (err) => log.warn(`cannot update the Claude status hook script in ${dir}: ${(err as Error).message}`),
+    );
+    void refreshStatusLineScript(dir).then(
+      (changed) => changed && log.info(`updated DevDesk's Claude status line script in ${dir}`),
+      (err) => log.warn(`cannot update DevDesk's Claude status line script in ${dir}: ${(err as Error).message}`),
+    );
+  }
   ctx.subscriptions.push(
     watchEventLoop(() => worktrees.tree.treeItemCalls, diagnosticsConfig),
     cleanDiagnosticsRegularly(diagnosticsConfig),
@@ -193,7 +202,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       return file;
     }),
   );
-  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review, checks, workers, globalState, projectState });
+  return testApi(ctx, { sessionsTree, worktrees, board, usagePanel, usageScope, cli, review, checks, workers, tickets, globalState, projectState });
 }
 
 export function deactivate(): void {}

@@ -223,6 +223,11 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .card .meta .wt { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .meta .wt .ico { width: 11px; height: 11px; flex: none; opacity: 0.7; }
 .card .meta .model { white-space: nowrap; opacity: 0.85; }
+/* The Claude account it runs in (devdesk.claude.accounts), when not the default one. */
+.card .meta .account { white-space: nowrap; opacity: 0.85; font-size: 0.9em; padding: 0 4px; border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4)); border-radius: 3px; }
+/* The linked ticket's chip (a button: a click opens it). */
+.card .meta .ticket { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.95em; padding: 0 5px; border-radius: 8px; border: 1px solid var(--vscode-badge-background, var(--vscode-widget-border, transparent)); background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.card .meta .ticket:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
 .card .meta .when { margin-left: auto; white-space: nowrap; flex: none; }
 .card .meta .when .glyph { margin-right: 2px; font-size: 0.9em; }
 .card.task .wt {
@@ -393,6 +398,7 @@ button.link:hover { background: none; text-decoration: underline; }
 .composer .icon { width: 26px; padding: 0; justify-content: center; }
 .composer .icon.mode { width: auto; padding: 0 6px; }
 .composer .pill { padding: 0 8px; font-size: 0.85em; }
+.composer .footer button[hidden] { display: none; }
 .composer .pill .ico:last-child { width: 12px; height: 12px; }
 .composer .label { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .composer .mode .label { font-size: 0.85em; }

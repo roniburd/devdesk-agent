@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
-import { claudePromptIsEmpty } from './core/claudePrompt';
+import { claudePromptIsEmpty, paneScreenArgs, parsePaneScreen } from './core/claudePrompt';
 import { programStatusBlocksArrow, readCardProgramStatus } from './core/programStatus';
 import { processAlive } from './core/sessions';
 import { skipShellUpdate } from './core/skipShell';
+import { FIELD_SEP } from './core/tmux';
 import { claudeTerminalOfTab, claudeTerminalSession, isClaudeTerminal } from './claudeSessions';
 import { programStatusDir, sessionsLeftArrowOpensSidebar, sessionsTmux } from './config';
 import { log, registerTimedCommand } from './log';
@@ -42,8 +43,12 @@ async function leftArrow(tree: SessionsTree): Promise<void> {
       // Claude's own report (Program Status relay) shows an open dialog without reading the screen; only the screen
       // shows whether text is typed. A running turn keeps ← for DevDesk, as without the relay.
       const status = card?.tmuxSession === target.session ? await readCardProgramStatus(programStatusDir(), card, processAlive) : undefined;
-      // The session's current pane is the one its attached client shows.
-      empty = !programStatusBlocksArrow(status) && claudePromptIsEmpty(await sessionsTmux(target.server)(['capture-pane', '-p', '-e', '-t', `=${target.session}:`]));
+      // The session's current pane is the one its attached client shows; its flags (copy mode, the cursor) come with
+      // the capture.
+      if (!programStatusBlocksArrow(status)) {
+        const { capture, flags } = parsePaneScreen(await sessionsTmux(target.server)(paneScreenArgs(`=${target.session}:`, FIELD_SEP)), FIELD_SEP);
+        empty = claudePromptIsEmpty(capture, flags);
+      }
     } catch (err) {
       log.debug(`cannot read the prompt of ${target.session}: ${(err as Error).message}`);
     }

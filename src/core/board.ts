@@ -142,6 +142,8 @@ export interface BoardSession {
   note?: string;
   /** Its worktree's pull request checks hint (`2 checks failing`), when they have something to fix: the card offers Fix checks. */
   checks?: string;
+  /** The ticket linked to it or its worktree: the chip's text (`ABC-123 · In progress`), its hover, and where it opens. */
+  ticket?: { text: string; hover: string; url: string };
   /**
    * Its place among coordinator and worker sessions (`devdesk worker`): `worker "lint" · working · of <coordinator>` on a
    * worker, "3 workers: 1 done, 2 working" on its coordinator.
@@ -177,6 +179,8 @@ export interface BoardSession {
   canEnd: boolean;
   /** The model the board started it with (its pill row's name), when not Default. */
   model?: string;
+  /** The Claude account it runs in (`devdesk.claude.accounts`), when not the default one. */
+  account?: string;
   /** Not running: opening it resumes it, and End removes it from the list. */
   parked: boolean;
   /**
@@ -249,6 +253,8 @@ export interface BoardOptions {
   models?: readonly Pick<ModelChoice, 'value' | 'label'>[];
   /** The models the board started sessions with, by `launchKey`. */
   launchedModels?: ReadonlyMap<string, string>;
+  /** The Claude account a card's session runs in, when not the default one (none: no account shown). */
+  accountOf?: (card: SessionCard) => string | undefined;
   /** How many parked sessions to show (the newest); the rest are counted in their lane's `more`. All when undefined. */
   parkedLimit?: number;
   /**
@@ -262,6 +268,8 @@ export interface BoardOptions {
   recentMs?: number;
   /** A worktree's checks hint (`2 checks failing`), empty when it has nothing to fix, by worktree directory. */
   checks?: (featureDir: string) => string;
+  /** A card's ticket chip: its session's linked ticket, else its worktree's. */
+  ticket?: (card: SessionCard) => { text: string; hover: string; url: string } | undefined;
 }
 
 export type { CardTitleMode };
@@ -284,6 +292,12 @@ export const launchKey = (server: string | undefined, session: string) => `${ser
  */
 export function liveLaunches(launches: ReadonlyMap<string, Launch>, listed: ReadonlySet<string>, now: number): Map<string, Launch> {
   return new Map([...launches].filter(([key, l]) => listed.has(key) || now - l.at < LAUNCH_GRACE_MS));
+}
+
+/** A card's `ticket` field, when it has one. */
+function ticketOf(card: SessionCard, o: BoardOptions): { ticket?: BoardSession['ticket'] } {
+  const ticket = o.ticket?.(card);
+  return ticket ? { ticket } : {};
 }
 
 /** The board: prompts for later newest first, and the sessions in `sort` order, each in its state's lane. */
@@ -372,6 +386,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
       ...(lane.id === 'working' && (v.liveStatus || v.detail) ? { doing: v.liveStatus || v.detail } : {}),
       ...(card.note ? { note: card.note } : {}),
       ...(card.featureDir && o.checks?.(card.featureDir) ? { checks: o.checks(card.featureDir) } : {}),
+      ...ticketOf(card, o),
       ...(team ? { team } : {}),
       ...(coordinator?.id ? { coordinatorId: coordinator.id } : {}),
       unread: unread.has(card.id),
@@ -384,6 +399,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
       parked: isParked,
       ...(idle ? { idle: true as const } : {}),
       ...(model ? { model } : {}),
+      ...(o.accountOf?.(card) ? { account: o.accountOf(card) } : {}),
       search: searchFields({
         title,
         worktree: v.worktree,
@@ -391,7 +407,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
         lookLabel: shown.label,
         state: card.state,
         model,
-        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight, card.note],
+        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight, card.note, o.ticket?.(card)?.hover],
       }),
     };
     if (hidden) (lane.hidden ??= []).push(session);

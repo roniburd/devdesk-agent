@@ -3,8 +3,9 @@ import type { SessionCard } from './core/sessions';
 import { colorCommand, SESSION_COLORS } from './core/sessionColors';
 import { cardView } from './core/sessionsView';
 import { findByTmux, installTmux, registerTerminalRestore, type TerminalTitles } from './claudeSessions';
-import { openSettings, sessionsNotifyWhenWaiting, sessionsTmuxServer, setGlobalSetting } from './config';
-import { hooksStatus, installHooksCommand, removeHooksCommand } from './hooksCommands';
+import { claudeAccounts, openSettings, sessionsNotifyWhenWaiting, sessionsTmuxServer, setGlobalSetting } from './config';
+import { accountNamed, type ClaudeAccount } from './core/accounts';
+import { accountsWithoutHooks, hooksStatus, installHooksCommand, removeHooksCommand } from './hooksCommands';
 import type { InsightsWorker } from './insightsWorker';
 import { registerLeftArrow } from './leftArrow';
 import { registerTimedCommand } from './log';
@@ -22,7 +23,8 @@ import {
   removeParked,
 } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
-import { showLastTurnChanges, showTurnChanges, TURN_SCHEME, TurnContentProvider } from './turnChanges';
+import { forkFromTurn } from './forkTurn';
+import { showLastTurnChanges, showTurnChanges, TURN_SCHEME, TurnContentProvider, type TurnForker } from './turnChanges';
 import { newSessionInWorktree, newWorktreeSession, type WorktreeTaskStore } from './worktreeSessions';
 
 /** What the Claude view's commands act on. */
@@ -46,6 +48,23 @@ async function offerHookReinstall(parts: SessionsParts): Promise<void> {
   if ((await hooksStatus()) !== 'outdated') return;
   const choice = await vscode.window.showInformationMessage('Claude status hooks write to the old state directory.', 'Reinstall hooks');
   if (choice === 'Reinstall hooks' && (await installHooksCommand())) await hooksChanged(parts);
+}
+
+/** The Claude account a command's `{ account: name }` argument names, if it is one of `devdesk.claude.accounts`. */
+function accountArg(arg: unknown): ClaudeAccount | undefined {
+  const name = arg && typeof arg === 'object' ? (arg as { account?: unknown }).account : undefined;
+  return typeof name === 'string' ? accountNamed(claudeAccounts(), name) : undefined;
+}
+
+/** After `devdesk.claude.accounts` changes: an account without DevDesk's hooks (while another has them) is offered them. */
+async function offerAccountHooks(parts: SessionsParts): Promise<void> {
+  const missing = await accountsWithoutHooks();
+  if (!missing.length) return;
+  const choice = await vscode.window.showInformationMessage(
+    `Claude account ${missing.join(', ')} has no DevDesk status hooks: its sessions show no status.`,
+    'Install Hooks',
+  );
+  if (choice === 'Install Hooks' && (await installHooksCommand())) await hooksChanged(parts);
 }
 
 /**
@@ -89,10 +108,17 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     };
 
   const turnContent = new TurnContentProvider();
+  const forkDeps = { model: sessions, tree: sessionsTree, store: worktreeTasks, turnContent };
+  const forker: TurnForker = (card, turns, index) => forkFromTurn(forkDeps, card, turns, index);
+  /** The title of the editor tab in front, which names the turn a diff of Show Changes by Turn shows. */
+  const activeTabLabel = () => vscode.window.tabGroups.activeTabGroup.activeTab?.label;
+  const syncTurnDiff = () => void vscode.commands.executeCommand('setContext', 'devdesk.sessions.turnDiffActive', !!turnContent.shownTurn(activeTabLabel()));
 
   ctx.subscriptions.push(
     insights,
     vscode.workspace.registerTextDocumentContentProvider(TURN_SCHEME, turnContent),
+    vscode.window.tabGroups.onDidChangeTabs(syncTurnDiff),
+    vscode.window.tabGroups.onDidChangeTabGroups(syncTurnDiff),
     sessions.onDidChange((cards) => insights.update(cards)),
     sessions.onDidStartWaiting((cards) => {
       if (!notifying) return;
@@ -112,13 +138,19 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
         sessionsTree.refreshHooks();
       }
       if (e.affectsConfiguration('devdesk.sessions.stateDir')) void offerHookReinstall(parts);
+      // Another Claude account: its registry and transcripts are read from now on, and it needs DevDesk's hooks too.
+      if (e.affectsConfiguration('devdesk.claude.accounts')) {
+        void sessions.refresh();
+        void offerAccountHooks(parts);
+      }
       if (e.affectsConfiguration('devdesk.insights')) {
         void sessions.refresh();
         insights.update(sessions.current);
       }
     }),
     registerTimedCommand('devdesk.sessions.open', () => vscode.commands.executeCommand('devdesk.sessions.focus')),
-    registerTimedCommand('devdesk.sessions.new', () => newSession(sessions, sessionsTree)),
+    // `{ account: name }` (tests, keybindings) starts in that Claude account without asking.
+    registerTimedCommand('devdesk.sessions.new', (arg: unknown) => newSession(sessions, sessionsTree, undefined, accountArg(arg))),
     registerTimedCommand('devdesk.sessions.newWorktree', (task: unknown) => newWorktreeSession(sessions, sessionsTree, worktreeTasks, task)),
     registerTimedCommand('devdesk.sessions.newInWorktree', (arg: unknown) => newSessionInWorktree(sessions, sessionsTree, arg)),
     registerTimedCommand('devdesk.sessions.newWithMode', async () => {
@@ -135,8 +167,16 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     registerTimedCommand('devdesk.sessions.openCard', onCard((c) => openSessionCard(sessionsTree, c))),
     registerTimedCommand('devdesk.sessions.fork', onCard((c) => forkSession(sessions, sessionsTree, c))),
     // Also in the command palette, on the session selected in the Claude view.
-    registerTimedCommand('devdesk.sessions.lastTurnChanges', onSelectedCard((c) => showLastTurnChanges(turnContent, c))),
-    registerTimedCommand('devdesk.sessions.turnChanges', onSelectedCard((c) => showTurnChanges(turnContent, c))),
+    registerTimedCommand('devdesk.sessions.lastTurnChanges', onSelectedCard((c) => showLastTurnChanges(turnContent, c, forker))),
+    registerTimedCommand('devdesk.sessions.turnChanges', onSelectedCard((c) => showTurnChanges(turnContent, c, undefined, forker))),
+    registerTimedCommand('devdesk.sessions.forkFromTurn', onSelectedCard((c) => forkFromTurn(forkDeps, c))),
+    // The Fork from Here button of a turn's diff editor: forks from the turn it shows.
+    registerTimedCommand('devdesk.sessions.forkFromShownTurn', () => {
+      const shown = turnContent.shownTurn(activeTabLabel());
+      if (shown) return forkFromTurn(forkDeps, shown.card, shown.turns, shown.index);
+      void vscode.window.showInformationMessage('Open the changes of a turn first (Show Changes by Turn…).');
+      return undefined;
+    }),
     registerTimedCommand('devdesk.sessions.kill', onCard((c) => killSession(sessions, c))),
     registerTimedCommand('devdesk.sessions.remove', onCard((c) => removeParked(sessions, c))),
     registerTimedCommand('devdesk.sessions.markRead', onCards((c) => sessionsTree.state.setRead(c.id, true))),

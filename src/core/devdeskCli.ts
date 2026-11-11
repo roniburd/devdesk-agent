@@ -59,7 +59,7 @@ export function windowPanes(cards: readonly Pick<SessionCard, 'tmuxPane' | 'tmux
   return [...new Set(panes)].sort();
 }
 
-export type CliAction = 'open' | 'diff' | 'note' | 'worker';
+export type CliAction = 'open' | 'diff' | 'note' | 'worker' | 'ticket';
 /** What `devdesk worker` does: start a worker; from a worker, report or ask; from its coordinator, read, list, answer. */
 export type WorkerVerb = 'start' | 'done' | 'ask' | 'check' | 'list' | 'reply';
 const WORKER_VERBS: ReadonlySet<string> = new Set(['start', 'done', 'ask', 'check', 'list', 'reply']);
@@ -80,7 +80,7 @@ export interface CliRequest {
   column?: number;
   /** Move the keyboard focus to what opens (by default it stays where it is, as in Claude's terminal). */
   focus: boolean;
-  /** note: the text; empty clears the note. worker: the task (start), summary (done), question (ask) or answer (reply). */
+  /** ticket: the key or URL, `--clear`, or empty (print the linked one). note: the text; empty clears the note. worker: the task (start), summary (done), question (ask) or answer (reply). */
   text?: string;
   /** worker: what it does, and its options. */
   verb?: WorkerVerb;
@@ -98,7 +98,9 @@ const isRef = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9
 
 /** A note's longest text: a card shows one line of it. */
 export const MAX_NOTE_LENGTH = 300;
-const ACTIONS: ReadonlySet<string> = new Set(['open', 'diff', 'note', 'worker']);
+const ACTIONS: ReadonlySet<string> = new Set(['open', 'diff', 'note', 'worker', 'ticket']);
+/** The longest key or URL `devdesk ticket` takes. */
+export const MAX_TICKET_TEXT = 2000;
 export const isRequestId = (s: unknown): s is string => typeof s === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(s);
 const positive = (n: unknown): n is number => isFiniteNumber(n) && Number.isInteger(n) && n >= 1 && n <= 10_000_000;
 
@@ -126,6 +128,7 @@ export function parseCliRequest(text: string, token: string): CliRequest | { err
   if (req.action === 'open' && !req.path) return { error: 'open needs a file' };
   if (req.action === 'note' && !req.pane) return { error: 'devdesk note works only in a tmux session' };
   if (req.action === 'worker') return workerRequest(req, raw);
+  if (req.action === 'ticket' && (req.text ?? '').length > MAX_TICKET_TEXT) return { error: `the ticket is longer than ${MAX_TICKET_TEXT} characters` };
   return req;
 }
 
@@ -245,7 +248,7 @@ export function skillText(command: string): string {
   const q = command.includes(' ') ? `"${command}"` : command;
   return `---
 name: ${SKILL_NAME}
-description: Show the user something in their VS Code editor from a DevDesk session - open a file at a line, open a diff of a file or of all changed files, or set a short note on this session's card on the Claude Board - and start worker sessions on parts of a task and get their reports. Use when the user asks to see, open or review a file or your changes, when a status note would help them follow the work, when the user asks for workers or to split a task across sessions or worktrees, or when your first prompt says you are a DevDesk worker.
+description: Show the user something in their VS Code editor from a DevDesk session - open a file at a line, open a diff of a file or of all changed files, set a short note on this session's card on the Claude Board, or link the ticket the work is for - and start worker sessions on parts of a task and get their reports. Use when the user asks to see, open or review a file or your changes, when a status note would help them follow the work, when the user asks for workers or to split a task across sessions or worktrees, or when your first prompt says you are a DevDesk worker.
 allowed-tools: Bash(${q}:*)
 ---
 ${SKILL_MARK}
@@ -263,11 +266,14 @@ ${q} open <file>[:<line>[:<column>]] [--focus]   # open a file, at a line (and c
 ${q} diff [<file>] [--focus]                      # diff a file vs mainline; no file: all changed files of this worktree
 ${q} note <text>                                  # a one-line note on this session's card on the Claude Board
 ${q} note --clear                                 # remove the note
+${q} ticket <key|url>                             # link the ticket this session works on (ABC-123, #123, its URL)
+${q} ticket                                       # print the linked ticket (title, status, URL)
 \`\`\`
 
 - Files open without taking the keyboard focus from the user's terminal. Pass \`--focus\` only when the user asked to look at it now.
 - Open files and diffs when the user asks to see them, or once at the end of a task to point at what to review; not after every edit.
 - A note says where the work stands in a few words ("waiting for CI", "3 of 5 tests fixed"). Clear it when it no longer holds.
+- When the user names the ticket or issue the work is for, and the card has none yet, link it with \`ticket\` (once).
 
 ## Coordinator and workers
 
@@ -326,6 +332,8 @@ Asks the VS Code window that shows this session (DevDesk Claude) to:
                                 without a file, of every changed file of this worktree
   devdesk note <text>           set a one-line note on this session's card on the Claude Board
   devdesk note --clear          remove it
+  devdesk ticket <key|url>      link the ticket this session works on to its card (and its worktree)
+  devdesk ticket                print the linked ticket; devdesk ticket --clear unlinks it
 
   devdesk worker --help         coordinator and worker sessions: start workers, report, ask, read
 
@@ -377,11 +385,14 @@ def parse(argv):
         sys.stdout.write(USAGE)
         sys.exit(0)
     action, rest = argv[0], argv[1:]
-    if action not in ('open', 'diff', 'note', 'worker'):
+    if action not in ('open', 'diff', 'note', 'worker', 'ticket'):
         fail('unknown command %r (devdesk --help)' % action, 2)
     if action == 'worker':
         return parse_worker(rest)
     req = {'action': action, 'focus': False}
+    if action == 'ticket':
+        req['text'] = ' '.join(rest).strip()
+        return req
     if action == 'note':
         text = ' '.join(rest).strip()
         req['text'] = '' if text == '--clear' else text

@@ -59,6 +59,8 @@ export interface Turn {
   agents: string[];
   /** Not all of it was read: it started before the part of the transcript read, or a line too long to read was skipped. */
   partial: boolean;
+  /** The prompt line's `uuid` in the transcript (what Claude Code's checkpoints and forks name a turn by), when it has one. */
+  uuid?: string;
 }
 
 /** Edit tools whose calls change files, by the name Claude Code gives them. */
@@ -178,7 +180,8 @@ export class TurnParser {
     if (!this.subagent) {
       const prompt = promptOf(o);
       if (prompt !== undefined) {
-        this.turns.push({ prompt, at: time, ops: [], agents: [], partial: false });
+        const uuid = str(o.uuid);
+        this.turns.push({ prompt, at: time, ops: [], agents: [], partial: false, ...(uuid ? { uuid } : {}) });
         return;
       }
     }
@@ -281,7 +284,7 @@ export function undoEdits(text: string, edits: readonly TextEdit[]): string | un
 }
 
 /** The file after the op, from the file before it (or the op's own record of it); undefined when unknown. */
-function forward(op: FileOp, before: string | undefined): string | undefined {
+export function forward(op: FileOp, before: string | undefined): string | undefined {
   const start = op.original ?? before ?? (op.kind === 'write' && op.created ? '' : undefined);
   if (op.kind === 'write') return op.content;
   if (start === undefined || op.kind === 'notebook') return undefined;

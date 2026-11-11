@@ -18,6 +18,8 @@ export interface KeptChoice {
   model?: string;
   effort?: string;
   ultracode?: boolean;
+  /** The Claude account picked in the account pill (`devdesk.claude.accounts`), by name. */
+  account?: string;
 }
 
 /** The lanes' worktree filter and the search box's text. */
@@ -55,7 +57,7 @@ export function parseKeptChoice(raw: unknown): KeptChoice {
   if (!raw || typeof raw !== 'object') return {};
   const o = raw as Record<string, unknown>;
   const out: KeptChoice = {};
-  for (const k of ['mode', 'model', 'effort'] as const) {
+  for (const k of ['mode', 'model', 'effort', 'account'] as const) {
     const v = name(o[k]);
     if (v) out[k] = v;
   }

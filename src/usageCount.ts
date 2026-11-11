@@ -11,8 +11,8 @@ import { addDays, DayCounter, dayKey, dayStart, decodeHistory, type DayUsage, ty
 
 /** What a count needs, all resolved by the caller (settings, paths, the board's session names). */
 export interface CountRequest {
-  /** `<Claude config dir>/projects` */
-  projectsDir: string;
+  /** `<Claude config dir>/projects`, or one per Claude account. */
+  projectsDir: string | readonly string[];
   historyPath: string;
   ledgerPath: string;
   keepDays: number;

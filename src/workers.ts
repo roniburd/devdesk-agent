@@ -3,6 +3,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { BoardSessions } from './board/boardSessions';
+import { sessionAccount } from './claudeAccounts';
 import { claudeNeedsTrust } from './claudeTrust';
 import type { CliRequest } from './core/devdeskCli';
 import { withFileLock } from './core/fileLock';
@@ -42,7 +43,7 @@ import {
   workerStopped,
   workersDirIn,
 } from './core/workers';
-import { sessionsClaudeCommand, sessionsStateDir, sessionsTmuxServer, workersConfig, workspaceRoot } from './config';
+import { claudeDefaultAccount, sessionsClaudeCommand, sessionsStateDir, sessionsTmuxServer, workersConfig, workspaceRoot } from './config';
 import { log } from './log';
 import { startNumbered } from './sessionsCommands';
 import type { SessionsModel } from './sessionsModel';
@@ -188,6 +189,9 @@ export class WorkerHub implements vscode.Disposable {
   private async launch(file: string, task: WorkerTask, req: CliRequest): Promise<void> {
     const prompt = workerPrompt({ id: task.id, name: task.name, task: task.task, coordinator: task.coordinator.session, command: this.command() });
     const server = sessionsTmuxServer();
+    // Workers run in their coordinator's Claude account (devdesk.claude.accounts).
+    const coordinator = cardOfSession(this.sessions.current, task.coordinator.server, task.coordinator.session);
+    const account = coordinator ? sessionAccount(coordinator) : claudeDefaultAccount();
     let session: string | undefined;
     let where: { name: string; dir: string } | undefined;
     let why = '';
@@ -199,8 +203,8 @@ export class WorkerHub implements vscode.Disposable {
         this.tree,
         sessionName(feature ?? { name: 'main', dir, isMain: true }),
         dir,
-        sessionsClaudeCommand(joinArgs(workerAllowArgs(this.command()), promptArg(prompt))),
-        await claudeNeedsTrust(dir),
+        sessionsClaudeCommand(joinArgs(workerAllowArgs(this.command()), promptArg(prompt)), undefined, account),
+        await claudeNeedsTrust(dir, account),
       );
       where = { name: feature?.name ?? 'main', dir };
     } else {
@@ -213,6 +217,7 @@ export class WorkerHub implements vscode.Disposable {
         prompt,
         extraArgs: workerAllowArgs(this.command()),
         open: false,
+        account,
         base: task.base,
         ...(pkg ? { packageDir: pkg.dir } : {}),
         untrusted: claudeNeedsTrust,

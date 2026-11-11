@@ -58,6 +58,6 @@ export function headlessClaudeCommand(claude: string, model: string, systemPromp
 }
 
 /** Runs `command` (shell syntax) in a login shell, as Claude sessions run, so PATH and the toolbox are there. */
-export function spawnLoginShell(command: string, cwd: string): ChildProcessWithoutNullStreams {
-  return spawn(process.env.SHELL || '/bin/sh', ['-lc', `exec ${command}`], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+export function spawnLoginShell(command: string, cwd: string, env?: Readonly<Record<string, string>>): ChildProcessWithoutNullStreams {
+  return spawn(process.env.SHELL || '/bin/sh', ['-lc', `exec ${command}`], { cwd, stdio: ['pipe', 'pipe', 'pipe'], ...(env ? { env: { ...process.env, ...env } } : {}) });
 }

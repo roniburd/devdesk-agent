@@ -4,6 +4,7 @@ import type { BoardPanel } from './boardPanel';
 import type { CliBridge } from './devdeskCli';
 import type { WorkerHub } from './workers';
 import type { ReviewComments } from './reviewComments';
+import type { TicketLinks } from './ticketLinks';
 import type { WorktreeChecks } from './worktreeChecks';
 import { claudeTerminalSession, restoreTerminals } from './claudeSessions';
 import { type OpenTerminal, REATTACH_KEY, reattachKey } from './state/reattachTerminals';
@@ -15,6 +16,8 @@ import { hostKey } from './state/mementoState';
 import type { UsageScope } from './core/usageScope';
 import { planLimits } from './planLimits';
 import { startNotice } from './edition';
+import { forkTestHooks } from './forkTurn';
+import { shownPick } from './pick';
 import type { UsagePanel } from './usagePanel';
 import type { UsageScopeState } from './usageScopeState';
 import type { WorktreesView } from './worktreesView';
@@ -46,6 +49,7 @@ export function testApi(
     review,
     checks,
     workers,
+    tickets,
     globalState,
     projectState,
   }: {
@@ -58,6 +62,7 @@ export function testApi(
     review: ReviewComments;
     checks: WorktreeChecks;
     workers: WorkerHub;
+    tickets: TicketLinks;
     globalState: SharedMemento;
     projectState: SharedMemento;
   },
@@ -79,6 +84,15 @@ export function testApi(
   return {
     /** What v2 told the user when it started (v1 enabled too, or its views missing), if anything. */
     editionNotice: startNotice,
+    /** The DevDesk quick pick shown now (a turn picker, Fork from a Turn's choices): its items, and a way to answer it. */
+    shownPick: () => {
+      const pick = shownPick();
+      return pick && { title: pick.title, labels: pick.labels, choose: (label: string, button?: string) => pick.choose(label, button) };
+    },
+    /** Answers Fork from a Turn's rewind confirmation with what `answer` says of its message (tests cannot answer a modal); undefined shows the dialog again. */
+    answerForkConfirm: (answer: ((message: string) => boolean) | undefined) => {
+      forkTestHooks.confirm = answer;
+    },
     /** A Claude view session row's decoration (read state and color), with its theme color's id. */
     sessionDecoration: (id: string) => {
       const d = sessionsTree.provideFileDecoration(vscode.Uri.from({ scheme: 'devdesk-session', path: `/${id}` }));
@@ -138,7 +152,7 @@ export function testApi(
     worktreeRoots: async () =>
       (await tree.getChildren()).map((node) => {
         const item = tree.getTreeItem(node);
-        return { label: item.label, description: item.description, contextValue: item.contextValue };
+        return { label: item.label, description: item.description, contextValue: item.contextValue, tooltip: typeof item.tooltip === 'string' ? item.tooltip : item.tooltip?.value };
       }),
     /** The tmux session a terminal is attached to, when it is one of DevDesk's Claude terminals (their names are titles). */
     claudeTerminalSession: (terminal: vscode.Terminal) => claudeTerminalSession(terminal),
@@ -189,6 +203,14 @@ export function testApi(
     refreshChecks: async () => {
       for (const f of tree.listedFeatures()) await checks.fetch(f);
     },
+    /** Every ticket link, by target (`worktree:<dir>`, `session:<id>`). */
+    ticketLinks: () => tickets.all(),
+    /** Looks for tickets in the listed worktrees' names and branches now, as the view's refresh tick does. */
+    detectTickets: () => tickets.detectWorktrees(tree.listedFeatures()),
+    /** Reads every linked ticket's title and status again now. */
+    refreshTickets: () => tickets.refreshAll(),
+    /** How many times tickets were fetched. */
+    ticketFetches: () => tickets.fetches,
     /** Each worktree's checks hint, by directory (only those with one). */
     checksHints: () => checks.hints(),
     /** How many times checks were fetched. */

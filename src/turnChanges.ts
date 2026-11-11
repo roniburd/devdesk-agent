@@ -8,6 +8,7 @@ import { type Turn, type TurnFile, turnFiles, turnPaths } from './core/turnChang
 import { readRecentTurns } from './core/turnChangesRead';
 import { sessionsTurnChangesLimits } from './config';
 import { log } from './log';
+import { type PickButton, pickOne } from './pick';
 
 /** Documents holding a file's text before or after a turn, as Show Changes by Turn computed it. */
 export const TURN_SCHEME = 'devdesk-turn';
@@ -17,8 +18,17 @@ const KEPT_SNAPSHOTS = 10;
 /** Files larger than this are not read from disk to rebuild a turn's changes. */
 const MAX_DISK_FILE = 32 * 1024 * 1024;
 
+/** The turn a diff shows, so its editor's Fork from Here button can fork from it. */
+export interface ShownTurn {
+  card: SessionCard;
+  turns: Turn[];
+  index: number;
+}
+
 export class TurnContentProvider implements vscode.TextDocumentContentProvider {
   private readonly snapshots = new Map<number, TurnFile[]>();
+  /** The turn each diff editor (by its tab's title) shows, for the last diffs opened. */
+  private readonly shown = new Map<string, ShownTurn>();
   private next = 1;
 
   /** Keeps a turn's files; returns the key their documents name. */
@@ -27,6 +37,20 @@ export class TurnContentProvider implements vscode.TextDocumentContentProvider {
     this.snapshots.set(key, files);
     for (const old of this.snapshots.keys()) if (this.snapshots.size > KEPT_SNAPSHOTS) this.snapshots.delete(old);
     return key;
+  }
+
+  /** Remembers which turn the diff editor titled `title` shows. */
+  showing(title: string, turn: ShownTurn): void {
+    this.shown.delete(title);
+    this.shown.set(title, turn);
+    for (const old of this.shown.keys()) if (this.shown.size > KEPT_SNAPSHOTS) this.shown.delete(old);
+  }
+
+  /** The turn the diff editor titled `title` shows, if it is one of the last opened. */
+  shownTurn(title: string | undefined): ShownTurn | undefined {
+    if (title === undefined) return undefined;
+    // A multi-file diff's tab adds how many files it has to the title it was given.
+    return this.shown.get(title) ?? this.shown.get(title.replace(/ \(\d+ files?\)$/, ''));
   }
 
   uri(key: number, index: number, side: 'before' | 'after'): vscode.Uri {
@@ -48,7 +72,7 @@ export interface TurnChangesShown {
   files: { path: string; source: TurnFile['source']; before: string; after: string; note?: string }[];
 }
 
-async function diskReader(paths: readonly string[]): Promise<(path: string) => string | undefined> {
+export async function diskReader(paths: readonly string[]): Promise<(path: string) => string | undefined> {
   const texts = new Map<string, string>();
   await Promise.all(
     paths.map(async (p) => {
@@ -65,7 +89,7 @@ async function diskReader(paths: readonly string[]): Promise<(path: string) => s
 }
 
 /** The session's recent turns, oldest first; undefined (after saying why) when they cannot be read. */
-async function sessionTurns(card: SessionCard): Promise<Turn[] | undefined> {
+export async function sessionTurns(card: SessionCard): Promise<Turn[] | undefined> {
   if (!card.transcriptPath) {
     void vscode.window.showInformationMessage('DevDesk does not know where this session’s transcript is yet, so it cannot show what Claude changed.');
     return undefined;
@@ -77,11 +101,14 @@ async function sessionTurns(card: SessionCard): Promise<Turn[] | undefined> {
   return turns;
 }
 
-const promptLabel = (turn: Turn) => (turn.prompt ? truncate(turn.prompt, 80) : '(a turn that started earlier)');
+export const promptLabel = (turn: Turn) => (turn.prompt ? truncate(turn.prompt, 80) : '(a turn that started earlier)');
 const fileCount = (n: number) => (n === 0 ? 'no file changes' : n === 1 ? '1 file' : `${n} files`);
 
+/** Forks a session from one of its turns (`forkFromTurn`), as the turn picker's Fork from Here button does. */
+export type TurnForker = (card: SessionCard, turns: Turn[], index: number) => Promise<unknown>;
+
 /** Opens what Claude changed in the session's last turn; when it changed nothing, offers the turn picker. */
-export async function showLastTurnChanges(provider: TurnContentProvider, card: SessionCard): Promise<TurnChangesShown | undefined> {
+export async function showLastTurnChanges(provider: TurnContentProvider, card: SessionCard, fork?: TurnForker): Promise<TurnChangesShown | undefined> {
   const turns = await sessionTurns(card);
   if (!turns) return undefined;
   const last = turns.length - 1;
@@ -90,21 +117,24 @@ export async function showLastTurnChanges(provider: TurnContentProvider, card: S
       last < 0 ? 'This session has no turns in its transcript yet.' : 'Claude’s last turn in this session changed no files.',
       'Pick a Turn…',
     );
-    return pick ? showTurnChanges(provider, card, turns) : undefined;
+    return pick ? showTurnChanges(provider, card, turns, fork) : undefined;
   }
   return openTurn(provider, card, turns, last);
 }
 
-type TurnItem = vscode.QuickPickItem & { index: number };
+type TurnItem = vscode.QuickPickItem & { index: number; buttons?: PickButton[] };
 
-/** Asks which recent turn (newest first, the last one preselected), then opens what Claude changed in it. */
-export async function showTurnChanges(provider: TurnContentProvider, card: SessionCard, known?: Turn[]): Promise<TurnChangesShown | undefined> {
-  const turns = known ?? (await sessionTurns(card));
-  if (!turns) return undefined;
-  if (!turns.length) {
-    void vscode.window.showInformationMessage('This session has no turns in its transcript yet.');
-    return undefined;
-  }
+export const FORK_BUTTON: PickButton = { id: 'fork', iconPath: new vscode.ThemeIcon('repo-forked'), tooltip: 'Fork from Here' };
+export const CHANGES_BUTTON: PickButton = { id: 'changes', iconPath: new vscode.ThemeIcon('diff-multiple'), tooltip: 'Show This Turn’s Changes' };
+
+/**
+ * Asks which of the session's recent turns (newest first), each item with `button`; undefined when dismissed.
+ * `button` in the answer is the id of the button clicked, when one was.
+ */
+export async function pickTurn(
+  turns: readonly Turn[],
+  options: { title: string; placeHolder: string; button: PickButton },
+): Promise<{ index: number; button?: string } | undefined> {
   const now = Date.now();
   const items: TurnItem[] = turns
     .map((turn, index) => {
@@ -115,16 +145,41 @@ export async function showTurnChanges(provider: TurnContentProvider, card: Sessi
         label: promptLabel(turn),
         description: [fileCount(paths.length), timeAgo(turn.at, now), turn.partial ? 'partly read' : ''].filter(Boolean).join(' · '),
         detail: shown.length ? shown.join(', ') + (paths.length > shown.length ? `, +${paths.length - shown.length} more` : '') : undefined,
+        buttons: [options.button],
       };
     })
     .reverse();
-  const pick = await vscode.window.showQuickPick(items, { title: 'Show Changes by Turn', placeHolder: 'Which turn? The newest is first', matchOnDescription: true, matchOnDetail: true });
+  const picked = await pickOne(items, { title: options.title, placeHolder: options.placeHolder, matchOnDescription: true, matchOnDetail: true });
+  return picked && { index: picked.item.index, button: picked.button };
+}
+
+/**
+ * Asks which recent turn (newest first), then opens what Claude changed in it; an item's Fork from Here button forks
+ * the session from that turn instead (`fork`).
+ */
+export async function showTurnChanges(provider: TurnContentProvider, card: SessionCard, known?: Turn[], fork?: TurnForker): Promise<TurnChangesShown | undefined> {
+  const turns = known ?? (await sessionTurns(card));
+  if (!turns) return undefined;
+  if (!turns.length) {
+    void vscode.window.showInformationMessage('This session has no turns in its transcript yet.');
+    return undefined;
+  }
+  const pick = await pickTurn(turns, { title: 'Show Changes by Turn', placeHolder: 'Which turn? The newest is first', button: FORK_BUTTON });
   if (!pick) return undefined;
-  if (turnPaths(turns[pick.index]).length === 0) {
+  if (pick.button === FORK_BUTTON.id && fork) {
+    await fork(card, turns, pick.index);
+    return undefined;
+  }
+  return openTurnChanges(provider, card, turns, pick.index);
+}
+
+/** Opens what Claude changed in `turns[index]`, or says it changed nothing. */
+export async function openTurnChanges(provider: TurnContentProvider, card: SessionCard, turns: Turn[], index: number): Promise<TurnChangesShown | undefined> {
+  if (turnPaths(turns[index]).length === 0) {
     void vscode.window.showInformationMessage('Claude changed no files in that turn.');
     return undefined;
   }
-  return openTurn(provider, card, turns, pick.index);
+  return openTurn(provider, card, turns, index);
 }
 
 async function openTurn(provider: TurnContentProvider, card: SessionCard, turns: Turn[], index: number): Promise<TurnChangesShown> {
@@ -137,9 +192,12 @@ async function openTurn(provider: TurnContentProvider, card: SessionCard, turns:
   if (files.length === 1) {
     const f = files[0];
     const note = f.note ? ` (${f.note})` : '';
-    await vscode.commands.executeCommand('vscode.diff', provider.uri(key, 0, 'before'), provider.uri(key, 0, 'after'), `${label(f.path)}: ${title}${note}`, { preview: true });
+    const tab = `${label(f.path)}: ${title}${note}`;
+    provider.showing(tab, { card, turns, index });
+    await vscode.commands.executeCommand('vscode.diff', provider.uri(key, 0, 'before'), provider.uri(key, 0, 'after'), tab, { preview: true });
   } else {
     const resources = files.map((f, i) => [vscode.Uri.file(f.path), provider.uri(key, i, 'before'), provider.uri(key, i, 'after')] as const);
+    provider.showing(title, { card, turns, index });
     await vscode.commands.executeCommand('vscode.changes', title, resources);
   }
   const approximate = files.filter((f) => f.source !== 'transcript');
