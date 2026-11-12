@@ -1,7 +1,8 @@
 // The web access page: the session list with a prompt box on top that starts a session, and a session's transcript and
 // screen with a reply box or dialog keys. On a phone the list and a session take turns; from 900 px wide (app.css) they
-// sit side by side, the list on the left. Hash routes `#/`, `#/s/<id>` (and `#/new`, which focuses the prompt box). It
-// talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
+// sit side by side, the list on the left. Hash routes `#/`, `#/s/<id>`, `#/settings` (and `#/new`, which focuses the
+// prompt box). A session opens as its transcript or, when this browser (or devdesk.web.sessionView) chose so, as the
+// experimental terminal (termView.ts). It talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
 // All data goes in as text (dom.ts, screen.ts, markdown.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
 import type {
   CardsResponse,
@@ -12,6 +13,8 @@ import type {
   OkResponse,
   SendRequest,
   SessionDetail,
+  SessionView,
+  SettingsResponse,
   WebCard,
   WebFolder,
   WebGroup,
@@ -21,6 +24,8 @@ import { api } from './api';
 import { h, sentenceCase, sessionHref } from './dom';
 import { turnEls } from './turns';
 import { renderScreen } from './screen';
+import { termView } from './termView';
+import { isSessionView } from '../../core/web/types';
 
 /** Stream errors in a row before the list falls back to polling `api/sessions`. */
 const STREAM_ERRORS = 3;
@@ -118,6 +123,42 @@ feed.listeners.add(() => {
   for (const c of feed.cards ?? []) if (c.pane) paneOf.set(c.id, c.pane);
 });
 
+// ---- Settings: this browser's choice (localStorage), else the daemon's default (devdesk.web.sessionView). ----
+
+const VIEW_KEY = 'devdesk.web.sessionView';
+let defaultView: SessionView = 'transcript';
+
+function storedView(): SessionView | undefined {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return isSessionView(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function storeView(v: SessionView | undefined): void {
+  try {
+    if (v) localStorage.setItem(VIEW_KEY, v);
+    else localStorage.removeItem(VIEW_KEY);
+  } catch {
+    // Private mode without storage: the choice lasts until the page reloads.
+  }
+}
+
+const viewNow = (): SessionView => storedView() ?? defaultView;
+
+async function loadSettings(): Promise<void> {
+  const r = await api<SettingsResponse>('GET', 'api/settings');
+  if (r.data && isSessionView(r.data.sessionView)) defaultView = r.data.sessionView;
+}
+
+const VIEW_NAMES: Record<SessionView, string> = { transcript: 'Transcript', 'terminal-experimental': 'Terminal (experimental)' };
+
+function gear(): HTMLElement {
+  return h('a', { class: 'button gear', text: '⚙', attrs: { href: '#/settings', 'aria-label': 'Settings', title: 'Settings' } });
+}
+
 // ---- Views ----
 
 interface View {
@@ -172,7 +213,7 @@ function listView(): ListView {
   const badge = h('span', { attrs: { role: 'status' } });
   const body = h('div', { class: 'content list' });
   const start = composer();
-  const el = h('div', { class: 'view view-list' }, h('header', { class: 'bar' }, h('h1', { class: 'heading', text: 'Claude sessions' }), badge), start.el, body);
+  const el = h('div', { class: 'view view-list' }, h('header', { class: 'bar' }, h('h1', { class: 'heading', text: 'Claude sessions' }), badge, gear()), start.el, body);
   const render = () => {
     showLink(badge);
     const cards = feed.cards;
@@ -323,6 +364,7 @@ function sessionView(id: string): View {
       { class: 'bar' },
       h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }),
       h('div', { class: 'titles' }, title, state),
+      gear(),
     ),
     h('nav', { class: 'tabs', attrs: { role: 'tablist' } }, tabButtons.transcript, tabButtons.screen),
     h('div', { class: 'content panels' }, panels.transcript, panels.screen),
@@ -497,6 +539,79 @@ function sessionView(id: string): View {
       feed.listeners.delete(onCards);
     },
   };
+}
+
+/** A session in the experimental terminal: termView, with the card's title and state kept up to date here. */
+function terminalSessionView(id: string): View {
+  let card = feed.cards?.find((c) => c.id === id);
+  const title = h('h1', { class: 'heading title', text: card?.title ?? 'Session' });
+  const state = h('span', { class: 'state' });
+  const show = () => {
+    card = feed.cards?.find((c) => c.id === id) ?? card;
+    if (!card) return;
+    title.textContent = card.title;
+    state.className = `state tone-${card.tone}`;
+    state.replaceChildren(stateGlyph(card), sentenceCase(card.label));
+  };
+  const follow = () => {
+    const pane = card?.pane ?? paneOf.get(id);
+    const next = pane ? feed.cards?.find((c) => c.pane === pane && c.id !== id) : undefined;
+    if (!next) return false;
+    location.replace(sessionHref(next.id));
+    return true;
+  };
+  feed.listeners.add(show);
+  show();
+  const v = termView(id, { title, state, gear: gear(), follow });
+  return {
+    el: v.el,
+    dispose: () => {
+      feed.listeners.delete(show);
+      v.dispose();
+    },
+  };
+}
+
+function settingsView(): View {
+  const choice = storedView();
+  const option = (value: SessionView | '', name: string, hint: string) => {
+    const input = h('input', { attrs: { type: 'radio', name: 'view', value } });
+    input.checked = (choice ?? '') === value;
+    input.addEventListener('change', () => {
+      storeView(value || undefined);
+      saved.hidden = false;
+    });
+    return h('label', { class: 'folder' }, input, h('span', { class: 'folder-text' }, h('span', { class: 'folder-name', text: name }), h('span', { class: 'folder-dir', text: hint })));
+  };
+  const saved = h('p', { class: 'notice', text: 'Saved for this browser.', attrs: { role: 'status' } });
+  saved.hidden = true;
+  const el = h(
+    'div',
+    { class: 'view view-settings' },
+    h('header', { class: 'bar' }, h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }), h('h1', { class: 'heading', text: 'Settings' })),
+    h(
+      'div',
+      { class: 'content new-form settings-form' },
+      h(
+        'fieldset',
+        { class: 'field' },
+        h('legend', { text: 'Open sessions as' }),
+        h(
+          'div',
+          { class: 'folders', attrs: { role: 'radiogroup', 'aria-label': 'Open sessions as' } },
+          option('', `Default: ${VIEW_NAMES[defaultView]}`, 'What devdesk.web.sessionView says on your desktop.'),
+          option('transcript', VIEW_NAMES.transcript, 'The conversation, the screen, and a reply box.'),
+          option(
+            'terminal-experimental',
+            VIEW_NAMES['terminal-experimental'],
+            "The session's live terminal with a key bar. While you type here, the session's window takes this screen's size; your desktop takes it back when you type there.",
+          ),
+        ),
+      ),
+      saved,
+    ),
+  );
+  return { el, dispose: () => {} };
 }
 
 /** The folders a session can start in, asked for once. */
@@ -681,14 +796,16 @@ function route(): void {
       id = undefined;
     }
   }
+  const settings = hash === '#/settings';
+  const open = !!id || settings;
   const wasSession = shell.el.classList.contains('has-session');
-  if (id && !wasSession) listScroll = window.scrollY ?? 0;
+  if (open && !wasSession) listScroll = window.scrollY ?? 0;
   detail?.dispose();
-  detail = id ? sessionView(id) : placeholder();
+  detail = id ? (viewNow() === 'terminal-experimental' ? terminalSessionView(id) : sessionView(id)) : settings ? settingsView() : placeholder();
   shell.detail.replaceChildren(detail.el);
-  shell.el.classList.toggle('has-session', !!id);
+  shell.el.classList.toggle('has-session', open);
   list!.select(id);
-  if (id) window.scrollTo?.(0, 0);
+  if (open) window.scrollTo?.(0, 0);
   else if (wasSession) window.scrollTo?.(0, listScroll);
   if (hash === '#/new') {
     history.replaceState(null, '', '#/');
@@ -706,6 +823,11 @@ function startPage(): void {
   shell.list.append(list.el);
   (document.getElementById('app') ?? document.body).replaceChildren(shell.el);
   route();
+  // The default view comes from the daemon: a session opened before it answered opens again if the view differs.
+  const shown = viewNow();
+  void loadSettings().then(() => {
+    if (viewNow() !== shown && (location.hash || '').startsWith('#/s/')) route();
+  });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startPage);

@@ -30,6 +30,7 @@ describe('resolveWebSettings', () => {
       tunnelActionHost: '',
       cloudflare: { team: '', audience: '' },
       ngrokProvider: 'google',
+      sessionView: 'transcript',
     });
     // v1's daemon has 7690: both can run on one host.
     expect(DEFAULT_WEB_PORT).toBe(7691);

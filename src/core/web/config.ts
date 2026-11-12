@@ -4,6 +4,7 @@ import { isFiniteNumber } from '../json';
 import { shellQuote } from '../shell';
 import type { ClaudeLaunch } from '../sessionStart';
 import { DEFAULT_PASTE_SETTLE_MS, isServerName } from '../tmux';
+import { isSessionView, type SessionView } from './types';
 import { allowsAnonymous, cloudflareAudienceOf, cloudflareTeamOf, type DaemonAuth, isTunnelPreset, TUNNEL_PRESETS, type NgrokOAuthProvider, ngrokProviderOf, presetSpec, type TunnelPreset, tunnelChoiceOf } from './tunnelPresets';
 import { SORT_MODES, type SortMode } from '../urgency';
 import { webDir } from './webState';
@@ -43,6 +44,8 @@ export interface WebSettings {
   cloudflare?: unknown;
   /** devdesk.web.ngrok.oauthProvider */
   ngrokProvider?: unknown;
+  /** devdesk.web.sessionView */
+  sessionView?: unknown;
 }
 
 export interface WebAccessSettings {
@@ -69,6 +72,8 @@ export interface WebAccessSettings {
   /** For `cloudflare` auth: the team name and the application's AUD tag ('' when invalid: every request is denied). */
   cloudflare: { team: string; audience: string };
   ngrokProvider: NgrokOAuthProvider;
+  /** What the page shows for a session unless the browser chose otherwise; 'transcript' for anything else. */
+  sessionView: SessionView;
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -104,6 +109,7 @@ export function resolveWebSettings(s: WebSettings, ctx: { provider?: WebProvider
     pollMs: pollOf(s.pollMs),
     cloudflare: { team: cloudflareTeamOf(s.cloudflareTeam ?? cf.team), audience: cloudflareAudienceOf(s.cloudflareAudience ?? cf.audience) },
     ngrokProvider: ngrokProviderOf(s.ngrokProvider),
+    sessionView: isSessionView(s.sessionView) ? s.sessionView : 'transcript',
     tunnelUrlHost: '',
     tunnelReadyLine: '',
     tunnelActionHost: '',
@@ -337,6 +343,7 @@ export function defaultDaemonConfig(home: string, user: string): DaemonConfig {
     tunnelActionHost: '',
     cloudflare: { team: '', audience: '' },
     ngrokProvider: 'google',
+    sessionView: 'transcript',
     user,
     stateDir,
     webDir: webDir(stateDir),

@@ -1,15 +1,32 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { build } from 'esbuild';
+
+const require = createRequire(import.meta.url);
 
 // How the web access daemon is bundled: the mobile page (src/web/page/: app.ts bundled for the browser, index.html,
 // app.css) inlined as strings into one Node script, dist/web.js (src/web/main.ts), which serves them from memory and
 // never reads files at runtime. There is no `external`: a `vscode` import anywhere in the daemon fails the build.
 // scripts/build.mjs writes it into dist/; the daemon test builds it into a temporary folder.
 
-/** The page's three assets, as the daemon serves them. */
+/** The page's assets, as the daemon serves them. */
 export async function webPage(root) {
   const page = join(root, 'src/web/page');
+  const bundle = (entry) =>
+    build({
+      entryPoints: [join(page, entry)],
+      absWorkingDir: root,
+      bundle: true,
+      platform: 'browser',
+      format: 'iife',
+      target: 'es2020',
+      minify: true,
+      write: false,
+      logLevel: 'error',
+    }).then((r) => r.outputFiles[0].text);
+  // The experimental terminal (xterm.js) is its own script, loaded only when a session opens in that view.
+  const [termJs, termCss] = await Promise.all([bundle('term.ts'), readFile(require.resolve('@xterm/xterm/css/xterm.css'), 'utf8')]);
   const js = await build({
     entryPoints: [join(page, 'app.ts')],
     absWorkingDir: root,
@@ -22,7 +39,7 @@ export async function webPage(root) {
     logLevel: 'error',
   });
   const [html, css] = await Promise.all([readFile(join(page, 'index.html'), 'utf8'), readFile(join(page, 'app.css'), 'utf8')]);
-  return { html, js: js.outputFiles[0].text, css };
+  return { html, js: js.outputFiles[0].text, css, termJs, termCss };
 }
 
 /** Builds `<outdir>/web.js` (and its source map), the extension's folder being `root`. */

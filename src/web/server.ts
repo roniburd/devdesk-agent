@@ -2,16 +2,31 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { SessionCard } from '../core/sessions';
 import { type ActionDeps, type ActionResult, pressKey, sendText, sessionDetail, startSession } from '../core/web/actions';
 import type { AccessKeys } from '../core/web/cfAccess';
-import { answeredPublicHost, authorize, deniedPage, hostAllowed, mutationCheck, SECURITY_HEADERS } from '../core/web/auth';
+import { answeredPublicHost, authorize, crossSiteRequest, deniedPage, hostAllowed, mutationCheck, SECURITY_HEADERS } from '../core/web/auth';
 import { webCards, webFolders, type WebView } from '../core/web/cards';
 import { readFile } from 'node:fs/promises';
 import type { DaemonConfig } from '../core/web/config';
 import { pollLoop } from '../core/web/pollLoop';
-import { isMutating, MAX_BODY_BYTES, parseKeyBody, parseNewSessionBody, parseRoute, parseSendBody, type Route } from '../core/web/routes';
+import {
+  isMutating,
+  MAX_BODY_BYTES,
+  parseKeyBody,
+  parseNewSessionBody,
+  parseRoute,
+  parseSendBody,
+  parseTermInputBody,
+  parseTermResizeBody,
+  type Route,
+} from '../core/web/routes';
 import type { SessionSnapshot } from '../core/web/snapshot';
 import { parseWebSeen, webSeenPath, webUnread } from '../core/web/webState';
 import type { CardsResponse, ErrorCode, ErrorResponse } from '../core/web/types';
 import type { PageAssets } from './pageAssets';
+import { TerminalHub } from './terminal';
+import { claudeGone } from '../core/sessionSend';
+import { isPaneId, paneTarget, tmuxTargetGone } from '../core/tmux';
+import { termSizeOf } from '../core/web/terminal';
+import type { SettingsResponse } from '../core/web/types';
 
 /**
  * The web access HTTP server: `node:http` on 127.0.0.1 only, wired to the web core. Every request, the page's assets
@@ -40,6 +55,8 @@ export interface WebServer {
   close(): Promise<void>;
   /** SSE clients (the poll runs while > 0). */
   readonly clients: number;
+  /** Open experimental terminals. */
+  readonly terminals: number;
 }
 
 /** A comment line on the event stream this often keeps proxies from closing it. */
@@ -47,7 +64,10 @@ const PING_MS = 15_000;
 
 const JSON_TYPE = 'application/json; charset=utf-8';
 const HTML_TYPE = 'text/html; charset=utf-8';
-const ASSET_TYPES = { html: HTML_TYPE, js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' } as const;
+const JS_TYPE = 'text/javascript; charset=utf-8';
+const CSS_TYPE = 'text/css; charset=utf-8';
+const ASSET_TYPES = { html: HTML_TYPE, js: JS_TYPE, css: CSS_TYPE, termJs: JS_TYPE, termCss: CSS_TYPE } as const;
+const SSE_HEADERS = { 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' } as const;
 
 const CODES: Readonly<Record<number, ErrorCode>> = {
   400: 'bad-request',
@@ -88,6 +108,12 @@ function readBody(req: IncomingMessage): Promise<string> {
 export function createWebServer(o: WebServerOptions): WebServer {
   const { config, snapshot, actions, page, log } = o;
   const sse = new Set<ServerResponse>();
+  const terminals = new TerminalHub({
+    bin: config.tmux.bin,
+    ...(config.tmux.configFile ? { configFile: config.tmux.configFile } : {}),
+    configServer: config.tmux.server,
+    log,
+  });
   let lastSent: string | undefined;
   let ping: NodeJS.Timeout | undefined;
   let cached: { at: number; cards: SessionCard[] } | undefined;
@@ -158,7 +184,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
     lastSent = undefined;
   };
   const openEvents = async (res: ServerResponse) => {
-    res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no', Connection: 'keep-alive' });
+    res.writeHead(200, { ...SECURITY_HEADERS, ...SSE_HEADERS });
     res.flushHeaders();
     sse.add(res);
     res.on('close', () => {
@@ -179,7 +205,75 @@ export function createWebServer(o: WebServerOptions): WebServer {
     return card;
   };
 
-  const run = async (req: IncomingMessage, res: ServerResponse, route: Route): Promise<void> => {
+  /** The card's pane id: its own, or the one its tmux session shows. undefined: no terminal (410 sent). */
+  const paneOf = async (res: ServerResponse, card: SessionCard): Promise<string | undefined> => {
+    const target = paneTarget(card);
+    if (!target || claudeGone(card)) {
+      sendError(res, 410, 'The session has ended.');
+      return undefined;
+    }
+    if (isPaneId(target)) return target;
+    try {
+      const pane = (await actions.tmux(serverOf(card))(['display-message', '-p', '-t', target, '#{pane_id}'])).trim();
+      if (isPaneId(pane)) return pane;
+      sendError(res, 410, 'The session has ended.');
+    } catch (err) {
+      if (tmuxTargetGone((err as Error).message)) sendError(res, 410, 'The session has ended.');
+      else sendError(res, 502, `tmux failed: ${(err as Error).message}`);
+    }
+    return undefined;
+  };
+
+  /**
+   * The experimental terminal's stream: `data` events (base64 bytes for xterm.js), then `hello` with the terminal's id
+   * once its first frame is out, and `end` with why it closed. Closing the stream closes the terminal.
+   */
+  const openTerminal = async (req: IncomingMessage, res: ServerResponse, id: string, user: string | undefined): Promise<void> => {
+    const card = await cardFor(res, id);
+    if (!card) return;
+    const pane = await paneOf(res, card);
+    if (!pane) return;
+    const q = new URL(req.url ?? '/', 'http://x').searchParams;
+    const size = termSizeOf(q.get('cols'), q.get('rows')) ?? { cols: 80, rows: 24 };
+    res.writeHead(200, { ...SECURITY_HEADERS, ...SSE_HEADERS });
+    res.flushHeaders();
+    let gone = false;
+    let termId: string | undefined;
+    const ev = (name: string, data: string) => {
+      if (!gone) res.write(`event: ${name}\ndata: ${data}\n\n`);
+    };
+    const keepAlive = setInterval(() => {
+      if (!gone) res.write(': ping\n\n');
+    }, PING_MS);
+    const sink = {
+      data: (b: Uint8Array) => ev('data', Buffer.from(b).toString('base64')),
+      end: (reason: string) => {
+        ev('end', JSON.stringify({ reason }));
+        log(`terminal ${termId ?? '-'} on ${pane} closed: ${reason}`);
+        clearInterval(keepAlive);
+        gone = true;
+        res.end();
+      },
+    };
+    res.on('close', () => {
+      gone = true;
+      clearInterval(keepAlive);
+      if (termId) terminals.close(termId);
+    });
+    try {
+      const r = await terminals.open(serverOf(card), pane, size, sink);
+      if (r === 'busy') return sink.end('Too many terminals are open. Close one on another device and try again.');
+      termId = r;
+      log(`terminal ${r} on ${pane} opened at ${size.cols}x${size.rows}${user !== undefined ? ` user=${user}` : ''}`);
+      if (gone) terminals.close(r);
+      else ev('hello', JSON.stringify({ term: r }));
+    } catch (err) {
+      // open() already ended the stream through the sink.
+      log(`terminal on ${pane} failed: ${(err as Error).message}`);
+    }
+  };
+
+  const run = async (req: IncomingMessage, res: ServerResponse, route: Route, user?: string): Promise<void> => {
     switch (route.kind) {
       case 'page':
         return send(res, 200, ASSET_TYPES[route.asset], page[route.asset]);
@@ -187,6 +281,10 @@ export function createWebServer(o: WebServerOptions): WebServer {
         return sendJson(res, 200, await cardsResponse(await recentCards()));
       case 'events':
         return openEvents(res);
+      case 'settings':
+        return sendJson(res, 200, { sessionView: config.sessionView } satisfies SettingsResponse);
+      case 'term':
+        return openTerminal(req, res, route.id, user);
       case 'folders':
         return sendJson(res, 200, { folders: webFolders(await snapshot.features()) });
       case 'detail': {
@@ -224,6 +322,22 @@ export function createWebServer(o: WebServerOptions): WebServer {
       const [features, names] = await Promise.all([snapshot.features(), snapshot.sessionNames()]);
       sendResult(res, await startSession(body, features, names, config, actions));
       cached = undefined;
+    } else if (route.kind === 'term-input' || route.kind === 'term-resize') {
+      const body = route.kind === 'term-input' ? parseTermInputBody(raw) : parseTermResizeBody(raw);
+      if ('status' in body) return sendError(res, body.status, body.error);
+      const card = await cardFor(res, route.id);
+      if (!card) return;
+      const pane = await paneOf(res, card);
+      if (!pane) return;
+      const term = terminals.get(body.term, pane);
+      if (!term) return sendError(res, 410, 'This terminal is closed. Reconnect to go on.');
+      try {
+        if ('data' in body) await term.input(body.data);
+        else await term.resize(body);
+      } catch (err) {
+        return sendError(res, 502, `tmux failed: ${(err as Error).message}`);
+      }
+      sendJson(res, 200, { ok: true });
     }
   };
 
@@ -242,14 +356,17 @@ export function createWebServer(o: WebServerOptions): WebServer {
     if ('status' in route) {
       return route.status === 405 ? sendError(res, 405, 'Method not allowed.', { Allow: 'GET, POST' }) : sendError(res, 404, 'Not found.');
     }
-    if (!isMutating(route)) return run(req, res, route);
+    if (route.kind === 'term' && crossSiteRequest(req.headers)) return sendError(res, 403, 'This request did not come from the DevDesk page.');
+    if (!isMutating(route)) return run(req, res, route, auth.user);
     const check = mutationCheck(req.headers, config.port, publicHost);
     if (!check.ok) {
       sendError(res, check.status, check.message);
     } else {
       await run(req, res, route);
     }
-    // One line per action: what, how it went and who; never the text typed.
+    // One line per action: what, how it went and who; never the text typed. Terminal keystrokes are not logged one
+    // by one (the terminal's open and close are).
+    if (route.kind === 'term-input' && res.statusCode === 200) return;
     const id = 'id' in route ? ` ${route.id}` : '';
     log(`${method} ${route.kind}${id} ${res.statusCode}${auth.user !== undefined ? ` user=${auth.user}` : ''}`);
   };
@@ -278,6 +395,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
     close: () =>
       new Promise((resolve) => {
         stopLoop();
+        terminals.closeAll();
         for (const res of sse) res.end();
         sse.clear();
         server.close(() => resolve());
@@ -285,6 +403,9 @@ export function createWebServer(o: WebServerOptions): WebServer {
       }),
     get clients() {
       return sse.size;
+    },
+    get terminals() {
+      return terminals.size;
     },
   };
 }

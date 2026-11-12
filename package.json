@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.24",
+  "version": "2.1.0-prototype.25",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -30,6 +30,8 @@
     "@types/node": "^20.0.0",
     "@types/vscode": "~1.95.0",
     "@vscode/vsce": "^3.2.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "esbuild": "^0.24.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.6.0",
@@ -2521,6 +2523,20 @@
             "scope": "machine",
             "markdownDescription": "For the `ngrok` tunnel: the account visitors sign in with; only the emails in `#devdesk.web.allowedUsers#` get through.",
             "order": 11
+          },
+          "devdesk.web.sessionView": {
+            "type": "string",
+            "enum": [
+              "transcript",
+              "terminal-experimental"
+            ],
+            "enumDescriptions": [
+              "The transcript, the screen, and a reply box.",
+              "Experimental: the session's live terminal, as on your desktop. While you type on the phone, the session's window takes the phone's size; it takes your desktop's back when you type there."
+            ],
+            "default": "transcript",
+            "markdownDescription": "What the web page shows when you open a session. Each browser can choose its own in the page's settings (the gear); this is what a browser that didn't choose gets.",
+            "order": 12
           }
         }
       }

@@ -240,6 +240,26 @@ describe('web access daemon (header auth, tunnel)', () => {
     expect(cards).toEqual([expect.objectContaining({ id: 'sess-1', pane: '%1', canSend: true })]);
   });
 
+  it('serves the default view, the terminal script, and guards the terminal routes', async () => {
+    const settings = await call(d.port, { path: '/api/settings', headers: as('roni') });
+    expect(JSON.parse(settings.body)).toEqual({ sessionView: 'transcript' });
+    expect((await call(d.port, { path: '/api/settings' })).status).toBe(403);
+    const js = await call(d.port, { path: '/term.js', headers: as('roni') });
+    expect(js.status).toBe(200);
+    expect(js.headers['content-type']).toMatch(/javascript/);
+    expect(js.body).toContain('DevdeskXterm');
+    expect((await call(d.port, { path: '/term.css', headers: as('roni') })).body).toContain('.xterm');
+    // The stream resizes the session's window: not from another site, nor for anyone not allowed.
+    const cross = await call(d.port, { path: '/api/sessions/sess-1/term?cols=40&rows=20', headers: { ...as('roni'), 'sec-fetch-site': 'cross-site' } });
+    expect(cross.status).toBe(403);
+    expect((await call(d.port, { path: '/api/sessions/sess-1/term' })).status).toBe(403);
+    // Input needs the page's Origin, and an open terminal.
+    expect((await post(d.port, '/api/sessions/sess-1/term/input', { term: 'abcdefgh1234', data: 'x' }, { origin: 'http://evil.example' })).status).toBe(403);
+    const closed = await post(d.port, '/api/sessions/sess-1/term/input', { term: 'abcdefgh1234', data: 'x' });
+    expect(closed.status, closed.body).toBe(410);
+    expect(await tmuxCalls()).not.toContainEqual(expect.stringMatching(/-H/));
+  });
+
   it('refuses a Host it does not answer on', async () => {
     const r = await call(d.port, { path: '/api/sessions', headers: { ...as('roni'), host: 'evil.example' } });
     expect(r.status).toBe(403);

@@ -1368,8 +1368,19 @@ Web access is a page for your phone's browser. It shows your Claude sessions and
 - **List**: the sessions that need you first, then the working ones, then the rest (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, its worktree and what it is doing or asking.
 - **Session**: two tabs. **Transcript** is the conversation: your last 40 prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). One grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran between them; tap it to see the calls. **Screen** is the session's terminal as it is now. Type a reply. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
 - **Start a session**: the prompt box on top of the list. Type what Claude should do, pick `main` or a worktree (main is picked), and tap **Start** (or press Cmd/Ctrl+Enter). The new session opens.
+- **Settings** (the ⚙ at the top): how this browser opens a session. **Default** follows `devdesk.web.sessionView` on your desktop; **Transcript** is the view above; **Terminal (experimental)** is below.
 
 On a window 900 px wide or more, the list stays on the left and the open session fills the right, so you can switch sessions or start one without going back. It can't show the Claude Board or diffs, make worktrees, resume parked sessions, or attach images. With a mouse, the page uses smaller controls; a touch screen keeps the large ones.
+
+### The terminal (experimental)
+
+With **Terminal (experimental)** chosen, a session opens as its live terminal, the same screen your desktop shows, and you type into it as you would there: slash commands with their menus, **Tab**, **Shift+Tab** to change mode, **Ctrl** keys, editing a prompt before you send it. A key bar above the keyboard has the keys a phone lacks: **Esc**, **Tab**, **⇧Tab**, **Ctrl** (for the next key), **^C**, the arrows and **Enter**.
+
+- **The window takes the phone's size** while you use it there, so Claude's text fits the screen. Your desktop's view of that session shrinks too, until you type on the desktop: then the window takes the desktop's size back, and the phone's again when you type on the phone.
+- **It lets go when you leave.** Going back, locking the phone or switching apps closes the terminal (tap **Reconnect** to go on), and so do 10 minutes without typing. At most four terminals are open at once.
+- **What you type goes only to that session's pane.** tmux's own keys (the prefix key, new windows) do nothing from the page. As in the session itself, Claude's `!` commands run in the shell, and **Ctrl+Z** suspends Claude and leaves you at the pane's shell.
+
+It is experimental: tell us what doesn't work. Go back to **Transcript** in Settings at any time.
 
 ### How it works
 
@@ -1724,6 +1735,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.web.cloudflare.team` | *machine*, empty: for the `cloudflare` tunnel, your team name (`<team>.cloudflareaccess.com`); empty denies every request |
 | `devdesk.web.cloudflare.audience` | *machine*, empty: for the `cloudflare` tunnel, the Access application's AUD tag; empty denies every request |
 | `devdesk.web.ngrok.oauthProvider` | *machine*, `google` (`github`, `microsoft`, `gitlab`): what visitors sign in with for the `ngrok` tunnel |
+| `devdesk.web.sessionView` | `transcript` (`terminal-experimental`: [the live terminal](#the-terminal-experimental)): how a session opens in a browser that didn't choose in the page's Settings |
 
 ### Advanced
 

@@ -516,6 +516,81 @@ describe('list beside a session', () => {
   });
 });
 
+describe('settings and the experimental terminal', () => {
+  it('has a gear on the list, and saves the view for this browser', async () => {
+    const p = await page((m, url) => (url === 'api/settings' ? { status: 200, body: { sessionView: 'transcript' } } : undefined));
+    expect(p.$('a.gear')!.getAttribute('href')).toBe('#/settings');
+    p.win.location.hash = '#/settings';
+    await p.settle();
+    const radios = p.$$('input[name="view"]') as HTMLInputElement[];
+    expect(radios.map((r) => r.value)).toEqual(['', 'transcript', 'terminal-experimental']);
+    expect(radios[0].checked).toBe(true);
+    expect(p.$('label.folder .folder-name')!.textContent).toBe('Default: Transcript');
+    radios[2].checked = true;
+    radios[2].dispatchEvent(new p.win.Event('change'));
+    expect(p.win.localStorage.getItem('devdesk.web.sessionView')).toBe('terminal-experimental');
+    radios[0].checked = true;
+    radios[0].dispatchEvent(new p.win.Event('change'));
+    expect(p.win.localStorage.getItem('devdesk.web.sessionView')).toBeNull();
+  });
+
+  it("opens a session as the terminal when the daemon's default says so, and types into it", async () => {
+    const writes: string[] = [];
+    let onData: ((d: string) => void) | undefined;
+    const p = await page(
+      (m, url) => {
+        if (url === 'api/settings') return { status: 200, body: { sessionView: 'terminal-experimental' } };
+        if (m === 'POST' && url === 'api/sessions/s1/term/input') return { status: 200, body: { ok: true } };
+        return undefined;
+      },
+      '#/s/s1',
+    );
+    await p.settle();
+    expect(p.$('.view-term')).not.toBeNull();
+    const script = p.$('script[src="term.js"]')!;
+    expect(script).not.toBeNull();
+    expect(p.$('link[href="term.css"]')).not.toBeNull();
+    class FakeTerminal {
+      cols = 50;
+      rows = 20;
+      loadAddon() {}
+      open() {}
+      focus() {}
+      dispose() {}
+      write(b: Uint8Array) {
+        writes.push(Buffer.from(b).toString('utf8'));
+      }
+      onData(fn: (d: string) => void) {
+        onData = fn;
+      }
+    }
+    class FakeFit {
+      fit() {}
+    }
+    (p.win as unknown as { DevdeskXterm: unknown }).DevdeskXterm = { Terminal: FakeTerminal, FitAddon: FakeFit };
+    script.dispatchEvent(new p.win.Event('load'));
+    await p.settle();
+    const term = p.streams.find((s) => s.url.startsWith('api/sessions/s1/term'))!;
+    expect(term.url).toBe('api/sessions/s1/term?cols=50&rows=20');
+    for (const fn of term.listeners.get('data') ?? []) fn({ data: Buffer.from('héllo').toString('base64') });
+    expect(writes).toEqual(['héllo']);
+    term.emit('hello', { term: 'abcdefgh1234' });
+    onData!('x');
+    await p.settle();
+    expect(p.calls.find((c) => c.url === 'api/sessions/s1/term/input')?.body).toEqual({ term: 'abcdefgh1234', data: 'x' });
+    // Ctrl from the key bar turns the next key into a control character.
+    p.$('button.tkey[aria-pressed]')!.click();
+    onData!('c');
+    await p.settle();
+    const typed = p.calls.filter((c) => c.url === 'api/sessions/s1/term/input').map((c) => (c.body as { data: string }).data);
+    expect(typed).toEqual(['x', String.fromCharCode(3)]);
+    term.emit('end', { reason: 'The session ended.' });
+    await p.settle();
+    expect(p.$('.term-notice')!.textContent).toBe('The session ended.');
+    expect(term.readyState).toBe(2);
+  });
+});
+
 describe('index.html', () => {
   it('has no inline script or style (CSP default-src self)', () => {
     const html = readFileSync(join(PAGE, 'index.html'), 'utf8');
