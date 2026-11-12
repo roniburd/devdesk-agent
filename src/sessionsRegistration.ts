@@ -11,6 +11,7 @@ import { registerLeftArrow } from './leftArrow';
 import { registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { registerSmoothScroll } from './smoothScroll';
+import { registerTmuxConfig } from './tmuxConfigApply';
 import {
   cardOf,
   cardsOf,
@@ -193,6 +194,7 @@ export function registerSessions(ctx: vscode.ExtensionContext, parts: SessionsPa
     registerTimedCommand('devdesk.sessions.openChild', (file: unknown) => openChildFile(file)),
     ...registerLeftArrow(sessionsTree),
     ...registerSmoothScroll(),
+    ...registerTmuxConfig(),
     ...registerTerminalRestore(parts.projectState, terminalTitles(sessions)),
     registerTimedCommand('devdesk.sessions.openSettings', () => openSettings('devdesk.sessions')),
     registerTimedCommand('devdesk.sessions.installTmux', installTmux),

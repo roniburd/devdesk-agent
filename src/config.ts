@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
@@ -9,8 +9,9 @@ import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
 import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
-import { DEFAULT_CLAUDE_PATH, DEFAULT_PASTE_SETTLE_MS, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
+import { DEFAULT_CLAUDE_PATH, DEFAULT_SERVER, DEFAULT_PASTE_SETTLE_MS, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { scrollLines } from './core/smoothScroll';
+import { sanitizedTmuxConfig, userTmuxConfigFiles } from './core/tmuxConfig';
 import { claudeConfigFilePath } from './core/trust';
 import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount } from './core/accounts';
 import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
@@ -275,12 +276,52 @@ export function sessionsTmuxPath(): string {
   return pathSetting('sessions.tmuxPath', () => 'tmux');
 }
 
+/** The tmux config file the user set for DevDesk's tmux server (`devdesk.sessions.tmuxConfigFile`); empty: none. */
+export function sessionsTmuxConfigFileSetting(): string {
+  return expandHome(cfg().get<string>('sessions.tmuxConfigFile')) || '';
+}
+
+/** The sanitized config files already written in this process, so each is written once. */
+const writtenTmuxConfigs = new Set<string>();
+
 /**
- * The tmux binary, and the config file (setting `devdesk.sessions.tmuxConfigFile`, empty: tmux's own) for `server`:
- * the config file only applies to DevDesk's tmux server, never to another server DevDesk merely lists or attaches to.
+ * DevDesk's own tmux config (`<stateDir>/tmux.conf`, sanitizedTmuxConfig): the user's tmux config without its hooks.
+ * Written (when its content differs) the first time it is asked for in this process, so each install or update
+ * rewrites it. Undefined when it can't be written: tmux then loads its own config.
+ */
+export function sanitizedTmuxConfigFile(): string | undefined {
+  const file = join(sessionsStateDir(), 'tmux.conf');
+  if (writtenTmuxConfigs.has(file)) return file;
+  const text = sanitizedTmuxConfig(userTmuxConfigFiles(homedir(), process.env.XDG_CONFIG_HOME), 'devdesk.sessions.tmuxConfigFile');
+  try {
+    let current: string | undefined;
+    try {
+      current = readFileSync(file, 'utf8');
+    } catch {
+      // Not written yet.
+    }
+    if (current !== text) {
+      mkdirSync(sessionsStateDir(), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, text);
+      renameSync(tmp, file);
+    }
+  } catch {
+    return undefined;
+  }
+  writtenTmuxConfigs.add(file);
+  return file;
+}
+
+/**
+ * The tmux binary, and the config file for `server`: the file set in `devdesk.sessions.tmuxConfigFile`, else DevDesk's
+ * sanitized one (sanitizedTmuxConfigFile). The config file only applies to DevDesk's tmux server, never to another
+ * server DevDesk merely lists or attaches to. On tmux's own server (`default`), only the file set.
  */
 export function sessionsTmuxSetup(server = sessionsTmuxServer()): TmuxSetup {
-  const configFile = server === sessionsTmuxServer() ? expandHome(cfg().get<string>('sessions.tmuxConfigFile')) || undefined : undefined;
+  if (server !== sessionsTmuxServer()) return { bin: sessionsTmuxPath(), configFile: undefined };
+  // On tmux's own server (`default`), the user's config and hooks are theirs: DevDesk only loads a file they set.
+  const configFile = sessionsTmuxConfigFileSetting() || (server === DEFAULT_SERVER ? undefined : sanitizedTmuxConfigFile());
   return { bin: sessionsTmuxPath(), configFile };
 }
 

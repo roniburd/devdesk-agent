@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -2132,7 +2132,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "tmux config file DevDesk's tmux server loads (`tmux -f <file>`), for example `~/.tmux-devdesk.conf`. Empty: tmux's own (`~/.tmux.conf`). tmux reads it when the server starts: run `tmux -L devdesk kill-server` (this stops every DevDesk session), or `source-file` it, to apply a change to a running server.",
+            "markdownDescription": "tmux config file DevDesk's tmux server loads (`tmux -f <file>`), for example `~/.tmux-devdesk.conf`. Empty: DevDesk's own `tmux.conf` in `#devdesk.sessions.stateDir#`, which loads your tmux config (`~/.tmux.conf` and the others tmux reads) and then unsets its hooks, since they would also run for DevDesk's terminals, the board and the phone. With `#devdesk.sessions.tmuxServer#` set to `default`, empty means tmux's own config. tmux reads it when the server starts: run `tmux -L devdesk kill-server` (this stops every DevDesk session), or `source-file` it, to apply a change to a running server.",
             "order": 3
           },
           "devdesk.sessions.smoothScroll": {

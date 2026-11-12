@@ -1285,8 +1285,16 @@ DevDesk starts its sessions on a separate tmux server: `tmux -L devdesk` (settin
 | Setting | What it sets |
 |---|---|
 | `devdesk.sessions.tmuxPath` | The tmux binary. |
-| `devdesk.sessions.tmuxConfigFile` | A config file, loaded with `-f` when DevDesk's tmux server starts. |
+| `devdesk.sessions.tmuxConfigFile` | A config file, loaded with `-f` when DevDesk's tmux server starts. Empty: DevDesk's sanitized copy of your config (below). |
 | `devdesk.sessions.tmuxOptions` | Options such as `mouse` or `history-limit`. DevDesk sets them on each session when its terminal opens. |
+
+### Your tmux config in DevDesk's sessions
+
+DevDesk's tmux server loads a config of its own, `tmux.conf` in `devdesk.sessions.stateDir`. DevDesk writes it each time it starts, so an install or update brings it up to date. It loads your tmux config the way tmux would (`/etc/tmux.conf`, `~/.tmux.conf`, `~/.config/tmux/tmux.conf`), so your key bindings, options and theme still apply. Then it unsets every hook (`set-hook`).
+
+A hook also runs for DevDesk's own clients: its VS Code terminals, the Claude Board and the phone. When a hook's `run-shell` fails, tmux shows the error over the pane. For example, a `session-window-changed` hook that expects `#{client_tty}` fails when the phone switches windows, and the board then shows `'…' returned 1`. Your own tmux server (plain `tmux`) still loads your config with its hooks.
+
+When DevDesk starts, it also unsets the hooks of a DevDesk server that is already running. To load your own file instead, hooks included, set `devdesk.sessions.tmuxConfigFile`, then restart the server (`tmux -L devdesk kill-server`, which stops every DevDesk session). With `devdesk.sessions.tmuxServer` set to `default`, DevDesk shares your own server and changes nothing in it.
 
 ### Smooth scrolling (experimental)
 
@@ -1732,7 +1740,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 |---|---|
 | `devdesk.sessions.tmuxServer` | `devdesk` (`default` is tmux's own server) |
 | `devdesk.sessions.tmuxPath` | `tmux` on PATH |
-| `devdesk.sessions.tmuxConfigFile` | tmux's own (`~/.tmux.conf`); read when DevDesk's tmux server starts |
+| `devdesk.sessions.tmuxConfigFile` | DevDesk's `<stateDir>/tmux.conf`: your tmux config without its hooks (tmux's own on the `default` server); read when DevDesk's tmux server starts |
 | `devdesk.sessions.tmuxOptions` | `{}` (for example `{ "mouse": true, "history-limit": 50000 }`, set on each session) |
 | `devdesk.sessions.smoothScroll` | `false` (experimental: the wheel scrolls one line at a time) |
 | `devdesk.sessions.smoothScrollLines` | `3` (lines per wheel event with smooth scrolling on, 1 to 10) |
