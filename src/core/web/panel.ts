@@ -16,8 +16,16 @@ export interface WebPanelRow {
   /** A theme color id for the icon. */
   color?: string;
   action?: WebPanelAction;
-  /** For the row's inline buttons (`viewItem == …`). */
+  /** For the row's inline buttons (`viewItem =~ /\\b…\\b/`): space-separated words; `copyable` when `copy` is set. */
   contextValue?: string;
+  /** What the row's Copy button copies (a URL, pid, path, error…). */
+  copy?: string;
+}
+
+/** Sets `copy` and adds `copyable` to the row's contextValue, so it gets a Copy button on hover. */
+function copyable(row: WebPanelRow, copy: string | undefined): WebPanelRow {
+  if (!copy) return row;
+  return { ...row, copy, contextValue: [row.contextValue, 'copyable'].filter(Boolean).join(' ') };
 }
 
 /** The daemon's script and the extension version it came from, from its command line (`…/roniburd.devdesk-claude-1.6.0/dist/web.js --config …`). */
@@ -36,6 +44,8 @@ export interface WebPanelInput {
   running?: { script: string; version?: string };
   /** This extension's `dist/web.js`. */
   script: string;
+  /** The daemon's log file, for the Log row's Copy button. */
+  logPath?: string;
   now: number;
 }
 
@@ -66,18 +76,18 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
   const s = o.status.state;
   const local = `http://${s.host}:${s.port}/`;
   const rows: WebPanelRow[] = [
-    {
+    copyable({
       id: 'status',
       label: o.status.kind === 'tunnel-down' ? 'Running, tunnel down' : 'Running',
       description: `${sinceText(s.startedAt, o.now)} · pid ${s.pid}`,
       tooltip: `Started ${new Date(s.startedAt).toLocaleString()}, process ${s.pid}.`,
       icon: o.status.kind === 'tunnel-down' ? 'warning' : 'broadcast',
       color: o.status.kind === 'tunnel-down' ? 'problemsWarningIcon.foreground' : 'testing.iconPassed',
-    },
+    }, String(s.pid)),
   ];
   // A daemon another version started keeps serving that version's page until it restarts (an update doesn't restart it).
   if (o.running && o.running.script !== o.script) {
-    rows.push({
+    rows.push(copyable({
       id: 'outdated',
       label: o.running.version ? `Started by version ${o.running.version}` : 'Started by another version',
       description: 'Restart to update',
@@ -85,10 +95,10 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
       icon: 'warning',
       color: 'problemsWarningIcon.foreground',
       action: 'restart',
-    });
+    }, o.running.script));
   }
   if (s.url) {
-    rows.push({ id: 'url', label: 'Phone URL', description: s.url, tooltip: `${s.url}\n\nClick to copy.`, icon: 'device-mobile', action: 'copyUrl', contextValue: 'webUrl' });
+    rows.push(copyable({ id: 'url', label: 'Phone URL', description: s.url, tooltip: `${s.url}\n\nClick to copy.`, icon: 'device-mobile', action: 'copyUrl', contextValue: 'webUrl' }, s.url));
   }
   if (s.tunnel !== 'none') {
     const tunnel = {
@@ -96,7 +106,7 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
       starting: { label: 'Tunnel starting', icon: 'loading~spin', color: undefined },
       down: { label: 'Tunnel down', icon: 'error', color: 'problemsErrorIcon.foreground' },
     }[s.tunnel];
-    rows.push({
+    rows.push(copyable({
       id: 'tunnel',
       label: tunnel.label,
       description: s.tunnel === 'down' ? s.tunnelError : s.tunnelPid ? `pid ${s.tunnelPid}` : undefined,
@@ -105,11 +115,14 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
       color: tunnel.color,
       action: 'restartTunnel',
       contextValue: 'webTunnel',
-    });
+    }, s.tunnel === 'down' ? s.tunnelError : s.tunnelPid ? String(s.tunnelPid) : undefined));
   }
-  rows.push({ id: 'local', label: 'Loopback URL', description: local, tooltip: `${local}\n\nFor ssh -L. Click to copy.`, icon: 'link', action: 'copyLocal' });
-  if (o.settings) rows.push(accessRow(o.settings));
-  rows.push({ id: 'log', label: 'Log', description: 'daemon.log', icon: 'output', action: 'openLog' });
+  rows.push(copyable({ id: 'local', label: 'Loopback URL', description: local, tooltip: `${local}\n\nFor ssh -L. Click to copy.`, icon: 'link', action: 'copyLocal' }, local));
+  if (o.settings) {
+    const access = accessRow(o.settings);
+    rows.push(copyable(access, o.settings.auth === 'header' || o.settings.auth === 'cloudflare' ? o.settings.allowedUsers.join(', ') : undefined));
+  }
+  rows.push(copyable({ id: 'log', label: 'Log', description: 'daemon.log', tooltip: o.logPath ? `${o.logPath}\n\nClick to open.` : undefined, icon: 'output', action: 'openLog' }, o.logPath));
   return rows;
 }
 

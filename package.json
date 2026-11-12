@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -434,6 +434,12 @@
         "icon": "$(copy)"
       },
       {
+        "command": "devdesk.web.copyRow",
+        "title": "Copy",
+        "category": "DevDesk for Claude Code",
+        "icon": "$(copy)"
+      },
+      {
         "command": "devdesk.web.openUrl",
         "title": "Open Web Access URL",
         "category": "DevDesk for Claude Code",
@@ -547,24 +553,29 @@
       ],
       "view/item/context": [
         {
-          "command": "devdesk.web.copyUrl",
-          "when": "view == devdesk.web && viewItem == webUrl",
+          "command": "devdesk.web.copyRow",
+          "when": "view == devdesk.web && viewItem =~ /\\bcopyable\\b/",
           "group": "inline@1"
         },
         {
+          "command": "devdesk.web.copyRow",
+          "when": "view == devdesk.web && viewItem =~ /\\bcopyable\\b/",
+          "group": "1_copy@1"
+        },
+        {
           "command": "devdesk.web.openUrl",
-          "when": "view == devdesk.web && viewItem == webUrl",
+          "when": "view == devdesk.web && viewItem =~ /\\bwebUrl\\b/",
           "group": "inline@2"
         },
         {
           "command": "devdesk.web.showQr",
-          "when": "view == devdesk.web && viewItem == webUrl",
+          "when": "view == devdesk.web && viewItem =~ /\\bwebUrl\\b/",
           "group": "inline@3"
         },
         {
           "command": "devdesk.web.restartTunnel",
-          "when": "view == devdesk.web && viewItem == webTunnel",
-          "group": "inline@1"
+          "when": "view == devdesk.web && viewItem =~ /\\bwebTunnel\\b/",
+          "group": "inline@2"
         },
         {
           "command": "devdesk.sessions.newInWorktree",
@@ -725,6 +736,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "devdesk.web.copyRow",
+          "when": "false"
+        },
         {
           "command": "devdesk.board.fromSidebar",
           "when": "false"
