@@ -95,6 +95,15 @@ export function mutationCheck(h: Headers, port: number, publicHost: string): { o
   return { ok: true };
 }
 
+/**
+ * A GET with side effects (the terminal stream resizes the session's window) from another site: a browser says so in
+ * Sec-Fetch-Site. Browsers too old to send it pass; the page's own requests are `same-origin`.
+ */
+export function crossSiteRequest(h: Headers): boolean {
+  const site = single(h['sec-fetch-site'])?.toLowerCase();
+  return site === 'cross-site' || site === 'same-site';
+}
+
 export const SECURITY_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   'Content-Security-Policy': "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'X-Frame-Options': 'DENY',

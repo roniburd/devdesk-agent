@@ -2,7 +2,7 @@ import type { SessionState } from '../sessions';
 import type { StateLook } from '../stateLooks';
 
 /**
- * The web access JSON API, shared by the daemon (`src/web`) and the page (`src/web/page`). Only `WEB_KEYS` is a value,
+ * The web access JSON API, shared by the daemon (`src/web`) and the page (`src/web/page`). Only `WEB_KEYS` and `SESSION_VIEWS` (and isSessionView) are values,
  * so the page can import this file without pulling in Node code.
  */
 
@@ -101,6 +101,27 @@ export interface FoldersResponse {
 export interface SendRequest {
   text: string;
 }
+/** The page's view of a session: the transcript with a reply box, or the experimental terminal (core/web/terminal.ts). */
+export const SESSION_VIEWS = ['transcript', 'terminal-experimental'] as const;
+export type SessionView = (typeof SESSION_VIEWS)[number];
+export const isSessionView = (v: unknown): v is SessionView => typeof v === 'string' && (SESSION_VIEWS as readonly string[]).includes(v);
+
+/** GET api/settings: what the page shows by default (devdesk.web.sessionView); each browser may choose its own. */
+export interface SettingsResponse {
+  sessionView: SessionView;
+}
+
+/** POST api/sessions/<id>/term/input and …/term/resize. `term`: the id the stream's `hello` event gave. */
+export interface TermInputRequest {
+  term: string;
+  data: string;
+}
+export interface TermResizeRequest {
+  term: string;
+  cols: number;
+  rows: number;
+}
+
 export const WEB_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Enter', 'Escape', 'Up', 'Down'] as const;
 export type WebKey = (typeof WEB_KEYS)[number];
 export interface KeyRequest {

@@ -30,6 +30,7 @@ describe('resolveWebSettings', () => {
       tunnelActionHost: '',
       cloudflare: { team: '', audience: '' },
       ngrokProvider: 'google',
+      sessionView: 'transcript',
     });
     expect(DEFAULT_WEB_PORT).toBe(7690);
   });

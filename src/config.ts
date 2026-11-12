@@ -665,6 +665,7 @@ function webSettings(): WebSettings {
     cloudflareTeam: c.get('web.cloudflare.team'),
     cloudflareAudience: c.get('web.cloudflare.audience'),
     ngrokProvider: c.get('web.ngrok.oauthProvider'),
+    sessionView: c.get('web.sessionView'),
   };
 }
 
