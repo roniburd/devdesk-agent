@@ -12,6 +12,7 @@ export type Route =
   | { kind: 'cards' }
   | { kind: 'events' }
   | { kind: 'folders' }
+  | { kind: 'composer' }
   | { kind: 'detail'; id: string }
   | { kind: 'send'; id: string }
   | { kind: 'key'; id: string }
@@ -34,6 +35,7 @@ const FIXED: Readonly<Record<string, { GET?: Route; POST?: Route }>> = {
   '/api/sessions': { GET: { kind: 'cards' }, POST: { kind: 'start' } },
   '/api/events': { GET: { kind: 'events' } },
   '/api/folders': { GET: { kind: 'folders' } },
+  '/api/composer': { GET: { kind: 'composer' } },
 };
 
 const decode = (s: string): string | undefined => {
@@ -81,7 +83,14 @@ export function parseNewSessionBody(raw: unknown): NewSessionRequest | BodyError
   const prompt = raw.prompt === undefined ? '' : raw.prompt;
   if (typeof prompt !== 'string') return { status: 400, error: 'The prompt must be text.' };
   if (tooLong(prompt)) return { status: 413, error: `The prompt is over ${MAX_TEXT_BYTES / 1024} KiB.` };
-  return { dir: raw.dir, prompt };
+  const out: NewSessionRequest = { dir: raw.dir, prompt };
+  for (const k of ['mode', 'model', 'effort'] as const) {
+    const v = raw[k];
+    if (v === undefined) continue;
+    if (typeof v !== 'string' || v.length > 512) return { status: 400, error: `The ${k} must be a name.` };
+    out[k] = v;
+  }
+  return out;
 }
 
 /** A terminal id as the stream's `hello` gives it. */

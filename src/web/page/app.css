@@ -469,6 +469,80 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .folder-pick:disabled { color: var(--muted); cursor: default; }
 .composer .start { min-width: 96px; }
+
+/* The `/` button and the mode, model and effort pills: native selects (a wheel or sheet on a phone) drawn as chips. On
+ * a phone they show once the box is used, so the list stays near the top; they scroll sideways when they don't fit. */
+.composer-tools {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 calc(-1 * var(--pad));
+  padding: 0 var(--pad);
+}
+.composer-tools::-webkit-scrollbar { display: none; }
+.composer:not(.open):not(:focus-within) .composer-tools { display: none; }
+.pill {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-sm);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 0.875rem;
+}
+.pill[hidden] { display: none; }
+.pill.changed { border-color: var(--focus); background: color-mix(in srgb, var(--focus) 10%, var(--raised)); }
+.pill::after { content: "▾"; margin: 0 10px 0 -4px; color: var(--muted); pointer-events: none; font-size: 0.75rem; }
+.pill-text { padding: 0 10px 0 12px; font-weight: 600; white-space: nowrap; max-width: 16em; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.pill-pick {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  font-size: 16px; /* iOS doesn't zoom on focus. */
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+.pill:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+.slash-button { justify-content: center; min-width: var(--tap-sm); padding: 0 12px; font: 700 1rem/1 var(--mono); cursor: pointer; }
+.slash-button::after { content: none; }
+
+/* The `/` menu: in the flow under the prompt, so nothing covers it on a phone with the keyboard up. */
+.slash-menu {
+  max-height: min(45dvh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+}
+.slash-menu[hidden] { display: none; }
+.slash-row {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: var(--tap);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.slash-row:last-child { border-bottom: 0; }
+.slash-row.active { background: color-mix(in srgb, var(--focus) 14%, var(--surface)); }
+.slash-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.slash-name { flex: 0 1 auto; min-width: 0; font: 600 0.9375rem/1.3 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slash-hint { flex: 0 100 auto; color: var(--muted); font: 0.8125rem/1.3 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.slash-badge { margin-left: auto; flex: none; padding: 1px 8px; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 0.6875rem; font-weight: 600; }
+.badge-unavailable { color: var(--red); }
+.badge-session { color: var(--blue); }
+.badge-terminal { color: var(--purple); }
+.slash-desc { color: var(--muted); font-size: 0.8125rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .composer .notice { margin: 0; }
 .hint { margin: 0; color: var(--muted); }
 .empty .hint { font-size: 0.9375rem; }
@@ -524,6 +598,14 @@ button, input, textarea { font: inherit; color: inherit; }
   .reply-text, .prompt { border-radius: 10px; }
   .folder-pick { border-radius: 10px; font-size: 0.9375rem; }
   .composer .start { min-width: 80px; }
+  /* A laptop has room: the pills always show, and the menu rows are one line. */
+  .composer:not(.open):not(:focus-within) .composer-tools { display: flex; }
+  .composer-tools { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
+  .pill { font-size: 0.8125rem; }
+  .slash-row { min-height: 0; padding: 5px 10px; }
+  .slash-row:hover { background: var(--raised); }
+  .slash-row.active { background: color-mix(in srgb, var(--focus) 14%, var(--surface)); }
+  .slash-desc { -webkit-line-clamp: 1; }
   .reply-actions .send { min-width: 88px; }
 }
 

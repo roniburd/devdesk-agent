@@ -127,10 +127,52 @@ export type WebKey = (typeof WEB_KEYS)[number];
 export interface KeyRequest {
   key: WebKey;
 }
-/** prompt may be ''; <= MAX_TEXT_BYTES. */
+/**
+ * prompt may be ''; <= MAX_TEXT_BYTES. mode, model and effort as `ComposerResponse` offers them (absent: the default
+ * mode, Claude's own model and effort).
+ */
 export interface NewSessionRequest {
   dir: string;
   prompt: string;
+  mode?: string;
+  model?: string;
+  effort?: string;
+}
+
+/** A command the prompt box's `/` menu offers (core/slashCommands.ts's SlashCommand). */
+export interface WebCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+  origin: string;
+  aliases?: readonly string[];
+  /** core/builtins.ts's categories; absent: a skill or prompt command (F). */
+  category?: 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
+  hidden?: boolean;
+}
+/** A row of the model pill (core/composer.ts's ModelChoice): `value` is what `--model` gets, `Default` none. */
+export interface WebModel {
+  value: string;
+  label: string;
+  description: string;
+  /** Effort levels besides Default; [] when the model takes none. */
+  efforts: string[];
+}
+export interface WebMode {
+  name: string;
+  description: string;
+}
+/** GET api/composer?dir=…: what the prompt box offers for a session in that folder. */
+export interface ComposerResponse {
+  commands: WebCommand[];
+  /** Default first. */
+  models: WebModel[];
+  modes: WebMode[];
+  defaultMode: string;
+  /** The mode that starts Claude in plan mode (`--permission-mode plan`), for `/plan <task>`; absent when none does. */
+  planMode?: string;
+  /** The Claude CLI is still being asked for its commands and models: ask again in a few seconds for its rows. */
+  listing: boolean;
 }
 export interface NewSessionResponse {
   tmuxSession: string;

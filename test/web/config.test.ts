@@ -141,6 +141,12 @@ describe('parseDaemonConfig', () => {
     expect('config' in parsed && parsed.config.sort).toEqual({ mode: 'urgency', recentMs: 15 * 60_000, unreadFirst: true });
   });
 
+  it("keeps the prompt box's modes, models and Claude config directory", () => {
+    const claude = { modeArgs: '', env: {}, modes: [{ name: 'Plan', args: '--permission-mode plan', description: 'Plan only' }], defaultMode: 'Plan', models: ['Default', 'opus'], configDir: '/h/.claude' };
+    const parsed = parseDaemonConfig({ ...good(), claude });
+    expect('config' in parsed && parsed.config.claude).toEqual(claude);
+  });
+
   it('re-applies the clamps', () => {
     const parsed = parseDaemonConfig({ ...good(), pollMs: 1, identityHeader: 'X-H', publicHost: 'A.B' });
     expect('config' in parsed && parsed.config.pollMs).toBe(500);
@@ -176,6 +182,9 @@ describe('parseDaemonConfig', () => {
     ['an unknown sort mode', () => ({ ...good(), sort: { mode: 'random', recentMs: 1, unreadFirst: true } })],
     ['sort.unreadFirst missing', () => ({ ...good(), sort: { mode: 'urgency', recentMs: 1 } })],
     ['missing pasteSettleMs', () => ({ ...good(), pasteSettleMs: undefined })],
+    ['modes not modes', () => ({ ...good(), claude: { modeArgs: '', env: {}, modes: [{ args: 1 }] } })],
+    ['models with a number', () => ({ ...good(), claude: { modeArgs: '', env: {}, models: [1] } })],
+    ['configDir a number', () => ({ ...good(), claude: { modeArgs: '', env: {}, configDir: 1 } })],
     ['root a number', () => ({ ...good(), root: 3 })],
     ['missing discovery', () => ({ ...good(), discovery: undefined })],
     ['stuckMs negative', () => ({ ...good(), stuckMs: -1 })],

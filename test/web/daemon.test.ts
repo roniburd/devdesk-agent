@@ -102,6 +102,8 @@ async function startDaemon(over: Partial<DaemonConfig> = {}, env: Record<string,
     allowedUsers: ['roni'],
     pollMs: 500,
     tmux: { bin: tmuxBin, server: 'devdesk', options: [], env: {} },
+    // A Claude that is not there: asking it for its `/` list fails at once, never the real one.
+    claude: { modeArgs: '', env: {}, path: join(tmp, 'no-claude'), configDir: join(tmp, 'claude-home') },
     ...over,
     port,
   };
@@ -320,6 +322,18 @@ describe('web access daemon (header auth, tunnel)', () => {
     const r = await call(d.port, { path: '/api/folders', headers: as('roni') });
     expect(r.status).toBe(200);
     expect(JSON.parse(r.body).folders).toEqual([expect.objectContaining({ dir: repo, isMain: true })]);
+  });
+
+  it("offers the prompt box's commands, models and modes for a listed folder only", async () => {
+    const r = await call(d.port, { path: `/api/composer?dir=${encodeURIComponent(repo)}`, headers: as('roni') });
+    expect(r.status).toBe(200);
+    const info = JSON.parse(r.body);
+    expect(info.commands.map((c: { name: string }) => c.name)).toEqual(expect.arrayContaining(['model', 'plan', 'compact']));
+    expect(info.models[0]).toMatchObject({ value: 'Default' });
+    expect(info.modes).toEqual([{ name: 'Default', description: '' }]);
+    const other = await call(d.port, { path: `/api/composer?dir=${encodeURIComponent('/etc')}`, headers: as('roni') });
+    expect(other.status).toBe(400);
+    expect((await call(d.port, { path: `/api/composer?dir=${encodeURIComponent(repo)}` })).status).toBe(403);
   });
 
   it('streams the cards', async () => {

@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { SessionCard } from '../core/sessions';
-import { type ActionDeps, type ActionResult, pressKey, sendText, sessionDetail, startSession } from '../core/web/actions';
+import { type ActionDeps, type ActionResult, featureOf, pressKey, sendText, sessionDetail, startSession } from '../core/web/actions';
+import { composerResponse, webModels } from '../core/web/composer';
+import type { ComposerCache } from '../core/web/composerCache';
 import type { AccessKeys } from '../core/web/cfAccess';
 import { answeredPublicHost, authorize, crossSiteRequest, deniedPage, hostAllowed, mutationCheck, SECURITY_HEADERS } from '../core/web/auth';
 import { webCards, webFolders, type WebView } from '../core/web/cards';
@@ -45,6 +47,8 @@ export interface WebServerOptions {
   /** config.publicHost || the tunnel's. */
   publicHost: () => string;
   log: (line: string) => void;
+  /** What the Claude CLI and the skill folders offer per folder, for the prompt box (`api/composer`). */
+  composer?: Pick<ComposerCache, 'get' | 'listing'>;
   /** For `cloudflare` auth: the team's keys now, and a refresh for a token signed by a key not fetched yet. */
   accessKeys?: { current: AccessKeys | undefined; refresh(): Promise<void> };
 }
@@ -287,6 +291,13 @@ export function createWebServer(o: WebServerOptions): WebServer {
         return openTerminal(req, res, route.id, user);
       case 'folders':
         return sendJson(res, 200, { folders: webFolders(await snapshot.features()) });
+      case 'composer': {
+        const dir = new URL(req.url ?? '/', 'http://x').searchParams.get('dir') ?? '';
+        const feature = featureOf(dir, await snapshot.features());
+        if (!feature) return sendError(res, 400, 'Not one of the listed folders.');
+        const got = o.composer ? await o.composer.get(feature.dir) : { listing: undefined, onDisk: [], pending: false };
+        return sendJson(res, 200, composerResponse({ claude: config.claude, ...got }));
+      }
       case 'detail': {
         const card = await cardFor(res, route.id);
         if (card) sendResult(res, await sessionDetail(card, { ...(await view(await recentCards())), server: serverOf(card) }, actions));
@@ -320,7 +331,9 @@ export function createWebServer(o: WebServerOptions): WebServer {
       const body = parseNewSessionBody(raw);
       if ('status' in body) return sendError(res, body.status, body.error);
       const [features, names] = await Promise.all([snapshot.features(), snapshot.sessionNames()]);
-      sendResult(res, await startSession(body, features, names, config, actions));
+      const dir = featureOf(body.dir, features)?.dir;
+      const models = webModels(config.claude, dir ? o.composer?.listing(dir) : undefined);
+      sendResult(res, await startSession(body, features, names, config, actions, models));
       cached = undefined;
     } else if (route.kind === 'term-input' || route.kind === 'term-resize') {
       const body = route.kind === 'term-input' ? parseTermInputBody(raw) : parseTermResizeBody(raw);

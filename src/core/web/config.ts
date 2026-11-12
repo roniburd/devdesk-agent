@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { WEB_ACCESS } from '../edition';
 import { isFiniteNumber } from '../json';
+import { type LaunchMode, parseModes } from '../modes';
 import { shellQuote } from '../shell';
 import type { ClaudeLaunch } from '../sessionStart';
 import { DEFAULT_PASTE_SETTLE_MS, isServerName } from '../tmux';
@@ -198,8 +199,12 @@ export interface DaemonConfig extends WebAccessSettings {
     /** sessionsEnv(bin): sessionsClaudeEnv() (+ DEVDESK_TMUX when bin !== 'tmux'); each session adds its launchTags. */
     env: Record<string, string>;
   };
-  /** sessionsLaunch(): the default launch mode and Claude account. */
-  claude: ClaudeLaunch;
+  /**
+   * sessionsLaunch(): the default launch mode and Claude account. For the page's prompt box: modes (sessionsModes(),
+   * absent: only the default mode) with defaultMode its name, models (boardModels(): replaces the CLI's list when not
+   * empty), configDir (claudeConfigDir(): the skills and commands `/` offers).
+   */
+  claude: ClaudeLaunch & { modes?: LaunchMode[]; defaultMode?: string; models?: string[]; configDir?: string };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -272,6 +277,9 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   }
   if (typeof c.modeArgs !== 'string') return 'claude.modeArgs must be a string';
   if (!isObject(c.env) || !Object.values(c.env).every((v) => typeof v === 'string')) return 'claude.env must map names to strings';
+  if (c.modes !== undefined && (!Array.isArray(c.modes) || parseModes(c.modes).length !== c.modes.length)) return 'claude.modes must be launch modes';
+  if (!optionalString(c.defaultMode) || !optionalString(c.configDir)) return 'claude.defaultMode and configDir must be strings';
+  if (c.models !== undefined && (!Array.isArray(c.models) || !c.models.every((m) => typeof m === 'string'))) return 'claude.models must be strings';
   return undefined;
 }
 
@@ -316,6 +324,10 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
       ...(claude.wrapper !== undefined ? { wrapper: claude.wrapper } : {}),
       modeArgs: claude.modeArgs,
       env: { ...claude.env },
+      ...(claude.modes !== undefined ? { modes: parseModes(claude.modes) } : {}),
+      ...(claude.defaultMode !== undefined ? { defaultMode: claude.defaultMode } : {}),
+      ...(claude.models !== undefined ? { models: [...(claude.models as string[])] } : {}),
+      ...(claude.configDir !== undefined ? { configDir: claude.configDir } : {}),
     },
   };
   return { config };

@@ -6,6 +6,7 @@
 // All data goes in as text (dom.ts, screen.ts, markdown.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
 import type {
   CardsResponse,
+  ComposerResponse,
   FoldersResponse,
   KeyRequest,
   NewSessionRequest,
@@ -26,6 +27,9 @@ import { turnEls } from './turns';
 import { renderScreen } from './screen';
 import { termView } from './termView';
 import { isSessionView } from '../../core/web/types';
+import { DEFAULT_CHOICE } from '../../core/composer';
+import { boxAction } from '../../core/web/promptBox';
+import { promptTools } from './promptTools';
 
 /** Stream errors in a row before the list falls back to polling `api/sessions`. */
 const STREAM_ERRORS = 3;
@@ -627,21 +631,49 @@ function loadFolders(): Promise<{ folders?: WebFolder[]; error?: string }> {
 /** Rows the prompt box shows: one line until it is used, then up to 8 as you type. */
 const PROMPT_ROWS = { idle: 1, open: 3, max: 8 };
 
-/** The prompt box at the top of the list: type, pick a folder (main is picked), Start. It opens the new session. */
+/** While the Claude CLI is still listing a folder's commands and models, the box asks again this often, this many times. */
+const COMPOSER_RETRY_MS = 3000;
+const COMPOSER_RETRIES = 10;
+
+/**
+ * The prompt box at the top of the list: type (with a `/` menu of skills and commands), pick the mode, model and effort
+ * pills and a folder (main is picked), Start. It opens the new session.
+ */
 function composer(): View & { focus(): void } {
   let disposed = false;
   let waiting: { tmuxSession: string; until: number; from: string } | undefined;
   let waitTimer: number | undefined;
+  let infoTimer: number | undefined;
+  /** The text a notice asked to confirm (an unknown command): Start again with it sends it anyway. */
+  let confirming: string | undefined;
   const notice = h('p', { class: 'notice', attrs: { 'aria-live': 'polite' } });
   notice.hidden = true;
   const prompt = h('textarea', {
     class: 'prompt',
-    attrs: { rows: String(PROMPT_ROWS.idle), placeholder: 'What should Claude do?', 'aria-label': 'Prompt for a new session', autocapitalize: 'sentences' },
+    attrs: {
+      rows: String(PROMPT_ROWS.idle),
+      placeholder: 'What should Claude do? / for commands',
+      'aria-label': 'Prompt for a new session',
+      autocapitalize: 'sentences',
+      role: 'combobox',
+      'aria-expanded': 'false',
+    },
     on: {
-      input: () => fit(),
+      input: () => {
+        fit();
+        tools.update();
+      },
+      click: () => tools.update(),
+      keyup: (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') tools.update();
+      },
       focus: () => fit(),
-      blur: () => fit(),
+      blur: () => {
+        tools.close();
+        fit();
+      },
       keydown: (e) => {
+        if (tools.key(e)) return;
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           void submit();
@@ -649,8 +681,10 @@ function composer(): View & { focus(): void } {
       },
     },
   });
+  const tools = promptTools(prompt, { run: () => void submit(), changed: () => fit() });
   const folder = h('select', { class: 'folder-pick', attrs: { name: 'dir', 'aria-label': 'Folder' } }, h('option', { text: 'Loading folders…', attrs: { value: '' } }));
   folder.disabled = true;
+  folder.addEventListener('change', () => void loadInfo(folder.value));
   const start = h('button', { class: 'button primary start', text: 'Start', attrs: { type: 'submit' } });
   start.disabled = true;
 
@@ -658,6 +692,7 @@ function composer(): View & { focus(): void } {
     const used = document.activeElement === prompt || prompt.value !== '';
     const lines = prompt.value.split('\n').length;
     prompt.rows = used ? Math.min(PROMPT_ROWS.max, Math.max(PROMPT_ROWS.open, lines)) : PROMPT_ROWS.idle;
+    el.classList.toggle('open', used || tools.custom());
   }
 
   const say = (message: string | undefined, error = true) => {
@@ -679,9 +714,22 @@ function composer(): View & { focus(): void } {
       },
     },
     prompt,
+    tools.menu,
+    tools.bar,
     h('div', { class: 'composer-row' }, h('label', { class: 'folder-chip', attrs: { title: 'Folder the session starts in' } }, folder), start),
     notice,
   );
+
+  /** What the box offers for `dir`; again in a few seconds while the CLI is still listing it. */
+  async function loadInfo(dir: string, tries = 0): Promise<void> {
+    window.clearTimeout(infoTimer);
+    if (!dir) return;
+    const r = await api<ComposerResponse>('GET', `api/composer?dir=${encodeURIComponent(dir)}`);
+    if (disposed || folder.value !== dir || !r.data) return;
+    tools.setInfo(r.data);
+    fit();
+    if (r.data.listing && tries < COMPOSER_RETRIES) infoTimer = window.setTimeout(() => void loadInfo(dir, tries + 1), COMPOSER_RETRY_MS);
+  }
 
   async function fill(): Promise<void> {
     const r = await loadFolders();
@@ -701,6 +749,7 @@ function composer(): View & { focus(): void } {
     folder.value = sorted[0].dir;
     folder.disabled = false;
     start.disabled = false;
+    void loadInfo(folder.value);
   }
 
   function arrived(): void {
@@ -733,9 +782,39 @@ function composer(): View & { focus(): void } {
   async function submit(): Promise<void> {
     const dir = folder.value;
     if (!dir || waiting || start.disabled) return;
+    tools.close();
+    const text = prompt.value;
+    const info = tools.info();
+    const choice = tools.choice();
+    const action = boxAction(text, {
+      commands: info?.commands ?? [],
+      models: info?.models ?? [],
+      ...(info?.planMode ? { planMode: info.planMode } : {}),
+      choice,
+      confirmed: confirming === text,
+    });
+    confirming = undefined;
+    if (action.kind === 'notice') {
+      if (action.confirm) confirming = text;
+      return say(action.text, false);
+    }
+    if (action.kind === 'clear' || action.kind === 'set') {
+      if (action.kind === 'set') tools.set({ ...(action.model ? { model: action.model } : {}), ...(action.effort ? { effort: action.effort } : {}) });
+      prompt.value = '';
+      fit();
+      return say(action.kind === 'set' ? action.note : undefined, false);
+    }
     start.disabled = true;
     say(undefined);
-    const body: NewSessionRequest = { dir, prompt: prompt.value };
+    // Only what is off the defaults: the daemon starts the default mode, Claude's own model and effort otherwise.
+    const mode = action.mode ?? (info && choice.mode !== info.defaultMode ? choice.mode : undefined);
+    const body: NewSessionRequest = {
+      dir,
+      prompt: action.prompt,
+      ...(mode ? { mode } : {}),
+      ...(choice.model !== DEFAULT_CHOICE ? { model: choice.model } : {}),
+      ...(choice.effort !== DEFAULT_CHOICE ? { effort: choice.effort } : {}),
+    };
     const r = await api<NewSessionResponse>('POST', 'api/sessions', body);
     if (disposed) return;
     if (!r.data) {
@@ -744,7 +823,7 @@ function composer(): View & { focus(): void } {
       return;
     }
     // Only clear what was sent: anything typed while it went stays.
-    if (prompt.value === body.prompt) prompt.value = '';
+    if (prompt.value === text) prompt.value = '';
     fit();
     say('Starting Claude…', false);
     waiting = { tmuxSession: r.data.tmuxSession, until: Date.now() + NEW_SESSION_WAIT_MS, from: location.hash || '#/' };
@@ -762,6 +841,7 @@ function composer(): View & { focus(): void } {
     dispose: () => {
       disposed = true;
       window.clearTimeout(waitTimer);
+      window.clearTimeout(infoTimer);
       feed.listeners.delete(arrived);
     },
   };

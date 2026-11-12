@@ -43,6 +43,8 @@ const AFFECTS = [
   // The Claude accounts new sessions start in, and how they run Claude.
   'devdesk.claude',
   'devdesk.board.pasteSettleMs',
+  // The models the prompt box's model pill offers.
+  'devdesk.board.models',
 ];
 
 /** True when `pid` runs the daemon (not some process that took over a stale pid); false when `ps` can't tell. */

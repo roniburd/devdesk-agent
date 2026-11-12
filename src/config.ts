@@ -1001,6 +1001,6 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
       env: sessionsEnv(bin),
     },
     // The default launch mode and Claude account, as a new session from the Claude view starts.
-    claude: sessionsLaunch(),
+    claude: { ...sessionsLaunch(), modes: sessionsModes(), defaultMode: sessionsDefaultMode().name, models: boardModels(), configDir: claudeConfigDir() },
   };
 }
