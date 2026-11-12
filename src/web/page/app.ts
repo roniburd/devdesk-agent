@@ -585,24 +585,26 @@ function settingsView(): View {
       storeView(value || undefined);
       saved.hidden = false;
     });
-    return h('label', { class: 'folder' }, input, h('span', { class: 'folder-text' }, h('span', { class: 'folder-name', text: name }), h('span', { class: 'folder-dir', text: hint })));
+    return h('label', { class: 'setting-option' }, input, h('span', { class: 'setting-text' }, h('span', { class: 'setting-name', text: name }), h('span', { class: 'setting-hint', text: hint })));
   };
   const saved = h('p', { class: 'notice', text: 'Saved for this browser.', attrs: { role: 'status' } });
   saved.hidden = true;
+  const ok = h('button', { class: 'button primary', text: 'OK', attrs: { type: 'button' } });
+  ok.addEventListener('click', () => go(beforeSettings));
   const el = h(
     'div',
     { class: 'view view-settings' },
     h('header', { class: 'bar' }, h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }), h('h1', { class: 'heading', text: 'Settings' })),
     h(
       'div',
-      { class: 'content new-form settings-form' },
+      { class: 'content settings-form' },
       h(
         'fieldset',
-        { class: 'field' },
-        h('legend', { text: 'Open sessions as' }),
+        { class: 'setting' },
+        h('legend', { class: 'setting-label', text: 'Open sessions as' }),
         h(
           'div',
-          { class: 'folders', attrs: { role: 'radiogroup', 'aria-label': 'Open sessions as' } },
+          { class: 'setting-options', attrs: { role: 'radiogroup', 'aria-label': 'Open sessions as' } },
           option('', `Default: ${VIEW_NAMES[defaultView]}`, 'What devdesk.web.sessionView says on your desktop.'),
           option('transcript', VIEW_NAMES.transcript, 'The conversation, the screen, and a reply box.'),
           option(
@@ -613,6 +615,7 @@ function settingsView(): View {
         ),
       ),
       saved,
+      h('div', { class: 'settings-actions' }, ok),
     ),
   );
   return { el, dispose: () => {} };
@@ -861,6 +864,9 @@ function placeholder(): View {
   return { el: h('div', { class: 'view view-pick' }, h('p', { class: 'hint', text: 'Pick a session, or type a prompt to start one.' })), dispose: () => {} };
 }
 
+/** The page shown before Settings opened, where its OK button goes back to. */
+let beforeSettings = '#/';
+
 function go(hash: string): void {
   if (location.hash === hash) route();
   else location.hash = hash;
@@ -877,6 +883,7 @@ function route(): void {
     }
   }
   const settings = hash === '#/settings';
+  if (!settings && hash !== '#/new') beforeSettings = hash;
   const open = !!id || settings;
   const wasSession = shell.el.classList.contains('has-session');
   if (open && !wasSession) listScroll = window.scrollY ?? 0;

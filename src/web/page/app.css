@@ -642,4 +642,26 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 .tkey.on { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
 .tkey.wide { grid-column: span 1; }
-.view-settings .folder-dir { font-family: var(--sans); white-space: normal; }
+/* ---- Settings ---- */
+
+.settings-form { padding: 12px var(--pad); }
+.setting { margin: 0; padding: 0; border: 0; min-width: 0; }
+.setting-label { padding: 0; margin-bottom: 8px; font-weight: 700; }
+.setting-options { display: flex; flex-direction: column; gap: 8px; }
+.setting-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.setting-option:has(input:checked) { background: var(--raised); border-color: var(--primary); }
+.setting-option input { margin: 3px 0 0; flex: none; accent-color: var(--primary); }
+.setting-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.setting-name { font-weight: 600; }
+.setting-hint { color: var(--muted); font-size: 0.875rem; }
+.settings-form .notice { margin: 12px 0 0; }
+.settings-actions { display: flex; justify-content: flex-end; margin-top: 16px; }

@@ -650,13 +650,25 @@ describe('settings and the experimental terminal', () => {
     const radios = p.$$('input[name="view"]') as HTMLInputElement[];
     expect(radios.map((r) => r.value)).toEqual(['', 'transcript', 'terminal-experimental']);
     expect(radios[0].checked).toBe(true);
-    expect(p.$('label.folder .folder-name')!.textContent).toBe('Default: Transcript');
+    expect(p.$('label.setting-option .setting-name')!.textContent).toBe('Default: Transcript');
     radios[2].checked = true;
     radios[2].dispatchEvent(new p.win.Event('change'));
     expect(p.win.localStorage.getItem('devdesk.web.sessionView')).toBe('terminal-experimental');
     radios[0].checked = true;
     radios[0].dispatchEvent(new p.win.Event('change'));
     expect(p.win.localStorage.getItem('devdesk.web.sessionView')).toBeNull();
+  });
+
+  it('shows one option per row, and OK goes back to the page Settings was opened from', async () => {
+    const p = await page((m, url) => (url === 'api/settings' ? { status: 200, body: { sessionView: 'transcript' } } : undefined), '#/s/s1');
+    await p.settle();
+    p.win.location.hash = '#/settings';
+    await p.settle();
+    expect(p.$$('.setting-options > label.setting-option')).toHaveLength(3);
+    (p.$('.settings-actions button') as HTMLButtonElement).click();
+    await p.settle();
+    expect(p.win.location.hash).toBe('#/s/s1');
+    expect(p.$('.view-settings')).toBeNull();
   });
 
   it("opens a session as the terminal when the daemon's default says so, and types into it", async () => {
