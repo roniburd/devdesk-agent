@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir, hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
@@ -15,7 +15,7 @@ import { claudeConfigFilePath } from './core/trust';
 import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount } from './core/accounts';
 import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
 import type { TurnReadLimits } from './core/turnChangesRead';
-import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type WebSettings } from './core/web/config';
+import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type TunnelPreview, tunnelPreview, type WebSettings } from './core/web/config';
 import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -922,6 +922,7 @@ function webSettings(): WebSettings {
     publicHost: c.get('web.publicHost'),
     tunnelCommand: c.get('web.tunnelCommand'),
     pollMs: c.get('web.pollMs'),
+    tunnelName: c.get('web.tunnelName'),
     tunnel: c.get('web.tunnel'),
     cloudflareTeam: c.get('web.cloudflare.team'),
     cloudflareAudience: c.get('web.cloudflare.audience'),
@@ -934,6 +935,23 @@ function webSettings(): WebSettings {
 export function webNeedsTunnelChoice(root: string | undefined = workspaceRoot()): boolean {
   const provider = !!(root && workspaceProvider?.isWorkspace(root) && workspaceProvider.web);
   return needsTunnelChoice(webSettings(), provider);
+}
+
+/**
+ * The tunnel this window's web access runs, named with `tunnelName` (default: `devdesk.web.tunnelName`), and its URL
+ * when it is the workspace kind's own tunnel; undefined when no tunnel runs or its command has no {host}.
+ */
+export function webTunnelPreview(tunnelName?: string, root: string | undefined = workspaceRoot()): TunnelPreview | undefined {
+  const config = webAccessConfig(root);
+  const provider = root && workspaceProvider?.isWorkspace(root) ? workspaceProvider.web : undefined;
+  const own = !config.tunnel && provider && config.tunnelCommand === provider.tunnelCommand.trim();
+  return tunnelPreview({
+    command: config.tunnelCommand,
+    tunnelName: tunnelName ?? config.tunnelName,
+    host: hostname(),
+    user: config.user,
+    ...(own && provider.tunnelUrl ? { urlTemplate: provider.tunnelUrl } : {}),
+  });
 }
 
 /** The root as configured and with symlinks resolved (a session's cwd is the real path), as the Claude view scopes it. */

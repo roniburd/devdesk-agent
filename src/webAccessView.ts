@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { type WebPanelAction, type WebPanelRow, webPanelRows } from './core/web/panel';
 import type { WebStatus } from './core/web/webState';
+import { webTunnelPreview } from './config';
 import { log } from './log';
 import type { WebAccess } from './webAccess';
 
@@ -14,6 +15,7 @@ const COMMAND: Record<WebPanelAction, string> = {
   start: 'devdesk.web.start',
   restart: 'devdesk.web.restart',
   restartTunnel: 'devdesk.web.restartTunnel',
+  tunnelName: 'devdesk.web.setTunnelName',
   copyUrl: 'devdesk.web.copyUrl',
   copyLocal: 'devdesk.web.copyLocalUrl',
   openLog: 'devdesk.web.openLog',
@@ -62,7 +64,7 @@ export function registerWebAccessView(ctx: vscode.ExtensionContext, web: WebAcce
     drawing = drawing
       .then(async () => {
         const details = await web.details(status);
-        tree.set(webPanelRows({ status, ...details, script: web.script, logPath: web.logPath(), now: Date.now() }));
+        tree.set(webPanelRows({ status, ...details, script: web.script, logPath: web.logPath(), now: Date.now(), tunnelName: webTunnelPreview() }));
         view.description = status.kind === 'off' ? 'off' : status.kind === 'tunnel-down' ? 'tunnel down' : 'on';
       })
       .catch((err) => log.warn(`web access view: ${(err as Error).message}`));

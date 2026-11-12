@@ -1416,7 +1416,7 @@ Check once, from a private window or a phone that isn't signed in, that the URL 
 3. You tell DevDesk that header's name (`devdesk.web.identityHeader`) and your name in it (`devdesk.web.allowedUsers`). If the proxy's hostname isn't in the URL the tunnel command prints, also set `devdesk.web.publicHost`.
 4. You check that a browser that hasn't signed in can't open the URL: it must get the proxy's sign-in page, not the session list.
 
-DevDesk can start your proxy: `devdesk.web.tunnelCommand` runs when the daemon starts, with `{port}`, `{user}` and `{host}` filled in (`{host}` is this machine's short host name, so each machine can have a tunnel of its own). The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. With `devdesk.web.tunnel` left at `auto`, a tunnel command you set runs as before.
+DevDesk can start your proxy: `devdesk.web.tunnelCommand` runs when the daemon starts, with `{port}`, `{user}` and `{host}` filled in (`{host}` is `devdesk.web.tunnelName`, else this machine's short host name, so each machine can have a tunnel of its own). The first `https://` URL it prints is the URL for your phone. Leave it empty to run the proxy yourself. With `devdesk.web.tunnel` left at `auto`, a tunnel command you set runs as before.
 
 **`ssh -L` from a laptop** (no phone, no proxy). Pick **No tunnel**, or set `"devdesk.web.auth": "loopback"` in your user settings (read [Who can open it](#who-can-open-it) first, and leave `devdesk.web.tunnelCommand` and `devdesk.web.publicHost` empty). Then run `ssh -L 7691:127.0.0.1:7691 <host>` and open `http://127.0.0.1:7691/` on the laptop.
 
@@ -1440,6 +1440,7 @@ The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at fi
 - **Running**: since when, and its process. **Started by version 1.6.0** means a daemon an older version started is still running: an update doesn't restart it, so the phone still gets the old page. Click the row to restart it.
 - **Phone URL**: click to copy; its buttons open it or show its QR code.
 - **Tunnel**: click to restart it.
+- **Tunnel name**: the tunnel's name for this machine (`devdesk.web.tunnelName`, else the host name), with its URL in the tooltip, also while web access is off. Click it to change the name, with a preview of the name and URL as you type. It shows only when the tunnel command has `{host}`.
 - **Loopback URL**: for `ssh -L`; click to copy.
 - **Access**: who may open the page (`devdesk.web.allowedUsers` and how it is checked: Tailscale, ngrok sign-in, Cloudflare Access or the header), *the tunnel owner* with Dev Tunnels, or *no identity check* with `loopback`.
 - **Log**: `daemon.log`.
@@ -1730,6 +1731,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.web.identityHeader` | *machine*, empty: none, so every request is denied. Not used by the presets |
 | `devdesk.web.allowedUsers` | *machine*, `[]`: no one, so every request is denied. Your Tailscale login, or your email for `cloudflare` and `ngrok` (Choose Web Access Tunnel fills it in) |
 | `devdesk.web.publicHost` | *machine*, empty (the host of the URL the tunnel command prints) |
+| `devdesk.web.tunnelName` | *machine*, empty: this machine's short host name. What fills `{host}` in the tunnel command (the tunnel's name), so each machine gets a tunnel and URL of its own; at most 24 letters, digits and dashes. **Set Web Access Tunnel Name** previews the name and URL |
 | `devdesk.web.tunnelCommand` | *machine*, empty: no tunnel |
 | `devdesk.web.pollMs` | `2000` (how often the open page's list refreshes; 500 to 60000) |
 | `devdesk.web.cloudflare.team` | *machine*, empty: for the `cloudflare` tunnel, your team name (`<team>.cloudflareaccess.com`); empty denies every request |

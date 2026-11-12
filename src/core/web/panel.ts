@@ -1,10 +1,10 @@
-import type { WebAccessSettings } from './config';
+import type { TunnelPreview, WebAccessSettings } from './config';
 import type { WebStatus } from './webState';
 
 /** The Web Access view's rows (webAccessView.ts draws them): what runs, where, for whom, and from which version. No `vscode`. */
 
 /** What a row does when clicked. */
-export type WebPanelAction = 'start' | 'restart' | 'restartTunnel' | 'copyUrl' | 'copyLocal' | 'openLog' | 'settings';
+export type WebPanelAction = 'start' | 'restart' | 'restartTunnel' | 'tunnelName' | 'copyUrl' | 'copyLocal' | 'openLog' | 'settings';
 
 export interface WebPanelRow {
   id: string;
@@ -46,6 +46,8 @@ export interface WebPanelInput {
   script: string;
   /** The daemon's log file, for the Log row's Copy button. */
   logPath?: string;
+  /** The tunnel the current settings name (webTunnelPreview()), when its command has {host}. */
+  tunnelName?: TunnelPreview;
   now: number;
 }
 
@@ -70,6 +72,7 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
         icon: 'circle-slash',
         action: 'start',
       },
+      ...(o.tunnelName ? [tunnelNameRow(o.tunnelName)] : []),
       { id: 'settings', label: 'Settings', icon: 'gear', action: 'settings' },
     ];
   }
@@ -117,6 +120,7 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
       contextValue: 'webTunnel',
     }, s.tunnel === 'down' ? s.tunnelError : s.tunnelPid ? String(s.tunnelPid) : undefined));
   }
+  if (o.tunnelName) rows.push(tunnelNameRow(o.tunnelName));
   rows.push(copyable({ id: 'local', label: 'Loopback URL', description: local, tooltip: `${local}\n\nFor ssh -L. Click to copy.`, icon: 'link', action: 'copyLocal' }, local));
   if (o.settings) {
     const access = accessRow(o.settings);
@@ -124,6 +128,20 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
   }
   rows.push(copyable({ id: 'log', label: 'Log', description: 'daemon.log', tooltip: o.logPath ? `${o.logPath}\n\nClick to open.` : undefined, icon: 'output', action: 'openLog' }, o.logPath));
   return rows;
+}
+
+/** The tunnel's name (and URL), from `devdesk.web.tunnelName` or the host name; click to change it. */
+function tunnelNameRow(t: TunnelPreview): WebPanelRow {
+  const from = t.fromSetting ? `devdesk.web.tunnelName (${t.label})` : `this machine's host name (${t.label}); set devdesk.web.tunnelName to choose another`;
+  return {
+    id: 'tunnelName',
+    label: 'Tunnel name',
+    description: t.name,
+    tooltip: `${t.name}${t.url ? `\n${t.url}` : ''}\n\nThis machine's part comes from ${from}. Click to change it.`,
+    icon: 'tag',
+    action: 'tunnelName',
+    contextValue: 'webTunnelName',
+  };
 }
 
 /** Who may use web access, as the running daemon checks it. */

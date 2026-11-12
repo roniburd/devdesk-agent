@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.25",
+  "version": "2.1.0-prototype.26",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -529,6 +529,12 @@
         "icon": "$(plug)"
       },
       {
+        "command": "devdesk.web.setTunnelName",
+        "title": "Set Web Access Tunnel Name",
+        "category": "DevDesk",
+        "icon": "$(edit)"
+      },
+      {
         "command": "devdesk.web.openSettings",
         "title": "Web Access Settings",
         "category": "DevDesk",
@@ -690,6 +696,11 @@
           "command": "devdesk.web.showQr",
           "when": "view == devdesk.web && viewItem =~ /\\bwebUrl\\b/",
           "group": "inline@3"
+        },
+        {
+          "command": "devdesk.web.setTunnelName",
+          "when": "view == devdesk.web && viewItem == webTunnelName",
+          "group": "inline@1"
         },
         {
           "command": "devdesk.web.restartTunnel",
@@ -2482,12 +2493,21 @@
             "markdownDescription": "Host name (`host` or `host:port`) the proxy serves web access on; requests for any other host than this and `127.0.0.1` are refused. Needed for the `cloudflare` tunnel (the host its DNS route and Access application use); for `ngrok`, your reserved domain. Empty: taken from the URL the tunnel command prints.",
             "order": 6
           },
+          "devdesk.web.tunnelName": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "pattern": "^[A-Za-z0-9-]{0,24}$",
+            "patternErrorMessage": "Use at most 24 letters, digits and dashes.",
+            "markdownDescription": "This machine's part of the tunnel's name (`{host}` in the tunnel command), so each machine gets a tunnel and URL of its own: for example `mac` on your laptop and `cloud` on a cloud machine. Lower case, at most 24 letters, digits and dashes. Empty: this machine's short host name. [Set Web Access Tunnel Name](command:devdesk.web.setTunnelName) shows the tunnel name and URL a name gives as you type; so does the **Tunnel name** row in the Web Access view.",
+            "order": 7
+          },
           "devdesk.web.tunnelCommand": {
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts when `#devdesk.web.tunnel#` is `custom` (or `auto`), with `{port}`, `{user}`, `{host}` (this machine's short host name) and `{publicHost}` filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
-            "order": 7
+            "markdownDescription": "Shell command that exposes the port through an identity proxy, run after the daemon starts when `#devdesk.web.tunnel#` is `custom` (or `auto`), with `{port}`, `{user}`, `{host}` (`#devdesk.web.tunnelName#`, else this machine's short host name) and `{publicHost}` filled in. The first `https://` URL it prints is the URL to open on the phone. Empty: the workspace kind's default, if any, else no tunnel (run your proxy yourself).",
+            "order": 8
           },
           "devdesk.web.pollMs": {
             "type": "number",
@@ -2495,21 +2515,21 @@
             "minimum": 500,
             "maximum": 60000,
             "markdownDescription": "How often, in milliseconds, the web page's session list is refreshed while it is open. 500 to 60000.",
-            "order": 8
+            "order": 9
           },
           "devdesk.web.cloudflare.team": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "For the `cloudflare` tunnel: your Cloudflare One team name (`<team>.cloudflareaccess.com`). Empty: every request is denied.",
-            "order": 9
+            "order": 10
           },
           "devdesk.web.cloudflare.audience": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "For the `cloudflare` tunnel: the Application Audience (AUD) Tag of the Access application in front of `#devdesk.web.publicHost#`. Empty: every request is denied.",
-            "order": 10
+            "order": 11
           },
           "devdesk.web.ngrok.oauthProvider": {
             "type": "string",
@@ -2522,7 +2542,7 @@
             "default": "google",
             "scope": "machine",
             "markdownDescription": "For the `ngrok` tunnel: the account visitors sign in with; only the emails in `#devdesk.web.allowedUsers#` get through.",
-            "order": 11
+            "order": 12
           },
           "devdesk.web.sessionView": {
             "type": "string",
@@ -2536,7 +2556,7 @@
             ],
             "default": "transcript",
             "markdownDescription": "What the web page shows when you open a session. Each browser can choose its own in the page's settings (the gear); this is what a browser that didn't choose gets.",
-            "order": 12
+            "order": 13
           }
         }
       }
