@@ -37,7 +37,8 @@ describe('resolveWebSettings', () => {
       ngrokProvider: 'google',
       sessionView: 'transcript',
     });
-    expect(DEFAULT_WEB_PORT).toBe(7690);
+    // v1's daemon has 7690: both can run on one host.
+    expect(DEFAULT_WEB_PORT).toBe(7691);
   });
 
   it('keeps a port in range and falls back otherwise', () => {
@@ -128,15 +129,20 @@ describe('parseDaemonConfig', () => {
   });
 
   it('keeps optional fields', () => {
-    const raw = { ...good(), root: '/w', scopeDirs: ['/w', '/real/w'], tmux: { ...good().tmux, configFile: '/c.conf' }, claude: { command: 'c', path: 'p', args: 'a', modeArgs: '--x' } };
+    const raw = { ...good(), root: '/w', scopeDirs: ['/w', '/real/w'], tmux: { ...good().tmux, configFile: '/c.conf' }, claude: { command: 'c', path: 'p', args: 'a', wrapper: 'w', modeArgs: '--x', env: { CLAUDE_CONFIG_DIR: '/a' } } };
     const parsed = parseDaemonConfig(raw);
     expect('config' in parsed && parsed.config.root).toBe('/w');
     expect('config' in parsed && parsed.config.tmux.configFile).toBe('/c.conf');
-    expect('config' in parsed && parsed.config.claude).toEqual({ command: 'c', path: 'p', args: 'a', modeArgs: '--x' });
+    expect('config' in parsed && parsed.config.claude).toEqual({ command: 'c', path: 'p', args: 'a', wrapper: 'w', modeArgs: '--x', env: { CLAUDE_CONFIG_DIR: '/a' } });
+  });
+
+  it("takes the Claude view's default order when the config has none", () => {
+    const parsed = parseDaemonConfig({ ...good(), sort: undefined });
+    expect('config' in parsed && parsed.config.sort).toEqual({ mode: 'urgency', recentMs: 15 * 60_000, unreadFirst: true });
   });
 
   it("keeps the prompt box's modes, models and Claude config directory", () => {
-    const claude = { modeArgs: '', modes: [{ name: 'Plan', args: '--permission-mode plan', description: 'Plan only' }], defaultMode: 'Plan', models: ['Default', 'opus'], configDir: '/h/.claude' };
+    const claude = { modeArgs: '', env: {}, modes: [{ name: 'Plan', args: '--permission-mode plan', description: 'Plan only' }], defaultMode: 'Plan', models: ['Default', 'opus'], configDir: '/h/.claude' };
     const parsed = parseDaemonConfig({ ...good(), claude });
     expect('config' in parsed && parsed.config.claude).toEqual(claude);
   });
@@ -167,10 +173,18 @@ describe('parseDaemonConfig', () => {
     ['tmux options not pairs', () => ({ ...good(), tmux: { ...good().tmux, options: [['a']] } })],
     ['tmux env with a number', () => ({ ...good(), tmux: { ...good().tmux, env: { A: 1 } } })],
     ['missing tmux', () => ({ ...good(), tmux: undefined })],
-    ['missing modeArgs', () => ({ ...good(), claude: {} })],
-    ['modes not modes', () => ({ ...good(), claude: { modeArgs: '', modes: [{ args: 1 }] } })],
-    ['models with a number', () => ({ ...good(), claude: { modeArgs: '', models: [1] } })],
-    ['configDir a number', () => ({ ...good(), claude: { modeArgs: '', configDir: 1 } })],
+    ['missing modeArgs', () => ({ ...good(), claude: { env: {} } })],
+    ['missing claude env', () => ({ ...good(), claude: { modeArgs: '' } })],
+    ['claude env with a number', () => ({ ...good(), claude: { modeArgs: '', env: { A: 1 } } })],
+    ['claudeSessionsDirs a string', () => ({ ...good(), claudeSessionsDirs: '/s' })],
+    ['an empty claudeSessionsDirs entry', () => ({ ...good(), claudeSessionsDirs: [''] })],
+    ['hooksQuietMs negative', () => ({ ...good(), hooksQuietMs: -1 })],
+    ['an unknown sort mode', () => ({ ...good(), sort: { mode: 'random', recentMs: 1, unreadFirst: true } })],
+    ['sort.unreadFirst missing', () => ({ ...good(), sort: { mode: 'urgency', recentMs: 1 } })],
+    ['missing pasteSettleMs', () => ({ ...good(), pasteSettleMs: undefined })],
+    ['modes not modes', () => ({ ...good(), claude: { modeArgs: '', env: {}, modes: [{ args: 1 }] } })],
+    ['models with a number', () => ({ ...good(), claude: { modeArgs: '', env: {}, models: [1] } })],
+    ['configDir a number', () => ({ ...good(), claude: { modeArgs: '', env: {}, configDir: 1 } })],
     ['root a number', () => ({ ...good(), root: 3 })],
     ['missing discovery', () => ({ ...good(), discovery: undefined })],
     ['stuckMs negative', () => ({ ...good(), stuckMs: -1 })],
@@ -216,7 +230,7 @@ describe('parseDaemonArgs', () => {
         publicHost: 'h.example',
         tunnelCommand: 'run {port}',
         stateDir: '/s',
-        webDir: '/s/web',
+        webDir: '/s/web-v2',
         root: '/w',
         scopeDirs: ['/w'],
         pollMs: 1000,
@@ -257,8 +271,8 @@ describe('defaultDaemonConfig', () => {
   it('describes a manual run', () => {
     const c = defaultDaemonConfig('/home/u', 'u');
     expect(c.stateDir).toBe('/home/u/.claude/devdesk/state');
-    expect(c.webDir).toBe('/home/u/.claude/devdesk/state/web');
-    expect(c.claudeSessionsDir).toBe('/home/u/.claude/sessions');
+    expect(c.webDir).toBe('/home/u/.claude/devdesk/state/web-v2');
+    expect(c.claudeSessionsDirs).toEqual(['/home/u/.claude/sessions']);
     expect(c.tmux.server).toBe('devdesk');
     expect(c.scope).toBe('all');
     expect(c.tunnelCommand).toBe('');

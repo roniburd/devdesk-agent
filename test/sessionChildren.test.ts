@@ -266,6 +266,65 @@ describe('ChildrenReader', () => {
     expect(flat(await new ChildrenReader().read(transcript, { ...opts, live: false }))).toEqual(['shell:Server:stopped']);
   });
 
+  it('shows what an earlier Claude process started as stopped once the session resumed', async () => {
+    const later = (id: string, taskId: string, description: string) =>
+      shellLaunch(id, taskId, description).replace(T, '2026-10-29T12:00:00.000Z');
+    await writeFile(transcript, shellLaunch('t1', 'b1', 'Before') + agentLaunch('t2', 'a2', 'Old agent') + later('t3', 'b3', 'After'));
+    const since = Date.parse('2026-10-29T11:00:00.000Z');
+    expect(flat(await new ChildrenReader().read(transcript, { ...opts, since }))).toEqual([
+      'shell:Before:stopped',
+      'agent:Old agent:stopped',
+      'shell:After:running',
+    ]);
+    // A record from an older hook script has no start: nothing changes.
+    expect(flat(await new ChildrenReader().read(transcript, opts)).filter((c) => c.endsWith('running'))).toHaveLength(3);
+  });
+
+  describe('with the hooks roster', () => {
+    it('shows a subagent the roster says stopped as done at once, and the transcript alone without a roster', async () => {
+      await writeFile(transcript, agentLaunch('t1', 'a1', 'Background agent') + agentLaunch('t2', 'a2', 'Other agent'));
+      await writeFile(join(session, 'subagents', 'agent-a1.jsonl'), use('x', 'Read', { file_path: '/a' }));
+      const reader = new ChildrenReader();
+      // The fallback: no roster (an older hook script or Claude Code), so the transcript says both still run.
+      expect(flat(await reader.read(transcript, opts))).toEqual(['agent:Background agent:running', 'agent:Other agent:running']);
+      const roster = { a1: { type: 'Explore', startedAt: 1, runningSince: 1, stoppedAt: 2 }, a2: { type: 'Explore', startedAt: 1, runningSince: 1 } };
+      const tree = await reader.read(transcript, { ...opts, roster });
+      expect(flat(tree)).toEqual(['agent:Background agent:done', 'agent:Other agent:running']);
+      expect(runningBackground(tree)).toBe(true);
+      // The last one stops: nothing runs in the background any more, though no notification reached the transcript.
+      const done = await reader.read(transcript, { ...opts, roster: { ...roster, a2: { ...roster.a2, stoppedAt: 3 } } });
+      expect(flat(done)).toEqual(['agent:Background agent:done', 'agent:Other agent:done']);
+      expect(runningBackground(done)).toBe(false);
+    });
+
+    it('keeps a failed or stopped state the transcript shows, and an agent the transcript shows finished stays finished', async () => {
+      await writeFile(transcript, agentLaunch('t1', 'a1', 'Killed') + agentLaunch('t2', 'a2', 'Finished'));
+      await appendFile(transcript, notify('<tool-use-id>t1</tool-use-id><status>killed</status>') + notify('<tool-use-id>t2</tool-use-id><status>completed</status>'));
+      // a1 stopped (killed, not done); no SubagentStop came for a2 (the hook missed it): the transcript's states stand.
+      const roster = { a1: { startedAt: 1, stoppedAt: 2 }, a2: { startedAt: 1 } };
+      expect(flat(await new ChildrenReader().read(transcript, { ...opts, roster }))).toEqual(['agent:Killed:stopped', 'agent:Finished:done']);
+    });
+
+    it('shows a resumed subagent running, and an idle teammate idle and never folded away', async () => {
+      await writeFile(transcript, agentLaunch('t1', 'a1', 'Resumed') + agentLaunch('t2', 'a2', 'Teammate') + agentLaunch('t3', 'a3', 'Done'));
+      await appendFile(transcript, notify('<tool-use-id>t1</tool-use-id><status>completed</status>') + notify('<tool-use-id>t3</tool-use-id><status>completed</status>'));
+      const roster = { a1: { startedAt: 1, runningSince: 5, resumed: true }, a2: { name: 'helper', startedAt: 1, idleAt: 4 } };
+      const tree = await new ChildrenReader().read(transcript, { finishedLimit: 0, live: true, roster });
+      expect(flat(tree)).toEqual(['more:1 earlier finished:done', 'agent:Resumed:running', 'agent:Teammate:idle']);
+      expect(runningCount(tree)).toBe(1);
+      // Once the session is gone, nothing runs or waits.
+      expect(flat(await new ChildrenReader().read(transcript, { ...opts, live: false, roster }))).toEqual(['agent:Resumed:stopped', 'agent:Teammate:stopped', 'agent:Done:done']);
+    });
+
+    it('trusts the roster of the running Claude process over an older launch time', async () => {
+      await writeFile(transcript, agentLaunch('t1', 'a1', 'Old agent') + agentLaunch('t2', 'a2', 'Resumed now'));
+      await appendFile(transcript, notify('<tool-use-id>t2</tool-use-id><status>completed</status>'));
+      const since = Date.parse('2026-10-29T11:00:00.000Z');
+      const roster = { a2: { startedAt: since + 1, runningSince: since + 1, resumed: true } };
+      expect(flat(await new ChildrenReader().read(transcript, { ...opts, since, roster }))).toEqual(['agent:Old agent:stopped', 'agent:Resumed now:running']);
+    });
+  });
+
   it('groups a finished workflow by phase from its summary', async () => {
     await writeFile(
       transcript,

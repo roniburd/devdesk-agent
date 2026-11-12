@@ -18,16 +18,17 @@ const LIST_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', 'st
  * skills, plugins', the project's, MCP prompts) and its model picker's rows. Runs in a login shell, as sessions do. Only
  * for trusted folders: the CLI loads the project's settings. Resolves once no `commands_changed` came for 1.5 s after
  * the answer (at the timeout, with what came; undefined without an answer); `onUpdate` sees each listing as it arrives,
- * `warn` why there is none. No `vscode`: the web access daemon lists folders with it too.
+ * `warn` why there is none; `env` (a Claude account's) is added to its environment. No `vscode`: the web access daemon lists folders with it too.
  */
 export function listClaude(
   claude: string,
   cwd: string,
   onUpdate?: (listing: CliListing) => void,
   warn: (message: string) => void = () => undefined,
+  env?: Readonly<Record<string, string>>,
 ): Promise<CliListing | undefined> {
   return new Promise((resolve) => {
-    const child = spawnLoginShell(shellCommand(claude, LIST_ARGS), cwd);
+    const child = spawnLoginShell(shellCommand(claude, LIST_ARGS), cwd, env);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     const reader = new CliStreamReader();

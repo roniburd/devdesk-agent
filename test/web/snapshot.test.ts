@@ -48,7 +48,8 @@ const config = (over: Partial<SnapshotConfig> = {}): SnapshotConfig => ({
   scope: 'workspace',
   showAll: false,
   discovery: { claudeWorktrees: false },
-  claudeSessionsDir: registryDir,
+  claudeSessionsDirs: [registryDir],
+  hooksQuietMs: 120_000,
   insights: true,
   tmux: { bin: 'tmux', server: 'devdesk', options: [], env: {} },
   ...over,
@@ -130,6 +131,26 @@ describe('SessionSnapshot', () => {
     await writeFile(join(registryDir, '1001.json'), JSON.stringify({ pid: 1001, sessionId: 's1', name: 'Fix the build', nameSource: 'user' }));
     const [card] = await new SessionSnapshot(config(), deps([mainPane()]).deps).cards();
     expect(card).toMatchObject({ name: 'Fix the build', nameByUser: true });
+  });
+
+  it("reads every Claude account's registry", async () => {
+    const work = join(tmp, 'work-sessions');
+    await mkdir(work, { recursive: true });
+    await writeRecord(record('s1'));
+    await writeFile(join(work, '1001.json'), JSON.stringify({ pid: 1001, sessionId: 's1', name: 'Work task', nameSource: 'user' }));
+    const [card] = await new SessionSnapshot(config({ claudeSessionsDirs: [registryDir, work] }), deps([mainPane()]).deps).cards();
+    expect(card).toMatchObject({ name: 'Work task' });
+  });
+
+  it("shows Claude's own report (Program Status) for a session without hooks, and the note Claude set", async () => {
+    await mkdir(join(stateDir, 'status'), { recursive: true });
+    await mkdir(join(stateDir, 'notes'), { recursive: true });
+    await writeFile(join(stateDir, 'status', 'devdesk-1.json'), JSON.stringify({ body: 'state=working:app=claude-code', at: NOW - 100, pid: 1001 }));
+    await writeFile(join(stateDir, 'notes', 'devdesk-1.json'), JSON.stringify({ text: 'Waiting on CI', at: NOW - 100 }));
+    const cards = await new SessionSnapshot(config(), deps([paneLine({ session: 'cc-main', pane: '%1', pid: 500, command: 'claude', cwd: root })]).deps).cards();
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ state: 'working', tmuxPane: '%1' });
+    expect(JSON.stringify(cards[0])).toContain('Waiting on CI');
   });
 
   it('adds the insight: live status while working, the ask while waiting', async () => {

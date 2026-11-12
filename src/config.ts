@@ -4,17 +4,24 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { type BesideMode, type CardTitleMode, DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH } from './core/board';
 import { parseModels } from './core/composer';
+import { EXTENSION_ID } from './core/edition';
+import { programStatusDirIn } from './core/programStatus';
 import type { ParkPolicy } from './core/park';
+import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
-import { claudeShellCommand, DEFAULT_CLAUDE_PATH, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
+import { DEFAULT_CLAUDE_PATH, DEFAULT_PASTE_SETTLE_MS, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
 import { scrollLines } from './core/smoothScroll';
 import { claudeConfigFilePath } from './core/trust';
+import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount } from './core/accounts';
+import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
+import type { TurnReadLimits } from './core/turnChangesRead';
 import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type TunnelPreview, tunnelPreview, type WebSettings } from './core/web/config';
 import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
 import { noteLatency } from './log';
+import { programStatusLaunchWrapper } from './programStatusLaunch';
 
 export function cfg(): vscode.WorkspaceConfiguration {
   return vscode.workspace.getConfiguration('devdesk');
@@ -27,7 +34,7 @@ export function setGlobalSetting(key: string, value: unknown): Thenable<void> {
 
 /** Opens the Settings editor on this extension's settings matching `query` (a settings gear). */
 export function openSettings(query: string): Thenable<unknown> {
-  return vscode.commands.executeCommand('workbench.action.openSettings', `@ext:roniburd.devdesk-claude ${query}`);
+  return vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${EXTENSION_ID} ${query}`);
 }
 
 const expandHome = (p: string | undefined) => p?.trim().replace(/^~(?=\/|$)/, homedir());
@@ -120,6 +127,14 @@ export function worktreesIdleReloadMs(): number {
   return numberSetting('worktrees.idleReloadMinutes', 10, 0) * 60_000;
 }
 
+/**
+ * Accept Claude's trust dialog for a worktree DevDesk makes, when Claude trusts the workspace it is made in (setting
+ * `devdesk.worktrees.autoTrust`).
+ */
+export function worktreesAutoTrust(): boolean {
+  return bool('worktrees.autoTrust', true);
+}
+
 /** Pause the Worktrees view's refresh while the VS Code window is in the background (setting `devdesk.worktrees.pauseWhenUnfocused`). */
 export function worktreesPauseWhenUnfocused(): boolean {
   return bool('worktrees.pauseWhenUnfocused', true);
@@ -130,30 +145,82 @@ export function sessionsStateDir(): string {
   return pathSetting('sessions.stateDir', () => join(homedir(), '.claude', 'devdesk', 'state'));
 }
 
-/** Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
-export function claudeConfigDir(): string {
+/** Claude Code's own config directory, whatever the account: `$CLAUDE_CONFIG_DIR` (VS Code's), else `~/.claude`. */
+export function ambientClaudeConfigDir(): string {
   return process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), '.claude');
 }
 
-/** Where Claude Code keeps its transcripts: `projects` in its config directory. */
-export function claudeProjectsDir(): string {
-  return join(claudeConfigDir(), 'projects');
+/** The Claude accounts (setting `devdesk.claude.accounts`); one, `default` (Claude's own config directory), when none is listed. */
+export function claudeAccounts(): ClaudeAccount[] {
+  return parseAccounts(cfg().get<unknown>('claude.accounts'), ambientClaudeConfigDir(), homedir());
+}
+
+/**
+ * The account new sessions use unless another is picked (setting `devdesk.claude.defaultAccount`, which a folder's
+ * workspace settings may set; empty or unknown: the first listed).
+ */
+export function claudeDefaultAccount(): ClaudeAccount {
+  return defaultAccount(claudeAccounts(), text('claude.defaultAccount'));
+}
+
+/** The account `name` names, else the default one. */
+export function claudeAccount(name?: string): ClaudeAccount {
+  return pickAccount(claudeAccounts(), name, text('claude.defaultAccount'));
+}
+
+/** `path` with the home directory shown as `~`, for messages. */
+export function shownPath(path: string): string {
+  const home = homedir();
+  return path === home || path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+/**
+ * The account a session runs in, from its transcript's config directory (`<dir>/projects/…`): a listed one, else one
+ * named after the directory. Undefined without a transcript (not started yet, or no hook record).
+ */
+export function claudeAccountOf(transcriptPath: string | undefined): ClaudeAccount | undefined {
+  return accountOfTranscript(claudeAccounts(), transcriptPath, ambientClaudeConfigDir(), shownPath);
+}
+
+/**
+ * Claude Code's config directory for `account` (default: the default account, which with no accounts listed is
+ * `$CLAUDE_CONFIG_DIR`, else `~/.claude`). What DevDesk derives from Claude's config directory resolves it here.
+ */
+export function claudeConfigDir(account: ClaudeAccount = claudeDefaultAccount()): string {
+  return account.configDir;
+}
+
+/** Every Claude config directory DevDesk reads: each account's, and Claude's own. */
+export function claudeConfigDirs(): string[] {
+  return accountDirs(claudeAccounts(), ambientClaudeConfigDir());
+}
+
+/** Where Claude Code keeps its transcripts: `projects` in each config directory (`claudeConfigDirs`). */
+export function claudeProjectsDirs(): string[] {
+  return claudeConfigDirs().map((d) => join(d, 'projects'));
 }
 
 /**
  * Where Claude Code lists its running sessions and their names (setting `devdesk.sessions.claudeSessionsDir`).
- * Empty means `sessions` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+ * Empty means `sessions` in each Claude config directory (`claudeConfigDirs`).
  */
-export function claudeSessionsDir(): string {
-  return pathSetting('sessions.claudeSessionsDir', () => join(claudeConfigDir(), 'sessions'));
+export function claudeSessionsDirs(): string[] {
+  const explicit = expandHome(cfg().get<string>('sessions.claudeSessionsDir'));
+  return explicit ? [explicit] : claudeConfigDirs().map((d) => join(d, 'sessions'));
 }
 
 /**
  * Where Claude Code keeps its background jobs, read for the session each /fork was forked from (setting
- * `devdesk.sessions.claudeJobsDir`). Empty means `jobs` in Claude's config directory (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+ * `devdesk.sessions.claudeJobsDir`). Empty means `jobs` in the config directory of the session's transcript, else
+ * the default account's.
  */
-export function claudeJobsDir(): string {
-  return pathSetting('sessions.claudeJobsDir', () => join(claudeConfigDir(), 'jobs'));
+export function claudeJobsDir(transcriptPath?: string): string {
+  return pathSetting('sessions.claudeJobsDir', () => join(configDirOfTranscript(transcriptPath) ?? claudeConfigDir(), 'jobs'));
+}
+
+/** Sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1` (setting `devdesk.claude.disableAutoUpdater`). */
+export function claudeDisableAutoUpdater(): boolean {
+  return bool('claude.disableAutoUpdater', false);
 }
 
 /** List packages without changes in the Worktrees view (setting `devdesk.worktrees.showCleanPackages`). */
@@ -256,10 +323,55 @@ export function sessionsTmuxInstallCommand(): string {
  * `devdesk.sessions.claudePath` (empty: the toolbox Claude) with `devdesk.sessions.claudeArgs`, then a login shell.
  * The launch mode's arguments (the default mode unless `mode` is given), then `extraArgs` (for example a fork's
  * `--resume <id> --fork-session`), follow `claudeArgs`; with a full command they go right after its first word, except a prompt (`-- 'text'`), which goes after the command's own options.
+ * Claude runs in `account` (default: the default account): its `CLAUDE_CONFIG_DIR` and `env` are exported first.
  */
-export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode()): string {
+export function sessionsClaudeCommand(extraArgs = '', mode: LaunchMode = sessionsDefaultMode(), account: ClaudeAccount = claudeDefaultAccount()): string {
+  return claudeLaunchCommand(sessionsLaunch(mode, account), extraArgs);
+}
+
+/** How new sessions run Claude in launch mode `mode` and Claude account `account` (see `claudeLaunchCommand`). */
+export function sessionsLaunch(mode: LaunchMode = sessionsDefaultMode(), account: ClaudeAccount = claudeDefaultAccount()): ClaudeLaunch {
   const c = cfg();
-  return claudeShellCommand({ command: c.get<string>('sessions.command'), path: claudeBinary(), args: c.get<string>('sessions.claudeArgs') }, joinArgs(mode.args, extraArgs));
+  const command = c.get<string>('sessions.command');
+  const wrapper = !command?.trim() && sessionsProgramStatus() ? programStatusLaunchWrapper(ambientClaudeConfigDir(), programStatusDir()) : undefined;
+  const launch: ClaudeLaunch = { modeArgs: mode.args, env: accountEnv(account) };
+  const path = claudeBinary();
+  const args = c.get<string>('sessions.claudeArgs');
+  if (command) launch.command = command;
+  if (path) launch.path = path;
+  if (args) launch.args = args;
+  if (wrapper) launch.wrapper = wrapper;
+  return launch;
+}
+
+/**
+ * What `sessionsClaudeCommand` gives Claude before its extra arguments, as shell text: `devdesk.claudeCommand` or
+ * `devdesk.sessions.claudeArgs`, and the launch mode's arguments (to tell whether they already pick a model).
+ */
+export function sessionsLaunchArgs(mode: LaunchMode = sessionsDefaultMode()): string {
+  const c = cfg();
+  return joinArgs(c.get<string>('sessions.command'), c.get<string>('sessions.claudeArgs'), mode.args);
+}
+
+/**
+ * New sessions run Claude under DevDesk's Program Status relay, which gets Claude to report its state (OSC 7501) to a
+ * file per pane (setting `devdesk.sessions.programStatus`).
+ */
+export function sessionsProgramStatus(): boolean {
+  return bool('sessions.programStatus', true);
+}
+
+/**
+ * A hooked session whose record says working or waiting and has not changed for this long takes the state Claude
+ * itself reports instead, when it differs (setting `devdesk.sessions.hooksQuietMinutes`; 0: never).
+ */
+export function sessionsHooksQuietMs(): number {
+  return numberSetting('sessions.hooksQuietMinutes', 2, 0) * 60_000;
+}
+
+/** Where the Program Status relay writes each pane's status: `status` in the sessions state directory. */
+export function programStatusDir(): string {
+  return programStatusDirIn(sessionsStateDir());
 }
 
 /** The Claude binary new sessions run (setting `devdesk.sessions.claudePath`; empty: the toolbox Claude, else `claude` on PATH). */
@@ -308,6 +420,19 @@ export function sessionsResortWorkingMs(): number {
   return numberSetting('sessions.resortWorkingMinutes', 5, 0) * 60_000;
 }
 
+/** How the Claude view and the Claude Board order sessions (setting `devdesk.sessions.sort`): `urgency` or `attention`. */
+export function sessionsSort(): SortMode {
+  return oneOf('sessions.sort', SORT_MODES, 'urgency');
+}
+
+/**
+ * With `urgency` order, an unread finished turn sorts above working sessions for this long (setting
+ * `devdesk.sessions.recentlyFinishedMinutes`, at least 1).
+ */
+export function sessionsRecentlyFinishedMs(): number {
+  return numberSetting('sessions.recentlyFinishedMinutes', 15, 1) * 60_000;
+}
+
 /** Unread sessions sort above every read one (setting `devdesk.sessions.unreadFirst`); else only within their state. */
 export function sessionsUnreadFirst(): boolean {
   return bool('sessions.unreadFirst', true);
@@ -351,12 +476,21 @@ export function sessionsTabTitleLength(): number {
   return numberSetting('sessions.tabTitleLength', 24, 0, 80, true);
 }
 
-/** Environment DevDesk adds to the Claude sessions it starts: without agent view while ← opens the sidebar instead. */
+/**
+ * Environment DevDesk adds to the Claude sessions it starts: without agent view while ← opens the sidebar instead, and
+ * without Claude's auto-updater with `devdesk.claude.disableAutoUpdater`.
+ */
 export function sessionsClaudeEnv(): Record<string, string> {
-  return sessionsLeftArrowOpensSidebar() ? { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } : {};
+  return {
+    ...(sessionsLeftArrowOpensSidebar() ? { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } : {}),
+    ...(claudeDisableAutoUpdater() ? { DISABLE_AUTOUPDATER: '1' } : {}),
+  };
 }
 
-/** A Claude session's environment. The status hook asks tmux for the session name, so it is told which tmux when not the one on PATH. */
+/**
+ * A Claude session's environment. The status hook asks tmux for the session name of a session without DevDesk's tags
+ * (`launchTags`), so it is told which tmux when not the one on PATH.
+ */
 export function sessionsEnv(bin = sessionsTmuxPath()): Record<string, string> {
   return bin === 'tmux' ? sessionsClaudeEnv() : { ...sessionsClaudeEnv(), DEVDESK_TMUX: bin };
 }
@@ -374,6 +508,16 @@ export function sessionsShowChildren(): boolean {
 /** Finished children listed per level, older ones folded into one row (setting `devdesk.sessions.finishedChildren`, at least 0). */
 export function sessionsFinishedChildren(): number {
   return numberSetting('sessions.finishedChildren', 10, 0, Infinity, true);
+}
+
+/**
+ * How far back Show Changes by Turn reads a session's transcript: the last `turns` turns (setting
+ * `devdesk.sessions.turnChangesTurns`, 1 to 200), and at most `maxBytes` from its end and from each subagent's
+ * (`devdesk.sessions.turnChangesMaxMB`, 1 to 1024). A line over 16 MB (or `maxBytes`) is skipped.
+ */
+export function sessionsTurnChangesLimits(): TurnReadLimits {
+  const maxBytes = numberSetting('sessions.turnChangesMaxMB', 64, 1, 1024) * 1024 * 1024;
+  return { turns: numberSetting('sessions.turnChangesTurns', 30, 1, 200, true), maxBytes, maxLine: Math.min(maxBytes, 16 * 1024 * 1024) };
 }
 
 /**
@@ -443,7 +587,7 @@ export function worktreesCleanup(): { idleDays: number; baseBranches: string[]; 
   return {
     idleDays: numberSetting('worktrees.cleanupIdleDays', 3, 0),
     baseBranches: Array.isArray(bases) ? bases.filter((b): b is string => typeof b === 'string').map((b) => b.trim()).filter(Boolean) : [],
-    deleteBranch: bool('worktrees.cleanupDeleteBranch', false) === true,
+    deleteBranch: cfg().get<boolean>('worktrees.cleanupDeleteBranch', false) === true,
     suggestCount: numberSetting('worktrees.cleanupSuggestCount', 5, 0, Infinity, true),
   };
 }
@@ -491,6 +635,15 @@ export function boardLaneWidth(): number {
   return numberSetting('board.laneWidth', DEFAULT_LANE_WIDTH, MIN_LANE_WIDTH, Infinity, 'round');
 }
 
+
+/**
+ * How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter
+ * (setting `devdesk.board.pasteSettleMs`; 0 or more, and 1 ms more per 4 KB pasted: `pasteSubmitDelayMs`).
+ */
+export function boardPasteSettleMs(): number {
+  return numberSetting('board.pasteSettleMs', DEFAULT_PASTE_SETTLE_MS, 0, Infinity, 'round');
+}
+
 /** Working and Needs you cards show one line on what Claude is doing or asks (setting `devdesk.board.cardLine`, on by default; the board's ☰ button toggles it). */
 export function boardCardLine(): boolean {
   return bool('board.cardLine', true);
@@ -515,11 +668,20 @@ export function boardPastedImagesDir(): string {
 }
 
 /**
- * Claude Code's global config file, read (never written) for the folders Claude trusts (setting
- * `devdesk.board.claudeConfigFile`); empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.
+ * Claude Code's global config file, read for the folders Claude trusts, and written only to trust new worktrees
+ * (`devdesk.worktrees.autoTrust`) (setting `devdesk.board.claudeConfigFile`); empty: `$CLAUDE_CONFIG_DIR/.claude.json`,
+ * else `~/.claude.json`.
  */
 export function boardClaudeConfigFile(): string {
   return pathSetting('board.claudeConfigFile', () => claudeConfigFilePath(process.env, homedir()));
+}
+
+/**
+ * Claude Code's global config file for `account` (default: the default account), where it keeps the folders it
+ * trusts: `boardClaudeConfigFile()` for Claude's own config directory, else `<config dir>/.claude.json`.
+ */
+export function claudeConfigFile(account: ClaudeAccount = claudeDefaultAccount()): string {
+  return accountConfigFile(account, boardClaudeConfigFile());
 }
 
 /** Extension host memory diagnostics (`devdesk.diagnostics.*`). */
@@ -617,9 +779,10 @@ export function boardSearchHistoryMaxSessions(): number {
   return numberSetting('boardSearch.historyMaxSessions', 5000, 100, 100_000, true);
 }
 
-/** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in Claude's config directory). */
-export function boardSearchHistoryDir(): string {
-  return pathSetting('boardSearch.historyDir', () => claudeProjectsDir());
+/** Where Claude keeps its transcripts (setting `devdesk.boardSearch.historyDir`; empty: `projects` in each Claude config directory). */
+export function boardSearchHistoryDirs(): string[] {
+  const explicit = expandHome(cfg().get<string>('boardSearch.historyDir'));
+  return explicit ? [explicit] : claudeProjectsDirs();
 }
 
 /** How long a ✨ search may take (setting `devdesk.boardSearch.timeoutSeconds`, 5–300). */
@@ -648,6 +811,104 @@ export function usageDefaultScope(): 'project' | 'all' {
  */
 export function boardSearchHistorySaveMs(): number {
   return numberSetting('boardSearch.historySaveMinutes', 5, 0, 60) * 60_000;
+}
+
+/** Whether this window takes requests from the `devdesk` command Claude runs (setting `devdesk.cli.enabled`). */
+export function cliEnabled(): boolean {
+  return bool('cli.enabled', true);
+}
+
+/** Whether the 📊 popup shows Claude's plan limits, or offers DevDesk's status line to record them (setting `devdesk.usage.planLimits`). */
+export function usagePlanLimits(): boolean {
+  return bool('usage.planLimits', true);
+}
+
+/** The checks and review comments of worktrees' pull requests (settings `devdesk.checks.*`). */
+export interface ChecksConfig {
+  enabled: boolean;
+  /** How long a worktree's checks are kept before they are fetched again; 0: only when asked. */
+  refreshMs: number;
+  /** The longest wait after failures in a row (the wait doubles each time). */
+  maxBackoffMs: number;
+  timeoutMs: number;
+  gh: string;
+  reviewComments: boolean;
+  logLines: number;
+  maxLogs: number;
+}
+
+export function checksConfig(): ChecksConfig {
+  return {
+    enabled: bool('checks.enabled', true),
+    refreshMs: numberSetting('checks.refreshMinutes', 5, 0) * 60_000,
+    maxBackoffMs: numberSetting('checks.maxBackoffMinutes', 60, 1) * 60_000,
+    timeoutMs: numberSetting('checks.timeoutSeconds', 30, 1) * 1000,
+    gh: pathSetting('checks.ghPath', () => 'gh'),
+    reviewComments: bool('checks.reviewComments', true),
+    logLines: numberSetting('checks.logLines', 40, 0, 500, true),
+    maxLogs: numberSetting('checks.maxLogs', 3, 0, 20, true),
+  };
+}
+
+/**
+ * Coordinator and worker sessions (`devdesk worker`): the most workers one coordinator may run at once
+ * (`devdesk.workers.maxConcurrent`), whether an idle coordinator is told about unread worker messages
+ * (`devdesk.workers.nudge`), and how long a worker may sit stopped without reporting before its coordinator is told
+ * (`devdesk.workers.escalationMinutes`; 0 tells it at once).
+ */
+export function workersConfig(): { maxConcurrent: number; nudge: boolean; escalationMs: number } {
+  return {
+    maxConcurrent: numberSetting('workers.maxConcurrent', 4, 1, 32, true),
+    nudge: bool('workers.nudge', true),
+    escalationMs: numberSetting('workers.escalationMinutes', 3, 0, 24 * 60) * 60_000,
+  };
+}
+
+/** Tickets linked to worktrees and sessions (settings `devdesk.tickets.*`, see `core/tickets.ts`). */
+export interface TicketsConfig {
+  enabled: boolean;
+  /** `devdesk.tickets.providers`: the providers on (empty: all). */
+  providers: string[];
+  /** Find a worktree's ticket in its name and branch, and a session's in its first prompt. */
+  autoDetect: boolean;
+  /** Read titles and statuses (with the providers that can). */
+  fetch: boolean;
+  /** How long a ticket's title and status are kept before they are read again. */
+  refreshMs: number;
+  timeoutMs: number;
+  includeInPrompt: boolean;
+  /** The GitHub CLI (`devdesk.checks.ghPath`). */
+  gh: string;
+  jira: { baseUrl: string; projects: string[]; command: string };
+  linear: { workspace: string; teams: string[] };
+  /** `devdesk.tickets.patterns` as set (checked by `validPatterns`). */
+  patterns: unknown;
+}
+
+const stringList = (key: string): string[] => {
+  const v = cfg().get<unknown>(key);
+  return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && !!s.trim()).map((s) => s.trim()) : [];
+};
+
+/** The `devdesk.tickets.*` settings, with their defaults. */
+export function ticketsConfig(): TicketsConfig {
+  return {
+    enabled: bool('tickets.enabled', true),
+    providers: stringList('tickets.providers'),
+    autoDetect: bool('tickets.autoDetect', true),
+    fetch: bool('tickets.fetch', true),
+    refreshMs: numberSetting('tickets.refreshMinutes', 10, 1) * 60_000,
+    timeoutMs: numberSetting('tickets.timeoutSeconds', 15, 1, 120) * 1000,
+    includeInPrompt: bool('tickets.includeInPrompt', false),
+    gh: checksConfig().gh,
+    jira: {
+      baseUrl: cfg().get<string>('tickets.jira.baseUrl', '').trim(),
+      projects: stringList('tickets.jira.projects'),
+      command: cfg().get<string>('tickets.jira.command', '').trim(),
+    },
+    linear: { workspace: cfg().get<string>('tickets.linear.workspace', '').trim(), teams: stringList('tickets.linear.teams') },
+    patterns: cfg().get<unknown>('tickets.patterns') ?? [],
+  };
 }
 
 /** `devdesk.web.*` as VS Code gives them, unchecked: resolveWebSettings() checks and fills them. */
@@ -705,7 +966,7 @@ function scopeDirsOf(root: string): string[] {
 }
 
 /**
- * Everything the web access daemon runs with (`<stateDir>/web/config.json`): the `devdesk.web.*` settings, with the
+ * Everything the web access daemon runs with (`<stateDir>/web-v2/config.json`): the `devdesk.web.*` settings, with the
  * workspace kind's tunnel and identity header when `root` is one of its workspaces, and the sessions settings the
  * Claude view uses, so the phone sees the sessions this window sees. `root` defaults to this window's.
  */
@@ -714,15 +975,6 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
   const provider = root && workspaceProvider?.isWorkspace(root) ? workspaceProvider.web : undefined;
   const stateDir = sessionsStateDir();
   const { bin = 'tmux', configFile } = sessionsTmuxSetup();
-  const c = cfg();
-  const mode = sessionsDefaultMode();
-  const claude: DaemonConfig['claude'] = { modeArgs: mode.args, modes: sessionsModes(), defaultMode: mode.name, models: boardModels(), configDir: claudeConfigDir() };
-  const command = c.get<string>('sessions.command');
-  const path = claudeBinary();
-  const args = c.get<string>('sessions.claudeArgs');
-  if (command) claude.command = command;
-  if (path) claude.path = path;
-  if (args) claude.args = args;
   return {
     version: 1,
     ...resolveWebSettings(webSettings(), { provider, user }),
@@ -734,10 +986,13 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
     scope: sessionsWorkspaceOnly() ? 'workspace' : 'all',
     showAll: sessionsShowAll(),
     discovery: featureDiscovery(),
-    claudeSessionsDir: claudeSessionsDir(),
+    claudeSessionsDirs: claudeSessionsDirs(),
     stuckMs: sessionsStuckMs(),
+    hooksQuietMs: sessionsHooksQuietMs(),
     idleMs: sessionsIdleMs(),
+    sort: { mode: sessionsSort(), recentMs: sessionsRecentlyFinishedMs(), unreadFirst: sessionsUnreadFirst() },
     insights: insightsEnabled(),
+    pasteSettleMs: boardPasteSettleMs(),
     tmux: {
       bin,
       ...(configFile ? { configFile } : {}),
@@ -745,6 +1000,7 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
       options: sessionsTmuxOptions(),
       env: sessionsEnv(bin),
     },
-    claude,
+    // The default launch mode and Claude account, as a new session from the Claude view starts.
+    claude: { ...sessionsLaunch(), modes: sessionsModes(), defaultMode: sessionsDefaultMode().name, models: boardModels(), configDir: claudeConfigDir() },
   };
 }

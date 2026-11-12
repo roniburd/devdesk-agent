@@ -1,11 +1,11 @@
 /*
- * State that both DevDesk for Claude Code versions (v1 and v2, see `edition.ts`) keep, in a file of the storage folder they share.
+ * State that both DevDesk Claude versions (v1 and v2, see `edition.ts`) keep, in a file of the storage folder they share.
  * VS Code keeps each extension's `globalState` and `workspaceState` apart, so what one version saved there (which
  * sessions are read, the board's draft, the terminals to reattach) would be lost on switching to the other. The file
  * holds those Memento keys instead (`SHARED_GLOBAL_KEYS`, `SHARED_PROJECT_KEYS`), and each version copies what it saved
  * in its own Memento into it once (`importValues`).
  *
- * The same code is on `main` (v1) and `v2_experiment` (v2): keep the two copies the same.
+ * The same code is on `main` (v2) and `v1`: keep the two copies the same.
  */
 
 /** The file in the shared storage folders (`globalStorageUri` for this host, `storageUri` for this project folder). */
@@ -19,10 +19,11 @@ export interface SharedState {
 
 /**
  * `globalState` keys kept in the host's shared file: what the user has read of each session and the colors given to
- * them, per host (`hostKey`), and the read state saved for every host together by versions before that.
+ * them, per host (`hostKey`), and the read state saved for every host together by versions before that; and the
+ * tickets linked to worktrees and sessions (`tickets.ts`).
  */
 export function isSharedGlobalKey(key: string): boolean {
-  return /^devdesk\.sessions\.(seen|colors)(@|$)/.test(key);
+  return /^devdesk\.sessions\.(seen|colors)(@|$)/.test(key) || key === 'devdesk.tickets.links';
 }
 
 /** `workspaceState` keys kept in the project folder's shared file. */

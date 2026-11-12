@@ -1,6 +1,6 @@
-# Developing DevDesk for Claude Code
+# Developing DevDesk Claude
 
-This guide is for people who want to build DevDesk for Claude Code from source, change it, or send a fix. To learn what the
+This guide is for people who want to build DevDesk Claude from source, change it, or send a fix. To learn what the
 extension does, read the [README](README.md) and the [manual](MANUAL.md) first.
 
 ## Where the code comes from
@@ -70,7 +70,9 @@ real sessions too.
 | `src/migrate.ts` | Copies renamed settings once (`MIGRATED_SETTINGS`). |
 | `src/core/` | Pure logic, no VS Code: tmux, sessions, hooks, worktrees, git, the board, usage. Unit-tested. |
 | `src/sessions*.ts`, `src/claudeSessions.ts` | The Claude view, its commands, read and unread, the Claude terminals. |
-| `src/worktreesView.ts`, `src/featuresTree.ts` | The Worktrees view and its diffs. |
+| `src/worktreesView.ts`, `src/featuresTree.ts`, `src/worktreeDiffs.ts` | The Worktrees view and its diffs. |
+| `src/reviewComments.ts`, `src/core/reviewNotes.ts` | Notes for Claude on diff lines (VS Code comments), and the prompt they make. |
+| `src/devdeskCli.ts`, `src/core/devdeskCli.ts` | The `devdesk` command Claude runs (a Python script), and this window's end of it: its record and the requests it takes, through files in `~/.claude/devdesk/ipc`. |
 | `src/boardPanel.ts`, `src/boardComposer.ts`, `src/board/` | The Claude Board and its prompt box. |
 | `media/` | The webviews' scripts and styles: `board.js`, `usage.js` (`// @ts-check`). `npm run build` bundles each script, with the `src/core/` modules it imports (`boardQuery.ts`, `usageProgress.ts`; nothing that needs Node), into `dist/webview/` (`scripts/webviews.mjs`), which the webview loads. |
 | `src/log.ts` | The **DevDesk** output channel. |
@@ -83,6 +85,8 @@ workspaces; in this repository it has none, so DevDesk works with git repositori
 
 Web access is a second bundle, `dist/web.js`, next to `dist/extension.js` in the same VSIX. `scripts/webBuild.mjs` builds it (`npm run build` calls it): it bundles the page's `src/web/page/app.ts` for the browser, then builds `src/web/main.ts` for Node with the page's HTML, script and CSS inlined, so the daemon never reads a file to serve it. It has no `external`, so anything in `src/web/` that imports `vscode` fails the build. The page is type-checked with the DOM types (`tsconfig.webview.json`), the rest without.
 
+The daemon builds its cards with `src/core/sessionCards.ts` (`sessionCards`, `readCardExtras`, `addSessionChildren`), as `SessionsModel.refresh` does, reads and types into panes with `src/core/paneScreen.ts`, as the Claude Board does, and starts Claude with `claudeLaunchCommand` (`src/core/sessionStart.ts`), as a new session from the Claude view does: change those, not copies in `src/core/web/`.
+
 - `test/web/daemon.test.ts` builds `dist/web.js` into a temporary folder, starts it on a free port with a fake tmux (`test/web/fixtures/fake-tmux.mjs`) and fixture hook records, and calls the API over HTTP: auth, Host and Origin checks, actions, the tunnel, signals, and that nothing listens beyond `127.0.0.1`.
 - `test/web/page.test.ts` runs the page in jsdom with a fake `fetch` and `EventSource`.
 - The `claude` e2e configuration starts and stops it through the commands, with a tunnel command that only prints a URL.
@@ -90,10 +94,10 @@ Web access is a second bundle, `dist/web.js`, next to `dist/extension.js` in the
 To run the daemon by hand, from this folder after `npm run build`:
 
 ```sh
-node dist/web.js --auth loopback --port 7690
+node dist/web.js --auth loopback --port 7691
 ```
 
-and open `http://127.0.0.1:7690/`. `--auth loopback` skips the identity check: don't leave it running on a shared host. The other flags are in `parseDaemonArgs` (`src/core/web/config.ts`). It reads the hook records in `~/.claude/devdesk/state` (`--state-dir`) and the sessions on tmux server `devdesk`.
+and open `http://127.0.0.1:7691/`. `--auth loopback` skips the identity check: don't leave it running on a shared host. The other flags are in `parseDaemonArgs` (`src/core/web/config.ts`). It reads the hook records in `~/.claude/devdesk/state` (`--state-dir`) and the sessions on tmux server `devdesk`.
 
 ### Add a setting
 
@@ -101,7 +105,7 @@ and open `http://127.0.0.1:7690/`. `--auth loopback` skips the identity check: d
    `"scope": "machine"`, so a repository's workspace settings can't change what runs.
 2. Read it through one function in `src/config.ts`. An empty string means the default. Expand a leading `~`.
 3. Make a change take effect without a reload: listen to `onDidChangeConfiguration`.
-4. List it in the [All settings](MANUAL.md#18-all-settings) table of the manual.
+4. List it in the [All settings](MANUAL.md#19-all-settings) table of the manual.
 
 ### Where state lives
 

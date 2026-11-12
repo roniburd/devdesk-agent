@@ -174,19 +174,21 @@ export async function firstTimestamp(path: string): Promise<number | undefined> 
 }
 
 /**
- * Transcripts under `<Claude config dir>/projects` changed since a time: `<project>/<session>.jsonl` and
+ * Transcripts under `<Claude config dir>/projects` (one or more: a folder per Claude account) changed since a time: `<project>/<session>.jsonl` and
  * `<project>/<session>/subagents/*.jsonl`, each with the session it belongs to. `onFound` is told how many transcripts
  * the folders hold as they are found, then `onListed` how many of them were checked for changes.
  */
 export async function changedTranscripts(
-  projectsDir: string,
+  projectsDir: string | readonly string[],
   since: number,
   onListed?: (count: number) => void,
   onFound?: (count: number) => void,
   startOf: (path: string) => Promise<number | undefined> = firstTimestamp,
 ): Promise<TranscriptFile[]> {
   const list = async (dir: string): Promise<Dirent[]> => readdir(dir, { withFileTypes: true }).catch(() => [] as Dirent[]);
-  const projects = (await list(projectsDir)).filter((p) => p.isDirectory()).map((p) => join(projectsDir, p.name));
+  // One `projects` folder per Claude account.
+  const roots = [projectsDir].flat();
+  const projects = (await Promise.all(roots.map(async (root) => (await list(root)).filter((p) => p.isDirectory()).map((p) => join(root, p.name))))).flat();
   let foundCount = 0;
   // Listed a few folders at a time; the transcripts kept in the folders' order.
   const perProject = await mapLimit(projects, LIST_CONCURRENCY, async (pdir) => {
@@ -258,7 +260,7 @@ export class UsageReader {
    * The transcripts changed since `since`, read up to now, by session id. Forgets the transcripts it no longer lists, so
    * reading from a later time keeps only what that needs.
    */
-  async scans(projectsDir: string, since: number): Promise<Map<string, UsageScan[]>> {
+  async scans(projectsDir: string | readonly string[], since: number): Promise<Map<string, UsageScan[]>> {
     const files = await changedTranscripts(projectsDir, since);
     const byId = new Map<string, UsageScan[]>();
     for (const f of files) {

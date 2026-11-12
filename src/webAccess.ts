@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import * as vscode from 'vscode';
 import { cfg, openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice, webTunnelPreview } from './config';
 import { writeFileAtomic } from './core/atomicWrite';
+import { WEB_ACCESS } from './core/edition';
 import { FileLockBusy, withFileLock } from './core/fileLock';
 import { processAlive } from './core/sessions';
 import { execText } from './core/shellRun';
@@ -34,7 +35,17 @@ const LOCK_WAIT_MS = 20_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const QR_PANEL = 'devdesk.web.qr';
 /** Settings the daemon's config is built from: a change restarts a running daemon when its config differs. */
-const AFFECTS = ['devdesk.web', 'devdesk.sessions', 'devdesk.insights', 'devdesk.worktrees.kind', 'devdesk.board.models'];
+const AFFECTS = [
+  'devdesk.web',
+  'devdesk.sessions',
+  'devdesk.insights',
+  'devdesk.worktrees.kind',
+  // The Claude accounts new sessions start in, and how they run Claude.
+  'devdesk.claude',
+  'devdesk.board.pasteSettleMs',
+  // The models the prompt box's model pill offers.
+  'devdesk.board.models',
+];
 
 /** True when `pid` runs the daemon (not some process that took over a stale pid); false when `ps` can't tell. */
 async function isDaemon(pid: number): Promise<boolean> {
@@ -461,7 +472,7 @@ export class WebAccess implements vscode.Disposable {
     const dir = webDir(sessionsStateDir());
     const seen = await this.status(dir);
     // Only a daemon Start ran (its config in its web folder), never one started by hand.
-    if (seen.kind === 'off' || !seen.state.configPath.endsWith('/web/config.json')) {
+    if (seen.kind === 'off' || !seen.state.configPath.endsWith(`/${WEB_ACCESS.dirName}/config.json`)) {
       await this.refresh();
       return;
     }

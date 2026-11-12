@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { runningBackground, type SessionChild } from './sessionChildren';
-import { INTERRUPTED_DETAIL, type SessionCard, type SessionState } from './sessions';
+import { endKindOf, hitLimit, type SessionCard, type SessionState, type WaitKind, waitKindOf } from './sessions';
 import { STATE_INFO } from './sessionStates';
 import { LOOKS, type StateLook } from './stateLooks';
 import { DEFAULT_SERVER } from './tmux';
@@ -441,7 +441,7 @@ export function unreadCards(seen: ReadonlyMap<string, string>, cards: readonly S
 
 export type { StateLook } from './stateLooks';
 
-const LIMIT_RE = /\b(rate|usage)[ _-]?limit|limit (reached|exceeded)|\blimited\b/i;
+const WAIT_LOOKS: Record<WaitKind, StateLook> = { question: 'question', plan: 'plan', permission: 'permission', elicitation: 'input' };
 
 /**
  * `stuckMs`: a working session with no hook event for this long looks stuck. A finished turn looks done (or interrupted,
@@ -451,11 +451,9 @@ export function stateLook(card: SessionCard, { now, stuckMs }: Pick<ViewContext,
   const state = card.state;
   switch (state) {
     case 'waiting':
-      if (card.detail.startsWith('Asking:')) return 'question';
-      if (card.detail.startsWith('Plan ready')) return 'plan';
-      return /permission/i.test(card.detail) ? 'permission' : 'input';
+      return WAIT_LOOKS[waitKindOf(card)];
     case 'blocked':
-      return LIMIT_RE.test(card.detail) ? 'limited' : 'error';
+      return hitLimit(card) ? 'limited' : 'error';
     case 'working':
       return card.updatedAt !== undefined && now - card.updatedAt > stuckMs ? 'stuck' : 'working';
     case 'stopped':
@@ -464,7 +462,7 @@ export function stateLook(card: SessionCard, { now, stuckMs }: Pick<ViewContext,
       return card.crashed ? 'crashed' : 'parked';
     case 'done':
       if (waitsOnBackground(card)) return 'background';
-      if (card.detail === INTERRUPTED_DETAIL) return 'interrupted';
+      if (endKindOf(card) === 'interrupted') return 'interrupted';
       return card.asksQuestion ? 'asked' : 'done';
     default:
       return state;
@@ -494,14 +492,6 @@ export function shownLook(card: SessionCard, v: Pick<ViewContext, 'now' | 'stuck
 export function readDecoration(unread: boolean, opts: { dimRead: boolean; badge: boolean }): { badge?: string; color?: string; tooltip: string } | undefined {
   if (unread) return opts.badge ? { badge: '\u25CF', tooltip: 'Unread' } : undefined;
   return opts.dimRead ? { color: 'descriptionForeground', tooltip: 'Read' } : undefined;
-}
-
-/** The most urgent session in each worktree (by `featureDir`), for the Worktrees view. */
-export function urgentByWorktree(cards: readonly SessionCard[], { now, idleMs, unread }: Pick<ViewContext, 'now' | 'idleMs' | 'unread'>): Map<string, SessionCard> {
-  const result = new Map<string, SessionCard>();
-  // Unread or not, and wherever the views keep working sessions: only urgency counts here.
-  for (const c of attentionOrder(cards, { now, idleMs, unread })) if (c.featureDir && !result.has(c.featureDir)) result.set(c.featureDir, c);
-  return result;
 }
 
 /**

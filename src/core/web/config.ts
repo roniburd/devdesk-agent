@@ -1,10 +1,14 @@
 import { join } from 'node:path';
+import { WEB_ACCESS } from '../edition';
 import { isFiniteNumber } from '../json';
 import { type LaunchMode, parseModes } from '../modes';
 import { shellQuote } from '../shell';
-import { isServerName } from '../tmux';
+import type { ClaudeLaunch } from '../sessionStart';
+import { DEFAULT_PASTE_SETTLE_MS, isServerName } from '../tmux';
 import { isSessionView, type SessionView } from './types';
 import { allowsAnonymous, cloudflareAudienceOf, cloudflareTeamOf, type DaemonAuth, isTunnelPreset, TUNNEL_PRESETS, type NgrokOAuthProvider, ngrokProviderOf, presetSpec, type TunnelPreset, tunnelChoiceOf } from './tunnelPresets';
+import { SORT_MODES, type SortMode } from '../urgency';
+import { webDir } from './webState';
 
 /**
  * Web access settings: `devdesk.web.*` as VS Code gives them, resolved into what the daemon runs with, and the config
@@ -12,7 +16,8 @@ import { allowsAnonymous, cloudflareAudienceOf, cloudflareTeamOf, type DaemonAut
  * daemon binds 127.0.0.1 only.
  */
 
-export const DEFAULT_WEB_PORT = 7690;
+/** 7691: v1's daemon has 7690, and both can run on one host (see `WEB_ACCESS`). */
+export const DEFAULT_WEB_PORT = WEB_ACCESS.port;
 const DEFAULT_POLL_MS = 2000;
 const MIN_POLL_MS = 500;
 const MAX_POLL_MS = 60_000;
@@ -149,14 +154,14 @@ export function needsTunnelChoice(s: Pick<WebSettings, 'tunnel' | 'auth' | 'tunn
   return tunnelChoiceOf(s.tunnel) === 'auto' && s.auth !== 'loopback' && !str(s.tunnelCommand) && !hasProvider;
 }
 
-/** The file the extension writes (`<stateDir>/web/config.json`, mode 0600) and `node dist/web.js --config <file>` reads. */
+/** The file the extension writes (`<stateDir>/web-v2/config.json`, mode 0600) and `node dist/web.js --config <file>` reads. */
 export interface DaemonConfig extends WebAccessSettings {
   version: 1;
   /** Fills {user}. */
   user: string;
   /** Hook records (sessionsStateDir()). */
   stateDir: string;
-  /** <stateDir>/web */
+  /** webDir(stateDir): <stateDir>/web-v2 */
   webDir: string;
   /** workspaceRoot() of the window that ran Start; kept on setting changes. */
   root?: string;
@@ -168,14 +173,20 @@ export interface DaemonConfig extends WebAccessSettings {
   showAll: boolean;
   /** featureDiscovery() */
   discovery: { claudeWorktrees: boolean };
-  /** claudeSessionsDir() */
-  claudeSessionsDir: string;
+  /** claudeSessionsDirs(): Claude Code's session registries, one per Claude account. */
+  claudeSessionsDirs: string[];
   /** sessionsStuckMs() */
   stuckMs: number;
+  /** sessionsHooksQuietMs(): when Claude's own report goes before a quiet hook record (0: never). */
+  hooksQuietMs: number;
   /** sessionsIdleMs(): a done session not updated this long sorts as idle, as in the Claude view. */
   idleMs: number;
+  /** The Claude view's order: `devdesk.sessions.sort`, `recentlyFinishedMinutes` (ms) and `unreadFirst`. */
+  sort: WebSort;
   /** insightsEnabled() */
   insights: boolean;
+  /** boardPasteSettleMs(): how long Claude gets to take in a paste before Enter. */
+  pasteSettleMs: number;
   tmux: {
     /** sessionsTmuxPath() */
     bin: string;
@@ -185,24 +196,15 @@ export interface DaemonConfig extends WebAccessSettings {
     server: string;
     /** sessionsTmuxOptions() */
     options: [string, string][];
-    /** sessionsClaudeEnv() (+ DEVDESK_TMUX when bin !== 'tmux') */
+    /** sessionsEnv(bin): sessionsClaudeEnv() (+ DEVDESK_TMUX when bin !== 'tmux'); each session adds its launchTags. */
     env: Record<string, string>;
   };
   /**
-   * modeArgs: sessionsDefaultMode().args. For the page's prompt box: modes (sessionsModes(), absent: only the default
-   * mode) with defaultMode its name, models (boardModels(): replaces the CLI's list when not empty), configDir
-   * (claudeConfigDir(): the skills and commands `/` offers).
+   * sessionsLaunch(): the default launch mode and Claude account. For the page's prompt box: modes (sessionsModes(),
+   * absent: only the default mode) with defaultMode its name, models (boardModels(): replaces the CLI's list when not
+   * empty), configDir (claudeConfigDir(): the skills and commands `/` offers).
    */
-  claude: {
-    command?: string;
-    path?: string;
-    args?: string;
-    modeArgs: string;
-    modes?: LaunchMode[];
-    defaultMode?: string;
-    models?: string[];
-    configDir?: string;
-  };
+  claude: ClaudeLaunch & { modes?: LaunchMode[]; defaultMode?: string; models?: string[]; configDir?: string };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -213,7 +215,7 @@ const optionalString = (v: unknown) => v === undefined || typeof v === 'string';
 function configProblem(r: Record<string, unknown>): string | undefined {
   if (r.version !== 1) return 'version must be 1';
   for (const k of ['user', 'identityHeader', 'publicHost', 'tunnelCommand'] as const) if (typeof r[k] !== 'string') return `${k} must be a string`;
-  for (const k of ['stateDir', 'webDir', 'claudeSessionsDir'] as const) if (typeof r[k] !== 'string' || !r[k]) return `${k} must be a non-empty string`;
+  for (const k of ['stateDir', 'webDir'] as const) if (typeof r[k] !== 'string' || !r[k]) return `${k} must be a non-empty string`;
   if (!validPort(r.port)) return 'port must be an integer from 1024 to 65535';
   if (!['header', 'loopback', 'tunnel', 'cloudflare'].includes(r.auth as string)) return "auth must be 'header', 'loopback', 'tunnel' or 'cloudflare'";
   if (r.tunnel !== undefined && r.tunnel !== '' && !isTunnelPreset(r.tunnel)) return 'tunnel must be a tunnel preset or empty';
@@ -241,6 +243,7 @@ function configProblem(r: Record<string, unknown>): string | undefined {
     }
   }
   if (!isStringArray(r.allowedUsers)) return 'allowedUsers must be an array of strings';
+  if (!isStringArray(r.claudeSessionsDirs) || r.claudeSessionsDirs.some((d) => !d)) return 'claudeSessionsDirs must be an array of non-empty strings';
   if (!isFiniteNumber(r.pollMs)) return 'pollMs must be a number';
   if (!optionalString(r.root)) return 'root must be a string';
   if (!isStringArray(r.scopeDirs)) return 'scopeDirs must be an array of strings';
@@ -248,8 +251,16 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (typeof r.showAll !== 'boolean') return 'showAll must be a boolean';
   if (!isObject(r.discovery) || typeof r.discovery.claudeWorktrees !== 'boolean') return 'discovery.claudeWorktrees must be a boolean';
   if (!isFiniteNumber(r.stuckMs) || r.stuckMs <= 0) return 'stuckMs must be a positive number';
+  if (!isFiniteNumber(r.hooksQuietMs) || r.hooksQuietMs < 0) return 'hooksQuietMs must be a number, 0 or more';
   if (r.idleMs !== undefined && (!isFiniteNumber(r.idleMs) || r.idleMs <= 0)) return 'idleMs must be a positive number';
+  const o = r.sort;
+  if (o !== undefined) {
+    if (!isObject(o) || !SORT_MODES.includes(o.mode as SortMode)) return `sort.mode must be one of ${SORT_MODES.join(', ')}`;
+    if (!isFiniteNumber(o.recentMs) || o.recentMs <= 0) return 'sort.recentMs must be a positive number';
+    if (typeof o.unreadFirst !== 'boolean') return 'sort.unreadFirst must be a boolean';
+  }
   if (typeof r.insights !== 'boolean') return 'insights must be a boolean';
+  if (!isFiniteNumber(r.pasteSettleMs) || r.pasteSettleMs < 0) return 'pasteSettleMs must be a number, 0 or more';
   const t = r.tmux;
   if (!isObject(t)) return 'tmux must be an object';
   if (typeof t.bin !== 'string' || !t.bin) return 'tmux.bin must be a non-empty string';
@@ -261,8 +272,11 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (!isObject(t.env) || !Object.values(t.env).every((v) => typeof v === 'string')) return 'tmux.env must map names to strings';
   const c = r.claude;
   if (!isObject(c)) return 'claude must be an object';
-  if (!optionalString(c.command) || !optionalString(c.path) || !optionalString(c.args)) return 'claude.command, path and args must be strings';
+  if (!optionalString(c.command) || !optionalString(c.path) || !optionalString(c.args) || !optionalString(c.wrapper)) {
+    return 'claude.command, path, args and wrapper must be strings';
+  }
   if (typeof c.modeArgs !== 'string') return 'claude.modeArgs must be a string';
+  if (!isObject(c.env) || !Object.values(c.env).every((v) => typeof v === 'string')) return 'claude.env must map names to strings';
   if (c.modes !== undefined && (!Array.isArray(c.modes) || parseModes(c.modes).length !== c.modes.length)) return 'claude.modes must be launch modes';
   if (!optionalString(c.defaultMode) || !optionalString(c.configDir)) return 'claude.defaultMode and configDir must be strings';
   if (c.models !== undefined && (!Array.isArray(c.models) || !c.models.every((m) => typeof m === 'string'))) return 'claude.models must be strings';
@@ -289,10 +303,13 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
     scope: r.scope,
     showAll: r.showAll,
     discovery: { claudeWorktrees: r.discovery.claudeWorktrees },
-    claudeSessionsDir: r.claudeSessionsDir,
+    claudeSessionsDirs: [...r.claudeSessionsDirs],
     stuckMs: r.stuckMs,
+    hooksQuietMs: r.hooksQuietMs,
     idleMs: r.idleMs ?? DEFAULT_IDLE_MS,
+    sort: r.sort ? { mode: r.sort.mode, recentMs: r.sort.recentMs, unreadFirst: r.sort.unreadFirst } : { ...DEFAULT_SORT },
     insights: r.insights,
+    pasteSettleMs: r.pasteSettleMs,
     tmux: {
       bin: tmux.bin,
       ...(tmux.configFile !== undefined ? { configFile: tmux.configFile } : {}),
@@ -304,7 +321,9 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
       ...(claude.command !== undefined ? { command: claude.command } : {}),
       ...(claude.path !== undefined ? { path: claude.path } : {}),
       ...(claude.args !== undefined ? { args: claude.args } : {}),
+      ...(claude.wrapper !== undefined ? { wrapper: claude.wrapper } : {}),
       modeArgs: claude.modeArgs,
+      env: { ...claude.env },
       ...(claude.modes !== undefined ? { modes: parseModes(claude.modes) } : {}),
       ...(claude.defaultMode !== undefined ? { defaultMode: claude.defaultMode } : {}),
       ...(claude.models !== undefined ? { models: [...(claude.models as string[])] } : {}),
@@ -316,6 +335,15 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
 
 /** `devdesk.sessions.idleMinutes`' default (30). */
 export const DEFAULT_IDLE_MS = 30 * 60_000;
+
+export interface WebSort {
+  mode: SortMode;
+  recentMs: number;
+  unreadFirst: boolean;
+}
+
+/** `devdesk.sessions.sort`, `recentlyFinishedMinutes` and `unreadFirst`'s defaults. */
+export const DEFAULT_SORT: Readonly<WebSort> = { mode: 'urgency', recentMs: 15 * 60_000, unreadFirst: true };
 
 /** What a manual run (no --config) uses. */
 export function defaultDaemonConfig(home: string, user: string): DaemonConfig {
@@ -339,17 +367,20 @@ export function defaultDaemonConfig(home: string, user: string): DaemonConfig {
     sessionView: 'transcript',
     user,
     stateDir,
-    webDir: join(stateDir, 'web'),
+    webDir: webDir(stateDir),
     scopeDirs: [],
     scope: 'all',
     showAll: false,
     discovery: { claudeWorktrees: false },
-    claudeSessionsDir: join(home, '.claude', 'sessions'),
+    claudeSessionsDirs: [join(home, '.claude', 'sessions')],
     stuckMs: 10 * 60_000,
+    hooksQuietMs: 2 * 60_000,
     idleMs: DEFAULT_IDLE_MS,
+    sort: { ...DEFAULT_SORT },
     insights: true,
+    pasteSettleMs: DEFAULT_PASTE_SETTLE_MS,
     tmux: { bin: 'tmux', server: 'devdesk', options: [], env: {} },
-    claude: { modeArgs: '' },
+    claude: { modeArgs: '', env: {} },
   };
 }
 
@@ -383,7 +414,7 @@ const FLAGS: Readonly<Record<string, Flag>> = {
   },
   '--state-dir': (v, o) => {
     o.stateDir = v;
-    o.webDir = join(v, 'web');
+    o.webDir = webDir(v);
     return undefined;
   },
   '--root': (v, o) => {

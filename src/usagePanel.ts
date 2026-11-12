@@ -5,6 +5,7 @@ import { type ScopedPage, scopedPage, type UsageScope } from './core/usageScope'
 import { parseUsageMessage, type UsageHostMessage } from './usage/messages';
 import type { UsageScopeState } from './usageScopeState';
 import { log } from './log';
+import { planLimits } from './planLimits';
 import type { CountProgress, UsageService } from './usageService';
 import { webviewOptions, webviewPage } from './webviewPage';
 
@@ -13,7 +14,7 @@ const TITLE = 'Claude Usage';
 
 /**
  * The stats page (📊 → More…): tokens by day, week and month, with charts, by model and by session, from the usage
- * history. One editor tab; opening it again reveals it and counts again.
+ * history, under Claude's plan limits (as in the 📊 popup). One editor tab; opening it again reveals it and counts again.
  */
 export class UsagePanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
@@ -77,6 +78,11 @@ export class UsagePanel implements vscode.Disposable {
       await openSettings('devdesk.usage');
       return;
     }
+    if (m.type === 'setupLimits') {
+      // Installs DevDesk's status line, which records the plan limits, then shows them (or that none came yet).
+      if (await vscode.commands.executeCommand<boolean>('devdesk.usage.installStatusLine')) await this.post();
+      return;
+    }
     await this.scope.set(m.scope); // posts the page again (onDidChange)
   }
 
@@ -98,7 +104,9 @@ export class UsagePanel implements vscode.Disposable {
   private async post(): Promise<void> {
     try {
       const page = await this.data();
-      await this.postToPage({ type: 'page', page });
+      // Claude's 5-hour and weekly limits, as the board's 📊 popup shows them (none with devdesk.usage.planLimits off).
+      const limits = await planLimits();
+      await this.postToPage({ type: 'page', page, limits });
     } catch (err) {
       log.warn(`cannot count token usage: ${(err as Error).message}`);
       await this.postToPage({ type: 'error', message: (err as Error).message });

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { claudeProjectsDir, sessionsStateDir, usageHistoryDays, usageHistoryMaxBytes } from './config';
+import { claudeProjectsDirs, sessionsStateDir, usageHistoryDays, usageHistoryMaxBytes } from './config';
 import { UsageReader } from './core/usage';
 import { usageLedger } from './insightsWorker';
 import { log, noteLatency, track } from './log';
@@ -61,7 +61,7 @@ export class UsageService {
   private request(): CountRequest {
     const stateDir = sessionsStateDir();
     return {
-      projectsDir: claudeProjectsDir(),
+      projectsDir: claudeProjectsDirs(),
       historyPath: usageHistoryPath(stateDir),
       ledgerPath: usageLedger(stateDir),
       keepDays: usageHistoryDays(),

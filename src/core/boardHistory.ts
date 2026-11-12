@@ -31,6 +31,8 @@ export function historyCard(doc: HistoryDoc, cwd: string | undefined, features: 
   return {
     id: doc.id,
     sessionId: doc.id,
+    // Its Claude account follows from where the transcript is (a resume or fork keeps it).
+    transcriptPath: doc.path,
     ...(cwd ? { cwd } : {}),
     state: 'parked',
     detail: '',

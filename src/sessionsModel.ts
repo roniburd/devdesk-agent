@@ -6,9 +6,11 @@ import { listProcesses } from './core/processes';
 import { EndedRecords, endedDir, listableEnded, removeEndedRecord, writeEndedRecord } from './core/ended';
 import { parkable, parkPlan, type ParkPolicy } from './core/park';
 import type { RestoreHold } from './core/restoreHold';
-import { ChildrenReader, runningBackground } from './core/sessionChildren';
-import { addSessionInfo, ForkParentReader, MetaReader, readRegistry, type RegistryEntry, registryFor } from './core/sessionInfo';
-import { buildSessionCards, cardsInScope, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds, withClaudeProcesses } from './core/sessions';
+import { notesDirIn, staleNotes } from './core/devdeskCli';
+import { addSessionChildren, readCardExtras, readClaudeRegistries, sessionCards } from './core/sessionCards';
+import { ChildrenReader } from './core/sessionChildren';
+import { addSessionInfo, ForkParentReader, MetaReader, type RegistryEntry, registryFor } from './core/sessionInfo';
+import { cardsInScope, type HookRecord, parseHookRecord, processAlive, readHookRecords, type SessionCard, splitRecords, TranscriptEnds, withClaudeProcesses } from './core/sessions';
 import { STATE_INFO } from './core/sessionStates';
 import { transitionsToWaiting } from './core/sessionsView';
 import { DEFAULT_SERVER, killSessionArgs, listPanes, serverOf, sessionName, sessionsOf, type TmuxPane, type TmuxRunner, type TmuxSession } from './core/tmux';
@@ -53,6 +55,8 @@ export interface SessionsModelOptions {
   /** The workspace root whose worktrees sessions are matched against. */
   root: () => string | undefined;
   pollMs: () => number;
+  /** How long a hooked working or waiting session's record may go unchanged before Claude's own report replaces it (0: never). */
+  hooksQuietMs: () => number;
   /** DevDesk's tmux server (`-L` name). */
   tmuxServer: () => string;
   /** List every Claude session on the machine, not only those on DevDesk's tmux server. */
@@ -63,12 +67,12 @@ export interface SessionsModelOptions {
   finishedChildren: () => number | undefined;
   /** Options for discovering worktrees (whether Claude Code worktrees count). */
   discovery: () => { claudeWorktrees?: boolean };
-  /** Where Claude Code lists its running sessions and their names; undefined skips them. */
-  claudeSessionsDir: () => string | undefined;
+  /** Where Claude Code lists its running sessions and their names (a directory per Claude account); undefined skips them. */
+  claudeSessionsDir: () => string | readonly string[] | undefined;
   /** Runs tmux on a server, with the configured binary. */
   tmux: (server: string) => TmuxRunner;
-  /** Where Claude Code keeps its background jobs (a /fork runs as one); undefined skips forks outside tmux. */
-  claudeJobsDir: () => string | undefined;
+  /** Where Claude Code keeps the background jobs (a /fork runs as one) of a session with this transcript; undefined skips forks outside tmux. */
+  claudeJobsDir: (transcriptPath?: string) => string | undefined;
   /** When to park DevDesk sessions (see `parkPlan`), but for low memory. */
   parkPolicy: () => Omit<ParkPolicy, 'lowMemory'>;
   /** Park one more idle session while less than this percent of memory is free; 0 never. */
@@ -271,14 +275,14 @@ export class SessionsModel implements vscode.Disposable {
   /** The session each record outside tmux was forked from (a /fork runs as a background job), by session id. */
   private async forkParents(records: readonly HookRecord[], registry: readonly RegistryEntry[]): Promise<Map<string, string>> {
     const parents = new Map<string, string>();
-    const dir = this.o.claudeJobsDir();
-    if (!dir) return parents;
     await Promise.all(
       records
         .filter((r) => !r.tmuxPane && !r.tmuxSession)
         .map(async (r) => {
           const jobId = registryFor(registry, r.sessionId, r.pid)?.jobId;
-          const parent = jobId ? await this.forkParentReader.read(dir, jobId) : undefined;
+          // The jobs of the session's own Claude account.
+          const dir = jobId ? this.o.claudeJobsDir(r.transcriptPath ?? undefined) : undefined;
+          const parent = jobId && dir ? await this.forkParentReader.read(dir, jobId) : undefined;
           if (parent) parents.set(r.sessionId, parent);
         }),
     );
@@ -354,21 +358,8 @@ export class SessionsModel implements vscode.Disposable {
    * and marks every live session that still runs something in the background (`runsInBackground`), which shows as
    * waiting on background work either way.
    */
-  private async addChildren(cards: SessionCard[]): Promise<void> {
-    const shown = this.o.finishedChildren();
-    const finishedLimit = shown ?? 0;
-    await Promise.all(
-      cards.map(async (card) => {
-        if (!card.transcriptPath) return;
-        const live = card.pid !== undefined && card.state !== 'stopped' && card.state !== 'parked' && processAlive(card.pid);
-        // Nothing to list, nor anything that can still run.
-        if (shown === undefined && !live) return;
-        const children = await this.childrenReader.read(card.transcriptPath, { finishedLimit, live });
-        if (shown !== undefined && children.length) card.children = children;
-        if (live && runningBackground(children)) card.runsInBackground = true;
-      }),
-    );
-    this.childrenReader.prune();
+  private addChildren(cards: SessionCard[]): Promise<void> {
+    return addSessionChildren(cards, this.childrenReader, this.o.finishedChildren(), processAlive);
   }
 
   /** The workspace root as configured and with symlinks resolved (a session's cwd is the real path); none without a folder. */
@@ -449,8 +440,10 @@ export class SessionsModel implements vscode.Disposable {
     if (generation !== this.generation) return;
     if (!record || !this.knownPids.has(record.sessionId) || this.knownPids.get(record.sessionId) !== record.pid) this.schedule();
     if (!record) return;
-    // Reads of one file can finish out of order: keep the newest record.
     const known = this.records.get(record.sessionId);
+    // A subagent started, stopped or went idle (the roster changes without updatedAt): its row comes from a refresh.
+    if (JSON.stringify(record.subagents) !== JSON.stringify(this.base.find((c) => c.id === record.sessionId)?.subagents)) this.schedule();
+    // Reads of one file can finish out of order: keep the newest record.
     if (known && known.record.updatedAt >= record.updatedAt) return;
     this.records.set(record.sessionId, { record, read: ++this.recordReads });
     this.publish();
@@ -528,13 +521,18 @@ export class SessionsModel implements vscode.Disposable {
       // Showing everything also covers your own (default) tmux server.
       if (showAll && server !== DEFAULT_SERVER) listing.push(listPanes(this.o.tmux(DEFAULT_SERVER), DEFAULT_SERVER));
       const registryDir = this.o.claudeSessionsDir();
-      const [paneLists, records, ended, procs, registry] = await Promise.all([
+      const [paneLists, records, ended, procs, registry, extras] = await Promise.all([
         Promise.all(listing),
         readHookRecords(dir, this.transcriptEnds),
         this.endedRecords.read(endedDir(dir)),
         listProcesses(),
-        registryDir ? readRegistry(registryDir) : Promise.resolve([]),
+        readClaudeRegistries(registryDir),
+        // Claude's own reports (OSC 7501) for sessions run under the Program Status relay: a state for those without
+        // hooks, and for hooked ones where the hooks lag or went quiet (statusMerge.ts); the notes Claude set on its
+        // cards (`devdesk note`); coordinator and worker sessions (`devdesk worker`).
+        readCardExtras(dir, processAlive),
       ]);
+      const { notes } = extras;
       steps.mark('list');
       const tmuxPanes = paneLists.flat();
       // tmux names the foreground process group leader, so `claude; exec $SHELL` shows as a shell: look at the tree.
@@ -549,7 +547,18 @@ export class SessionsModel implements vscode.Disposable {
       steps.mark('forks');
       const split = splitRecords(records, panes, processAlive);
       const { listed, stale } = listableEnded(ended.records, new Map(split.live.map((r) => [r.sessionId, r.updatedAt])), ended.exists);
-      const all = buildSessionCards(panes, records, features, processAlive, showAll ? undefined : server, forkParents, listed);
+      const all = sessionCards({
+        ...extras,
+        panes,
+        records,
+        features,
+        alive: processAlive,
+        onlyServer: showAll ? undefined : server,
+        forkParents,
+        ended: listed,
+        now: Date.now(),
+        quietMs: this.o.hooksQuietMs(),
+      });
       // The dead record that shows a crash is deleted below: keep the mark while the session stays stopped.
       for (const c of all) if (c.state === 'stopped' && this.crashed.has(c.id)) c.crashed = true;
       this.crashed = new Set(all.filter((c) => c.crashed).map((c) => c.id));
@@ -566,6 +575,9 @@ export class SessionsModel implements vscode.Disposable {
       for (const r of split.dead) void removeDead(dir, r);
       // Running again (resumed by an older hook script, which leaves the ended record), or nothing left to resume.
       for (const r of stale) void removeEndedRecord(endedDir(dir), r.sessionId);
+      // Notes of panes that are gone, on the servers just listed.
+      const listedPanes = new Map(listing.map((_, i) => [i === 0 ? server : DEFAULT_SERVER, paneLists[i].map((p) => p.paneId)] as const));
+      for (const name of staleNotes(notes.keys(), listedPanes)) void unlink(join(notesDirIn(dir), name)).catch(() => undefined);
       // Every session, also those of other workspaces: a window that lists them may not be open. The listed ones as
       // their insights show them (whether Claude asks you something).
       const inView = new Set(next);
@@ -662,7 +674,7 @@ export class SessionsModel implements vscode.Disposable {
       cards.map(async (card) => {
         if (card.children !== undefined || !card.transcriptPath || !parkable(card, server)) return card;
         const live = card.pid !== undefined && processAlive(card.pid);
-        const children = await this.parkChildrenReader.read(card.transcriptPath, { finishedLimit, live });
+        const children = await this.parkChildrenReader.read(card.transcriptPath, { finishedLimit, live, since: card.sessionStartedAt, roster: card.subagents });
         if (!children.length) return card;
         const copy = { ...card, children };
         original.set(copy, card);

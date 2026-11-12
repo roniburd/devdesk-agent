@@ -1,5 +1,5 @@
 import { DEFAULT_SERVER } from './tmux';
-import { type HookRecord, MOVED_DETAIL, type SessionCard } from './sessions';
+import { endKindOf, type HookRecord, type SessionCard, stateKinds, withoutStateKinds } from './sessions';
 import { STATE_INFO } from './sessionStates';
 
 /**
@@ -14,11 +14,14 @@ import { STATE_INFO } from './sessionStates';
  */
 export function withRecord(card: SessionCard, record: HookRecord): SessionCard {
   if (card.sessionId !== record.sessionId || !STATE_INFO[card.state].fromRecord) return card;
-  if (card.updatedAt !== undefined && record.updatedAt <= card.updatedAt) return card;
+  // A card showing Claude's own report holds the hook record's time: any newer hook event takes the card back.
+  const since = card.statusFrom?.hookAt ?? card.updatedAt;
+  if (since !== undefined && record.updatedAt <= since) return card;
   // Its conversation went on in a background job, as its transcript says: the pane's Claude still writes records
   // under this id, which the refresh corrects again.
-  if (card.detail === MOVED_DETAIL) return card;
-  const next: SessionCard = { ...card, state: record.state, detail: record.detail, updatedAt: record.updatedAt };
+  if (endKindOf(card) === 'moved') return card;
+  const next: SessionCard = { ...withoutStateKinds(card), state: record.state, detail: record.detail, updatedAt: record.updatedAt, ...stateKinds(record) };
+  delete next.statusFrom;
   if (record.prompt) next.prompt = record.prompt;
   if (record.asksQuestion) next.asksQuestion = true;
   else delete next.asksQuestion;
@@ -92,7 +95,7 @@ export function withPendingTurns(cards: SessionCard[], pending: readonly Pending
     if (card.state === 'stopped' && age >= PENDING_STOPPED_MS) continue;
     if (card.state === 'idle' && card.updatedAt !== undefined && now - card.updatedAt >= PENDING_IDLE_MS) continue;
     left.push(p);
-    next[i] = { ...card, state: 'working', detail: STARTING_DETAIL, prompt: p.prompt, updatedAt: card.updatedAt ?? p.at };
+    next[i] = { ...withoutStateKinds(card), state: 'working', detail: STARTING_DETAIL, prompt: p.prompt, updatedAt: card.updatedAt ?? p.at };
     changed = true;
   }
   return { cards: changed ? next : cards, pending: left };

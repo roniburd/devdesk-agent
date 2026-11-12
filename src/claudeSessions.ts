@@ -6,15 +6,16 @@ import { endedDir, type EndedRecord, readEndedRecords } from './core/ended';
 import { parkedIn } from './core/park';
 import { RestoreHold } from './core/restoreHold';
 import { processAlive, readHookRecords } from './core/sessions';
-import { readRegistry } from './core/sessionInfo';
-import { attachArgs, DEFAULT_SERVER, isPaneId, killSessionArgs, listSessions, resumeArgs, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { readRegistries } from './core/sessionInfo';
+import { attachArgs, DEFAULT_SERVER, isPaneId, killSessionArgs, launchTags, listSessions, resumeArgs, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
 import { tmuxStartCommand } from './core/sessionStart';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
+import { sessionAccount } from './claudeAccounts';
 import { applySmoothScrollWhenUp } from './smoothScroll';
 import { type OpenTerminal, ReattachTerminals, reattachKey, type RestoreOutcome } from './state/reattachTerminals';
 import {
-  claudeSessionsDir,
+  claudeSessionsDirs,
   openSettings,
   sessionsClaudeCommand,
   sessionsRestoreTerminals,
@@ -278,8 +279,10 @@ export async function startClaudeDetached(session: string, dir: string, command 
  */
 function newSessionShell(session: string, dir: string, command: string, detached = false): { shellPath: string; shellArgs: string[] } {
   const { bin = 'tmux', configFile } = sessionsTmuxSetup();
-  const args = attachArgs(session, dir, tmuxCommand(command), sessionsEnv(bin), sessionsTmuxOptions(), detached);
-  return { shellPath: bin, shellArgs: serverArgs(sessionsTmuxServer(), args, configFile) };
+  const server = sessionsTmuxServer();
+  const env = { ...sessionsEnv(bin), ...launchTags(session, server) };
+  const args = attachArgs(session, dir, tmuxCommand(command), env, sessionsTmuxOptions(), detached);
+  return { shellPath: bin, shellArgs: serverArgs(server, args, configFile) };
 }
 
 /**
@@ -289,7 +292,6 @@ function newSessionShell(session: string, dir: string, command: string, detached
 function tmuxCommand(command: string): string {
   return tmuxStartCommand(command, tmpdir());
 }
-
 
 /**
  * Shows the session's terminal, or opens one attached to an existing tmux session on `server` (DevDesk's by default),
@@ -418,7 +420,7 @@ async function reopenTerminals(saved: OpenTerminal[]): Promise<void> {
       }
       log.info(`restoring the terminal of parked Claude session ${record.sessionId}: resuming it in tmux session ${session}`);
       parked.live.add(record.sessionId);
-      await startClaude(session, record.cwd, sessionsClaudeCommand(resumeArgs(record.sessionId)), terminalLocation(), true);
+      await startClaude(session, record.cwd, sessionsClaudeCommand(resumeArgs(record.sessionId), undefined, sessionAccount(record)), terminalLocation(), true);
       outcomes.set(reattachKey(open), 'attached');
     } catch (err) {
       // Kept for the next window: it may work there.
@@ -435,7 +437,7 @@ async function parkedSessions(): Promise<{ ended: EndedRecord[]; live: Set<strin
   const [ended, records, registry] = await Promise.all([
     readEndedRecords(endedDir(dir)),
     readHookRecords(dir),
-    readRegistry(claudeSessionsDir()).catch(() => []),
+    readRegistries(claudeSessionsDirs()),
   ]);
   // Claude's own list of its processes also covers one another window resumed a moment ago, before its first hook.
   const running = [...records, ...registry].filter((r) => r.pid !== undefined && processAlive(r.pid));

@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "1.13.0",
+  "version": "2.1.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -92,7 +92,7 @@
       {
         "command": "devdesk.claude.switchVersion",
         "title": "Switch Version…",
-        "category": "DevDesk for Claude Code"
+        "category": "DevDesk Claude"
       },
       {
         "command": "devdesk.features.refresh",
@@ -323,6 +323,30 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "devdesk.sessions.lastTurnChanges",
+        "title": "Show Last Turn's Changes",
+        "category": "Worktrees",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "devdesk.sessions.turnChanges",
+        "title": "Show Changes by Turn…",
+        "category": "Worktrees",
+        "icon": "$(history)"
+      },
+      {
+        "command": "devdesk.sessions.forkFromTurn",
+        "title": "Fork from a Turn…",
+        "category": "Worktrees",
+        "icon": "$(repo-forked)"
+      },
+      {
+        "command": "devdesk.sessions.forkFromShownTurn",
+        "title": "Fork from This Turn…",
+        "category": "Worktrees",
+        "icon": "$(repo-forked)"
+      },
+      {
         "command": "devdesk.sessions.openSettings",
         "title": "Claude Sessions Settings",
         "category": "Worktrees",
@@ -371,6 +395,16 @@
         "icon": "$(add)"
       },
       {
+        "command": "devdesk.usage.installStatusLine",
+        "title": "Show Claude Plan Limits (Install DevDesk's Status Line)",
+        "category": "DevDesk"
+      },
+      {
+        "command": "devdesk.usage.removeStatusLine",
+        "title": "Remove DevDesk's Claude Status Line",
+        "category": "DevDesk"
+      },
+      {
         "command": "devdesk.sessions.installHooks",
         "title": "Install Claude Status Hooks",
         "category": "Worktrees"
@@ -391,62 +425,145 @@
         "category": "Worktrees"
       },
       {
+        "command": "devdesk.review.addNote",
+        "title": "Add Note for Claude",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.review.deleteNote",
+        "title": "Delete Note",
+        "category": "Worktrees",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "devdesk.review.deleteThread",
+        "title": "Delete Notes Here",
+        "category": "Worktrees",
+        "icon": "$(close)"
+      },
+      {
+        "command": "devdesk.review.sendThread",
+        "title": "Send Notes to Claude",
+        "category": "Worktrees",
+        "icon": "$(send)"
+      },
+      {
+        "command": "devdesk.review.send",
+        "title": "Send Notes to Claude",
+        "category": "Worktrees",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "devdesk.review.clear",
+        "title": "Clear Notes for Claude",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.checks.askClaude",
+        "title": "Ask Claude to Fix Checks",
+        "category": "Worktrees",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "devdesk.checks.refresh",
+        "title": "Refresh Pull Request Checks",
+        "category": "Worktrees"
+      },
+      {
+        "command": "devdesk.cli.installSkill",
+        "title": "Teach Claude the devdesk Command (Install Skill)",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.cli.removeSkill",
+        "title": "Remove the devdesk Skill",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.link",
+        "title": "Link Ticket…",
+        "category": "Claude",
+        "icon": "$(link)"
+      },
+      {
+        "command": "devdesk.tickets.open",
+        "title": "Open Ticket",
+        "category": "Claude",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "devdesk.tickets.unlink",
+        "title": "Unlink Ticket",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.refresh",
+        "title": "Refresh Tickets",
+        "category": "Claude"
+      },
+      {
+        "command": "devdesk.tickets.openSettings",
+        "title": "Ticket Settings",
+        "category": "Claude",
+        "icon": "$(gear)"
+      },
+      {
         "command": "devdesk.web.start",
         "title": "Start Web Access",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(play)"
       },
       {
         "command": "devdesk.web.stop",
         "title": "Stop Web Access",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(debug-stop)"
       },
       {
         "command": "devdesk.web.menu",
         "title": "Web Access…",
-        "category": "DevDesk for Claude Code"
+        "category": "DevDesk"
       },
       {
         "command": "devdesk.web.restartTunnel",
         "title": "Restart Web Access Tunnel",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(debug-restart)"
       },
       {
         "command": "devdesk.web.chooseTunnel",
         "title": "Choose Web Access Tunnel",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(plug)"
       },
       {
         "command": "devdesk.web.setTunnelName",
         "title": "Set Web Access Tunnel Name",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(edit)"
       },
       {
         "command": "devdesk.web.openSettings",
         "title": "Web Access Settings",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(gear)"
       },
       {
         "command": "devdesk.web.restart",
         "title": "Restart Web Access",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(debug-restart)"
       },
       {
         "command": "devdesk.web.copyUrl",
         "title": "Copy Web Access URL",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(copy)"
       },
       {
         "command": "devdesk.web.copyLocalUrl",
         "title": "Copy Web Access Loopback URL",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(copy)"
       },
       {
@@ -458,19 +575,19 @@
       {
         "command": "devdesk.web.openUrl",
         "title": "Open Web Access URL",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(link-external)"
       },
       {
         "command": "devdesk.web.showQr",
         "title": "Show Web Access QR Code",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(device-mobile)"
       },
       {
         "command": "devdesk.web.openLog",
         "title": "Open Web Access Log",
-        "category": "DevDesk for Claude Code",
+        "category": "DevDesk",
         "icon": "$(output)"
       },
       {
@@ -748,9 +865,44 @@
           "command": "devdesk.sessions.markUnread",
           "when": "view == devdesk.features && viewItem =~ /^session\\b.*\\sread$/",
           "group": "2_read@1"
+        },
+        {
+          "command": "devdesk.review.send",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "review@1"
+        },
+        {
+          "command": "devdesk.review.clear",
+          "when": "view == devdesk.features && viewItem =~ /^feature/",
+          "group": "review@2"
+        },
+        {
+          "command": "devdesk.checks.askClaude",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bchecks\\b/",
+          "group": "review@3"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "when": "view == devdesk.features && viewItem =~ /^feature.*\\bticket\\b/",
+          "group": "inline@9"
+        },
+        {
+          "submenu": "devdesk.tickets.menu",
+          "when": "(view == devdesk.features && viewItem =~ /^feature/) || (view == devdesk.sessions && !listMultiSelection && viewItem =~ /^session\\b/) || (view == devdesk.features && viewItem =~ /^session\\b/)",
+          "group": "4_more@2"
+        },
+        {
+          "submenu": "devdesk.sessions.changesMenu",
+          "when": "(view == devdesk.sessions && viewItem =~ /^session\\b/) || (view == devdesk.features && viewItem =~ /^session\\b/)",
+          "group": "3_diff@2"
         }
       ],
       "webview/context": [
+        {
+          "submenu": "devdesk.sessions.forkMenu",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "4_more@1"
+        },
         {
           "command": "devdesk.sessions.markRead",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session' && sessionUnread",
@@ -770,6 +922,16 @@
           "command": "devdesk.sessions.seeDiff",
           "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
           "group": "3_diff@1"
+        },
+        {
+          "submenu": "devdesk.tickets.menu",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "4_more@2"
+        },
+        {
+          "submenu": "devdesk.sessions.changesMenu",
+          "when": "webviewId == 'devdesk.board' && webviewSection == 'session'",
+          "group": "3_diff@2"
         }
       ],
       "commandPalette": [
@@ -812,6 +974,10 @@
         {
           "command": "devdesk.sessions.forkWithMode",
           "when": "false"
+        },
+        {
+          "command": "devdesk.sessions.forkFromShownTurn",
+          "when": "devdesk.sessions.turnDiffActive"
         },
         {
           "command": "devdesk.sessions.kill",
@@ -898,6 +1064,22 @@
           "when": "false"
         },
         {
+          "command": "devdesk.review.addNote",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.deleteNote",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.deleteThread",
+          "when": "false"
+        },
+        {
+          "command": "devdesk.review.sendThread",
+          "when": "false"
+        },
+        {
           "command": "devdesk.sessions.seeDiff",
           "when": "false"
         }
@@ -979,6 +1161,37 @@
           "command": "devdesk.web.openSettings",
           "group": "navigation@100",
           "when": "activeWebviewPanelId == devdesk.web.qr"
+        },
+        {
+          "command": "devdesk.sessions.forkFromShownTurn",
+          "group": "navigation@90",
+          "when": "devdesk.sessions.turnDiffActive"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "devdesk.review.addNote",
+          "group": "inline",
+          "when": "commentController == devdesk.review"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "devdesk.review.sendThread",
+          "group": "navigation@1",
+          "when": "commentController == devdesk.review && !commentThreadIsEmpty"
+        },
+        {
+          "command": "devdesk.review.deleteThread",
+          "group": "navigation@2",
+          "when": "commentController == devdesk.review && !commentThreadIsEmpty"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "devdesk.review.deleteNote",
+          "group": "inline",
+          "when": "commentController == devdesk.review && comment == devdesk.reviewNote"
         }
       ],
       "devdesk.sessions.forkMenu": [
@@ -991,6 +1204,36 @@
           "command": "devdesk.sessions.forkWithMode",
           "group": "fork@2",
           "when": "viewItem =~ /\\bforkable\\b/"
+        },
+        {
+          "command": "devdesk.sessions.forkFromTurn",
+          "group": "fork@3"
+        }
+      ],
+      "devdesk.tickets.menu": [
+        {
+          "command": "devdesk.tickets.link",
+          "group": "ticket@1"
+        },
+        {
+          "command": "devdesk.tickets.open",
+          "group": "ticket@2",
+          "when": "!(viewItem =~ /^feature/) || viewItem =~ /^feature.*\\bticket\\b/"
+        },
+        {
+          "command": "devdesk.tickets.unlink",
+          "group": "ticket@3",
+          "when": "!(viewItem =~ /^feature/) || viewItem =~ /^feature.*\\bticket\\b/"
+        }
+      ],
+      "devdesk.sessions.changesMenu": [
+        {
+          "command": "devdesk.sessions.lastTurnChanges",
+          "group": "changes@1"
+        },
+        {
+          "command": "devdesk.sessions.turnChanges",
+          "group": "changes@2"
         }
       ]
     },
@@ -1051,42 +1294,70 @@
             "markdownDescription": "The Claude view nests sessions under their worktree. Off: it lists every session in one list, in attention order, each row naming its worktree. Toggle it with the Claude view's list button.",
             "order": 3
           },
+          "devdesk.sessions.sort": {
+            "type": "string",
+            "enum": [
+              "urgency",
+              "attention"
+            ],
+            "enumDescriptions": [
+              "What needs you first: needs you (question, permission, plan, input, blocked; the longest waiting first), unread turns finished in the last few minutes (devdesk.sessions.recentlyFinishedMinutes), working, stuck, then read or older finished ones, not running and parked; newest first within each.",
+              "The order from before: needs input, blocked, unread done, working, read done, idle, then the rest, newest first; devdesk.sessions.unreadFirst puts unread sessions above read ones."
+            ],
+            "default": "urgency",
+            "description": "How the Claude view and the Claude Board order Claude sessions: in each worktree, in the flat list, and in each board lane.",
+            "order": 4
+          },
+          "devdesk.sessions.recentlyFinishedMinutes": {
+            "type": "number",
+            "default": 15,
+            "minimum": 1,
+            "markdownDescription": "With `#devdesk.sessions.sort#` `urgency`: a Claude session whose turn finished less than this many minutes ago, and that you haven't read, sorts above working sessions.",
+            "order": 5
+          },
           "devdesk.sessions.unreadFirst": {
             "type": "boolean",
             "default": true,
-            "description": "Sort unread Claude sessions above every read one. When off, unread sessions only sort first within their state (needs input, blocked, working, ...).",
-            "order": 4
+            "markdownDescription": "With `#devdesk.sessions.sort#` `attention`: sort unread Claude sessions above every read one. When off, unread sessions only sort first within their state (needs input, blocked, working, ...).",
+            "order": 6
           },
           "devdesk.sessions.dimRead": {
             "type": "boolean",
             "default": true,
             "description": "Grey the titles of Claude sessions you have read, so unread ones stand out in the Claude view.",
-            "order": 5
+            "order": 7
           },
           "devdesk.sessions.unreadBadge": {
             "type": "boolean",
             "default": true,
             "description": "Show a ● badge at the end of unread Claude session rows in the Claude view.",
-            "order": 6
+            "order": 8
           },
           "devdesk.sessions.notifyWhenWaiting": {
             "type": "boolean",
             "default": true,
             "description": "Show a notification when a Claude session starts waiting for you.",
-            "order": 7
+            "order": 9
           },
           "devdesk.sessions.statusBar": {
             "type": "boolean",
             "default": true,
             "description": "Show a status bar item with the number of Claude sessions needing input; click it to open the next one.",
-            "order": 8
+            "order": 10
           },
           "devdesk.sessions.stuckMinutes": {
             "type": "number",
             "default": 10,
             "minimum": 1,
             "description": "A working Claude session with no progress (no hook event) for this many minutes shows as stuck (orange watch).",
-            "order": 9
+            "order": 11
+          },
+          "devdesk.sessions.hooksQuietMinutes": {
+            "type": "number",
+            "default": 2,
+            "minimum": 0,
+            "markdownDescription": "A session whose status hooks have said working or waiting, with no new hook event, for this many minutes shows the state Claude itself reports instead, when it differs (it needs `#devdesk.sessions.programStatus#`). This catches a hook event that got lost, such as a permission you denied with Esc. 0: the hooks' state always wins.",
+            "order": 12
           },
           "devdesk.sessions.idleMinutes": {
             "scope": "machine",
@@ -1094,41 +1365,41 @@
             "default": 30,
             "minimum": 1,
             "description": "A finished Claude session not updated for this many minutes sorts after working and recently finished sessions (it still shows as done).",
-            "order": 10
+            "order": 13
           },
           "devdesk.sessions.resortWorkingMinutes": {
             "type": "number",
             "default": 5,
             "minimum": 0,
             "description": "Working Claude sessions keep their order in the Claude view and on the Claude Board for this many minutes, then sort again (newest first), so rows don't move each time a session does something. A session that starts working goes first among them. 0: always sorted.",
-            "order": 11
+            "order": 14
           },
           "devdesk.sessions.readAfterSeconds": {
             "type": "number",
             "default": 1.5,
             "minimum": 0,
             "description": "A Claude session shows in bold (unread) when anything happened in it since you last looked; its terminal must be in front for this many seconds to count as read.",
-            "order": 12
+            "order": 15
           },
           "devdesk.sessions.finishedSessions": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many parked (not running) Claude sessions the Claude view lists per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
-            "order": 13
+            "order": 16
           },
           "devdesk.sessions.showChildren": {
             "type": "boolean",
             "default": false,
             "description": "List what each Claude session spun off under its row: subagents (and their own subagents and shells), background shell commands, and workflows with their phases and agents. Read from the session's transcript.",
-            "order": 14
+            "order": 17
           },
           "devdesk.sessions.finishedChildren": {
             "type": "number",
             "default": 10,
             "minimum": 0,
             "markdownDescription": "How many finished subagents, shells and workflows the Claude view lists per level; older ones fold into one `N earlier finished` row. Running ones are always listed. Applies when `#devdesk.sessions.showChildren#` is on.",
-            "order": 15
+            "order": 18
           },
           "devdesk.sessions.pollSeconds": {
             "type": "number",
@@ -1136,7 +1407,23 @@
             "minimum": 1,
             "maximum": 3600,
             "description": "How often (seconds) the Claude Sessions panel re-checks tmux while it is open or notifications are on.",
-            "order": 16
+            "order": 19
+          },
+          "devdesk.sessions.turnChangesTurns": {
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "maximum": 200,
+            "markdownDescription": "How many of a session's latest turns **Show Changes by Turn…** lists (read from the end of its transcript).",
+            "order": 20
+          },
+          "devdesk.sessions.turnChangesMaxMB": {
+            "type": "number",
+            "default": 64,
+            "minimum": 1,
+            "maximum": 1024,
+            "markdownDescription": "How much (MB) of the end of a session's transcript, and of each of its subagents', **Show Last Turn's Changes** and **Show Changes by Turn…** read at most. Turns that started before it are listed as partly read.",
+            "order": 21
           }
         }
       },
@@ -1240,19 +1527,69 @@
             "markdownDescription": "Extra arguments for Claude Code in every new Claude session, whatever its mode, in shell syntax, for example `--model opus`. The launch mode's arguments (`#devdesk.sessions.defaultMode#`) come after these. Empty: none. Applies to sessions started after the change; `#devdesk.sessions.command#`, when set, replaces the whole command.",
             "order": 3
           },
+          "devdesk.claude.accounts": {
+            "type": "array",
+            "default": [],
+            "scope": "machine",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "configDir"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The account's name, shown in the board's account pill and on its sessions' cards."
+                },
+                "configDir": {
+                  "type": "string",
+                  "description": "Claude Code's config directory for the account (CLAUDE_CONFIG_DIR): its login, settings, transcripts. A leading ~ is your home directory."
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "More environment variables the account's sessions start with."
+                }
+              }
+            },
+            "markdownDescription": "Claude accounts (profiles): each a `name` and a Claude Code config directory (`configDir`, given to Claude as `CLAUDE_CONFIG_DIR`), with optional `env` for its sessions. With more than one, the Claude Board's composer has an account pill and **New Claude Session** asks which; a resumed or forked session keeps its account. An account whose `configDir` is Claude's own (`$CLAUDE_CONFIG_DIR`, else `~/.claude`) starts without `CLAUDE_CONFIG_DIR`. Empty: one account, Claude's own config directory.",
+            "order": 4
+          },
+          "devdesk.claude.defaultAccount": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "The Claude account (a `name` in `#devdesk.claude.accounts#`) new sessions use unless you pick another. A folder's workspace settings can set its own. Empty: the first account listed.",
+            "order": 5
+          },
+          "devdesk.claude.disableAutoUpdater": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Claude sessions DevDesk starts run with `DISABLE_AUTOUPDATER=1`, so Claude Code does not update itself.",
+            "order": 6
+          },
           "devdesk.sessions.claudePath": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Claude Code binary DevDesk starts in new Claude sessions. Empty: `$HOME/.toolbox/bin/claude` when it exists, else `claude` on PATH.",
-            "order": 4
+            "order": 7
           },
           "devdesk.sessions.command": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Full shell command tmux runs when it creates a feature's Claude session, overriding `#devdesk.sessions.claudePath#` and `#devdesk.sessions.claudeArgs#`. Empty: `<claudePath> <claudeArgs>; exec $SHELL -l`.",
-            "order": 5
+            "order": 8
+          },
+          "devdesk.sessions.programStatus": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Start new Claude sessions under DevDesk's Program Status relay (`python3`, `~/.claude/devdesk/devdesk_status.py`). It answers Claude Code's status probe (OSC 7501, Claude Code 2.1.295 or later), which tmux can't, so Claude reports whether it is working, waiting for an approval or an answer, or at its prompt. Sessions without status hooks then show that state, and sending to a session checks it instead of only reading the screen. Not used with `#devdesk.sessions.command#`. Applies to sessions started after you change it.",
+            "order": 9
           }
         }
       },
@@ -1294,7 +1631,7 @@
             "type": "number",
             "default": 12,
             "minimum": 0,
-            "markdownDescription": "Keep at most this many DevDesk for Claude Code sessions running: when more run, park the ones idle for `#devdesk.sessions.idleMinutes#`, read ones and the least recently active first. Working sessions, those waiting on you and those with an open terminal keep running, so more may run. Each running session takes memory (Claude and its MCP servers). `0`: no limit.",
+            "markdownDescription": "Keep at most this many DevDesk Claude sessions running: when more run, park the ones idle for `#devdesk.sessions.idleMinutes#`, read ones and the least recently active first. Working sessions, those waiting on you and those with an open terminal keep running, so more may run. Each running session takes memory (Claude and its MCP servers). `0`: no limit.",
             "order": 5
           },
           "devdesk.sessions.parkBelowFreeMemoryPercent": {
@@ -1423,6 +1760,13 @@
             "minimum": 0,
             "markdownDescription": "When a window opens and at least this many worktrees are ready to clean up, DevDesk offers **Clean Up Worktrees…** (it never deletes on its own). `0`: never offer.",
             "order": 18
+          },
+          "devdesk.worktrees.autoTrust": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Accept Claude's *Do you trust the files in this folder?* for a worktree DevDesk makes (New Worktree Session, the board, `devdesk worker start`), so its session starts without asking. Only when Claude already trusts the workspace (or repository) it is made in, and only for the worktree and its packages: DevDesk writes `hasTrustDialogAccepted` for them in Claude's config file (`#devdesk.board.claudeConfigFile#`). In a package Claude has not trusted, DevDesk then makes a Claude Code worktree with `git worktree add` from `HEAD` (`claude --worktree` refuses to start there). Off: Claude asks, and the session opens so you can answer.",
+            "order": 19
           }
         }
       },
@@ -1553,8 +1897,15 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Claude Code's global config file, read (never written) before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
+            "markdownDescription": "Claude Code's global config file, read before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Written only by `#devdesk.worktrees.autoTrust#`, to trust a new worktree. Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
             "order": 14
+          },
+          "devdesk.board.pasteSettleMs": {
+            "type": "number",
+            "default": 500,
+            "minimum": 0,
+            "markdownDescription": "How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter, so Claude has taken the paste in (1 ms more per 4 KB pasted). Raise it if a sent command stays typed at the session's prompt instead of running.",
+            "order": 15
           }
         }
       },
@@ -1714,13 +2065,54 @@
             "minimum": 0.1,
             "markdownDescription": "The most disk space the token usage history may take (MB). Past it, the oldest days are dropped, whatever `#devdesk.usage.historyDays#` allows. A day takes a few KB.",
             "order": 3
+          },
+          "devdesk.usage.planLimits": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show how much of Claude's 5-hour and weekly plan limits you've used at the top of the board's 📊 popup and of the Claude Usage page (Claude.ai Pro and Max subscriptions). The numbers come from DevDesk's Claude status line (**Show Claude Plan Limits** command), which runs your own status line after it. While it isn't installed, they offer it; turn this off to hide that.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.cli",
+        "title": "devdesk Command",
+        "order": 9,
+        "properties": {
+          "devdesk.cli.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "markdownDescription": "Let Claude sessions ask this window to open a file or a diff, or set a note on their card, with the `devdesk` command (`~/.claude/devdesk/devdesk`, written when this is on; `devdesk --help`). Requests go through files in a folder only you can open, `~/.claude/devdesk/ipc`; no port is opened. To tell Claude the command exists, run **Claude: Teach Claude the devdesk Command**.",
+            "order": 1
+          },
+          "devdesk.workers.maxConcurrent": {
+            "type": "number",
+            "default": 4,
+            "minimum": 1,
+            "maximum": 32,
+            "markdownDescription": "The most worker sessions one coordinator may run at once with `devdesk worker start` (workers that reported, failed to start or ended don't count).",
+            "order": 2
+          },
+          "devdesk.workers.nudge": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "When a coordinator session has unread worker messages and waits at an empty prompt, type a one-line notice into it (\"You have N worker messages. Run `devdesk worker check`.\"), once per batch of messages. A busy session is never interrupted. Off: the coordinator reads them only when it runs `devdesk worker check`.",
+            "order": 3
+          },
+          "devdesk.workers.escalationMinutes": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "markdownDescription": "Minutes a worker session may sit stopped (its turn over, or Claude gone) without `devdesk worker done` or `devdesk worker ask` before its coordinator gets a \"stopped without reporting\" message.",
+            "order": 4
           }
         }
       },
       {
         "id": "devdesk-claude.tmux",
         "title": "tmux",
-        "order": 9,
+        "order": 10,
         "properties": {
           "devdesk.sessions.tmuxServer": {
             "type": "string",
@@ -1781,9 +2173,283 @@
         }
       },
       {
+        "id": "devdesk-claude.advanced",
+        "title": "Advanced",
+        "order": 11,
+        "properties": {
+          "devdesk.sessions.stateDir": {
+            "type": "string",
+            "default": "~/.claude/devdesk/state",
+            "scope": "machine",
+            "description": "Directory where the Claude status hook writes one JSON file per session.",
+            "order": 1
+          },
+          "devdesk.sessions.claudeSessionsDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Directory where Claude Code lists its running sessions (`<pid>.json`), read for the names the agent view and /rename show. Empty means `sessions` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/sessions`.",
+            "order": 2
+          },
+          "devdesk.sessions.claudeJobsDir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Directory where Claude Code keeps its background jobs (`<job id>/state.json`), read to list the /fork forks of a listed session. Empty means `jobs` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/jobs`.",
+            "order": 3
+          },
+          "devdesk.diagnostics.debugLog": {
+            "type": "boolean",
+            "default": false,
+            "description": "Write DevDesk's debug lines (tree loads, git and refresh timings) to the DevDesk output at info level, without changing VS Code's log level.",
+            "order": 4
+          },
+          "devdesk.diagnostics.slowOperationSeconds": {
+            "type": "number",
+            "default": 60,
+            "minimum": 0,
+            "description": "Log a warning once when a DevDesk operation (git, tmux, a sessions refresh, a tree load) has been running this many seconds. 0 disables.",
+            "order": 5
+          },
+          "devdesk.diagnostics.latencyOutlierFactor": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "description": "Log an info line when a command, a sessions refresh, a Claude Board render or a tmux call takes this many times as long as it usually does (its median of the last 50), with what else DevDesk was doing, so a slow moment can be debugged later. 0 disables.",
+            "order": 6
+          },
+          "devdesk.diagnostics.latencyOutlierMinMs": {
+            "type": "number",
+            "default": 50,
+            "minimum": 0,
+            "description": "Only log a slow moment (devdesk.diagnostics.latencyOutlierFactor) that took at least this many milliseconds longer than usual.",
+            "order": 7
+          },
+          "devdesk.diagnostics.dir": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "Where the extension host writes a Node diagnostic report (native stack, heap spaces, resource usage) when it dies of a fatal error such as running out of memory. Empty: ~/.cache/devdesk/diagnostics.",
+            "order": 8
+          },
+          "devdesk.diagnostics.heapSnapshotNearLimit": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine",
+            "description": "Write one V8 heap snapshot (Heap.*.heapsnapshot, several GB) to the extension host's working directory when its heap nears the limit, to find which extension is allocating. Turning it off takes effect after a reload.",
+            "order": 9
+          },
+          "devdesk.diagnostics.keepDays": {
+            "scope": "machine",
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "description": "Delete heap snapshots (Heap.*.heapsnapshot in the extension host's working directory, usually ~) and fatal-error reports (in devdesk.diagnostics.dir) older than this many days. Checked when a window starts and every 6 hours. 0 keeps them.",
+            "order": 10
+          },
+          "devdesk.diagnostics.heapWarnMB": {
+            "type": "number",
+            "default": 1500,
+            "minimum": 0,
+            "description": "Log the extension host's memory every 10 s at info level (DevDesk output) once its heap is this big. 0 disables.",
+            "order": 11
+          },
+          "devdesk.diagnostics.heapGrowthWarnMB": {
+            "type": "number",
+            "default": 300,
+            "minimum": 0,
+            "description": "Log a warning, with the DevDesk operations in flight, when the extension host's heap grows this much in 10 s. 0 disables.",
+            "order": 12
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.checks",
+        "title": "Pull request checks",
+        "order": 12,
+        "properties": {
+          "devdesk.checks.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show each worktree's failing pull request checks and open review comments on its Worktrees view row and its sessions' board cards (`2 checks failing · 1 comment`), and offer Ask Claude to Fix Checks. GitHub pull requests are read with the `gh` CLI, when it is installed and signed in.",
+            "order": 1
+          },
+          "devdesk.checks.refreshMinutes": {
+            "type": "number",
+            "default": 5,
+            "minimum": 0,
+            "description": "While the Worktrees view is visible, read a listed worktree's checks again at most this many minutes after the last time (on the view's refresh, `devdesk.worktrees.refreshSeconds`). 0: only when you ask Claude to fix them or run Refresh Pull Request Checks.",
+            "order": 2
+          },
+          "devdesk.checks.maxBackoffMinutes": {
+            "type": "number",
+            "default": 60,
+            "minimum": 1,
+            "description": "After reading a worktree's checks fails (no `gh`, not signed in, no network), the next try waits twice as long each time, up to this many minutes.",
+            "order": 3
+          },
+          "devdesk.checks.timeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 1,
+            "description": "A `gh` call that takes longer is stopped.",
+            "order": 4
+          },
+          "devdesk.checks.reviewComments": {
+            "type": "boolean",
+            "default": true,
+            "description": "Also read the pull request's review comments that aren't resolved yet, count them in the hint and put them (file, line, text) in the prompt to Claude.",
+            "order": 5
+          },
+          "devdesk.checks.logLines": {
+            "type": "number",
+            "default": 40,
+            "minimum": 0,
+            "maximum": 500,
+            "description": "Lines of a failing check's failed log (`gh run view --log-failed`) the prompt to Claude quotes: from the first line that looks like a failure to the last error. 0: no logs, only each check's link.",
+            "order": 6
+          },
+          "devdesk.checks.maxLogs": {
+            "type": "number",
+            "default": 3,
+            "minimum": 0,
+            "maximum": 20,
+            "description": "The failed logs of at most this many failing checks are read for one prompt; the others get their link only.",
+            "order": 7
+          },
+          "devdesk.checks.ghPath": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "description": "The GitHub CLI to run. Empty: `gh` on PATH.",
+            "order": 8
+          }
+        }
+      },
+      {
+        "id": "devdesk-claude.tickets",
+        "title": "Tickets",
+        "order": 13,
+        "properties": {
+          "devdesk.tickets.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Link tickets (issues) to worktrees and sessions, and show a chip with the ticket's key and status (`ABC-123 · In progress`) on the worktree's Worktrees view row and on its sessions' board cards. A click opens the ticket. Link one with Link Ticket… on a row or card.",
+            "order": 1
+          },
+          "devdesk.tickets.autoDetect": {
+            "type": "boolean",
+            "default": true,
+            "description": "Find a worktree's ticket in its name and branch (`feat/ABC-123-login`, `issue-42`), and a session's in its first prompt, and link it. A ticket you unlink is not linked again automatically.",
+            "order": 2
+          },
+          "devdesk.tickets.includeInPrompt": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add the worktree's ticket (key, title, status, URL) after the prompt of each new session the board starts in that worktree.",
+            "order": 3
+          },
+          "devdesk.tickets.fetch": {
+            "type": "boolean",
+            "default": true,
+            "description": "Read the title and status of linked tickets, read-only, where DevDesk can: GitHub issues with the `gh` CLI (`devdesk.checks.ghPath`), Jira with `devdesk.tickets.jira.command`. DevDesk keeps no tokens: the other trackers are link only.",
+            "order": 4
+          },
+          "devdesk.tickets.refreshMinutes": {
+            "type": "number",
+            "default": 10,
+            "minimum": 1,
+            "description": "Read a linked ticket's title and status again at most this many minutes after the last time (a failure waits as long).",
+            "order": 5
+          },
+          "devdesk.tickets.timeoutSeconds": {
+            "type": "number",
+            "default": 15,
+            "minimum": 1,
+            "maximum": 120,
+            "description": "A ticket read (`gh issue view`, the Jira command) that takes longer is stopped.",
+            "order": 6
+          },
+          "devdesk.tickets.providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "The trackers whose keys and links DevDesk recognises, by id: `github`, `jira`, `linear`, and `patterns` for every entry of `#devdesk.tickets.patterns#`. Empty: all of them.",
+            "order": 7
+          },
+          "devdesk.tickets.jira.baseUrl": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your Jira site, such as `https://example.atlassian.net`. Set, keys like `ABC-123` and its `/browse/` links are Jira tickets. Empty: no Jira.",
+            "order": 8
+          },
+          "devdesk.tickets.jira.projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "The Jira project keys (`ABC`) bare keys are taken for, in any case (branch names are often lowercase). Empty: any uppercase `ABC-123`, except words like `UTF-8` or `SHA-256`.",
+            "order": 9
+          },
+          "devdesk.tickets.jira.command": {
+            "type": "string",
+            "default": "",
+            "scope": "machine",
+            "markdownDescription": "A command that prints a Jira issue as JSON, to show its title and status: the key is in `$DEVDESK_TICKET`. For example `jira issue view \"$DEVDESK_TICKET\" --raw` (jira-cli), signed in on its own. Jira's REST fields (`fields.summary`, `fields.status.name`) or flat `title` and `status` are read. Empty: Jira tickets are link only.",
+            "order": 10
+          },
+          "devdesk.tickets.linear.workspace": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your Linear workspace (the part after `linear.app/`). Set, keys like `ENG-123` link to its issues when Jira does not take them. Linear issue URLs are recognised either way. Link only.",
+            "order": 11
+          },
+          "devdesk.tickets.linear.teams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "The Linear team keys (ENG) bare keys are taken for. Empty: any uppercase key.",
+            "order": 12
+          },
+          "devdesk.tickets.patterns": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "regex",
+                "url"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The tracker's name, shown in hovers."
+                },
+                "regex": {
+                  "type": "string",
+                  "description": "A JavaScript regular expression for its keys or URLs; the first group is the key (else the whole match)."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "The ticket's URL: {key} is the key, {0} to {9} the regex's groups."
+                }
+              }
+            },
+            "markdownDescription": "Trackers of your own, link only: each `{ \"name\", \"regex\", \"url\" }`, such as `{ \"name\": \"Bugzilla\", \"regex\": \"\\\\bbug ?(\\\\d{4,})\\\\b\", \"url\": \"https://bugs.example.com/show_bug.cgi?id={key}\" }`. They are asked before the built-in trackers.",
+            "order": 13
+          }
+        }
+      },
+      {
         "id": "devdesk-claude.web",
         "title": "Web Access",
-        "order": 10,
+        "order": 14,
         "properties": {
           "devdesk.web.tunnel": {
             "type": "string",
@@ -1812,7 +2478,7 @@
           },
           "devdesk.web.port": {
             "type": "number",
-            "default": 7690,
+            "default": 7691,
             "minimum": 1024,
             "maximum": 65535,
             "markdownDescription": "Port the web access daemon listens on, on `127.0.0.1` only (there is no setting for the address: reach it through a proxy or `ssh -L`). 1024 to 65535.",
@@ -1923,97 +2589,6 @@
             "order": 13
           }
         }
-      },
-      {
-        "id": "devdesk-claude.advanced",
-        "title": "Advanced",
-        "order": 11,
-        "properties": {
-          "devdesk.sessions.stateDir": {
-            "type": "string",
-            "default": "~/.claude/devdesk/state",
-            "scope": "machine",
-            "description": "Directory where the Claude status hook writes one JSON file per session.",
-            "order": 1
-          },
-          "devdesk.sessions.claudeSessionsDir": {
-            "type": "string",
-            "default": "",
-            "scope": "machine",
-            "description": "Directory where Claude Code lists its running sessions (`<pid>.json`), read for the names the agent view and /rename show. Empty means `sessions` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/sessions`.",
-            "order": 2
-          },
-          "devdesk.sessions.claudeJobsDir": {
-            "type": "string",
-            "default": "",
-            "scope": "machine",
-            "description": "Directory where Claude Code keeps its background jobs (`<job id>/state.json`), read to list the /fork forks of a listed session. Empty means `jobs` in `$CLAUDE_CONFIG_DIR`, else `~/.claude/jobs`.",
-            "order": 3
-          },
-          "devdesk.diagnostics.debugLog": {
-            "type": "boolean",
-            "default": false,
-            "description": "Write DevDesk's debug lines (tree loads, git and refresh timings) to the DevDesk output at info level, without changing VS Code's log level.",
-            "order": 4
-          },
-          "devdesk.diagnostics.slowOperationSeconds": {
-            "type": "number",
-            "default": 60,
-            "minimum": 0,
-            "description": "Log a warning once when a DevDesk operation (git, tmux, a sessions refresh, a tree load) has been running this many seconds. 0 disables.",
-            "order": 5
-          },
-          "devdesk.diagnostics.latencyOutlierFactor": {
-            "type": "number",
-            "default": 3,
-            "minimum": 0,
-            "description": "Log an info line when a command, a sessions refresh, a Claude Board render or a tmux call takes this many times as long as it usually does (its median of the last 50), with what else DevDesk was doing, so a slow moment can be debugged later. 0 disables.",
-            "order": 6
-          },
-          "devdesk.diagnostics.latencyOutlierMinMs": {
-            "type": "number",
-            "default": 50,
-            "minimum": 0,
-            "description": "Only log a slow moment (devdesk.diagnostics.latencyOutlierFactor) that took at least this many milliseconds longer than usual.",
-            "order": 7
-          },
-          "devdesk.diagnostics.dir": {
-            "type": "string",
-            "default": "",
-            "scope": "machine",
-            "description": "Where the extension host writes a Node diagnostic report (native stack, heap spaces, resource usage) when it dies of a fatal error such as running out of memory. Empty: ~/.cache/devdesk/diagnostics.",
-            "order": 8
-          },
-          "devdesk.diagnostics.heapSnapshotNearLimit": {
-            "type": "boolean",
-            "default": true,
-            "scope": "machine",
-            "description": "Write one V8 heap snapshot (Heap.*.heapsnapshot, several GB) to the extension host's working directory when its heap nears the limit, to find which extension is allocating. Turning it off takes effect after a reload.",
-            "order": 9
-          },
-          "devdesk.diagnostics.keepDays": {
-            "scope": "machine",
-            "type": "number",
-            "default": 3,
-            "minimum": 0,
-            "description": "Delete heap snapshots (Heap.*.heapsnapshot in the extension host's working directory, usually ~) and fatal-error reports (in devdesk.diagnostics.dir) older than this many days. Checked when a window starts and every 6 hours. 0 keeps them.",
-            "order": 10
-          },
-          "devdesk.diagnostics.heapWarnMB": {
-            "type": "number",
-            "default": 1500,
-            "minimum": 0,
-            "description": "Log the extension host's memory every 10 s at info level (DevDesk output) once its heap is this big. 0 disables.",
-            "order": 11
-          },
-          "devdesk.diagnostics.heapGrowthWarnMB": {
-            "type": "number",
-            "default": 300,
-            "minimum": 0,
-            "description": "Log a warning, with the DevDesk operations in flight, when the extension host's heap grows this much in 10 s. 0 disables.",
-            "order": 12
-          }
-        }
       }
     ],
     "submenus": [
@@ -2024,6 +2599,14 @@
       {
         "id": "devdesk.sessions.forkMenu",
         "label": "Fork"
+      },
+      {
+        "id": "devdesk.sessions.changesMenu",
+        "label": "Changes"
+      },
+      {
+        "id": "devdesk.tickets.menu",
+        "label": "Ticket"
       }
     ]
   },

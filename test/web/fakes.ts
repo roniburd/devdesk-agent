@@ -24,7 +24,7 @@ export interface FakeTmux {
 }
 
 /**
- * A tmux runner answering `capture-pane` with `capture`, `display-message` with the pane's pid, mode and command, and
+ * A tmux runner answering `capture-pane` with `capture` (and, as `paneScreenArgs` asks, the pane's flags, pid and command), `display-message` with the pane's pid, mode and command, and
  * `list-panes` with `panes` (LIST_FORMAT lines); `fail` makes a command (by name) throw that message. Everything else
  * answers ''.
  */
@@ -33,7 +33,13 @@ export function fakeTmux(o: { capture?: string; pid?: number; inMode?: boolean; 
   const run: TmuxRunner = async (args) => {
     calls.push(args);
     const cmd = args[0];
-    if (o.fail?.[cmd]) throw new Error(o.fail[cmd]);
+    // tmux runs `;`-separated commands in one call: any of them can fail it.
+    const failed = args.find((a, i) => (i === 0 || args[i - 1] === ';') && o.fail?.[a]);
+    if (failed) throw new Error(o.fail![failed]);
+    // paneScreenArgs: the capture, then the pane's flags (mode, bracketed paste, cursor) and its pid and command.
+    if (cmd === 'capture-pane' && args.includes(';')) {
+      return `${o.capture ?? EMPTY_SCREEN}\n${[o.inMode ? '1' : '0', '1', '', '', String(o.pid ?? 100), o.command ?? 'sh'].join(FIELD_SEP)}\n`;
+    }
     if (cmd === 'capture-pane') return o.capture ?? EMPTY_SCREEN;
     if (cmd === 'display-message') return `${o.pid ?? 100}${FIELD_SEP}${o.inMode ? '1' : '0'}${FIELD_SEP}${o.command ?? 'sh'}\n`;
     if (cmd === 'list-panes') return (o.panes ?? []).map((l) => `${l}\n`).join('');

@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { parseBoardMessage } from '../src/board/messages';
 
+describe('parseBoardMessage: plan limits', () => {
+  it('takes the 📊 popup’s offer to install the status line, with no fields', () => {
+    expect(parseBoardMessage({ type: 'setupLimits', extra: 1 })).toEqual({ type: 'setupLimits' });
+  });
+});
+
+describe('parseBoardMessage: Fix checks', () => {
+  it("takes a card's Fix checks button, on its id", () => {
+    expect(parseBoardMessage({ type: 'fixChecks', id: 'abc' })).toEqual({ type: 'fixChecks', id: 'abc' });
+    expect(parseBoardMessage({ type: 'fixChecks' })).toBeUndefined();
+  });
+});
+
 describe('parseBoardMessage: rendered', () => {
   it('keeps the script time and the rebuilt cards when they are numbers', () => {
     expect(parseBoardMessage({ type: 'rendered', ms: 9, cards: 91, script: 2.5, rebuilt: 1, postedAt: 5 })).toEqual({ type: 'rendered', ms: 9, cards: 91, script: 2.5, rebuilt: 1, postedAt: 5 });

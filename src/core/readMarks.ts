@@ -10,7 +10,7 @@ import { cardSignature } from './sessionsView';
  * their version, unless this version saved it) counts as read as the session shows now, and is saved again in this
  * version's terms (`adoptForeign`).
  *
- * The same code is on `main` (v1) and `v2_experiment` (v2): keep the two copies the same.
+ * The same code is on `main` (v2) and `v1`: keep the two copies the same.
  */
 
 /** What a mark this version cannot compare reads as: the session was read in the other version. */

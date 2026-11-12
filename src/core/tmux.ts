@@ -157,9 +157,10 @@ export const DEFAULT_CLAUDE_PATH = '$HOME/.toolbox/bin/claude';
 /**
  * The shell command tmux runs in a new Claude session: `command` verbatim when set (`devdesk.claudeCommand`), else
  * `<path> <args>; exec $SHELL -l`, so the pane drops to a login shell when Claude exits. `path` and `args` are shell
- * text, not quoted, so `$HOME` and quoted arguments work. `extraArgs` follow `args`.
+ * text, not quoted, so `$HOME` and quoted arguments work. `extraArgs` follow `args`. `wrapper` (shell text) goes before
+ * the binary, which it runs (the Program Status relay, `programStatusWrapper`); a full `command` runs without it.
  */
-export function claudeShellCommand(opts: { command?: string; path?: string; args?: string }, extraArgs = ''): string {
+export function claudeShellCommand(opts: { command?: string; path?: string; args?: string; wrapper?: string }, extraArgs = ''): string {
   const command = opts.command?.trim();
   if (command) {
     // A full command is a shell snippet (`claude --model opus; exec $SHELL -l`): extra options go after its first word,
@@ -174,7 +175,7 @@ export function claudeShellCommand(opts: { command?: string; path?: string; args
     const first = (end < 0 ? withOptions : withOptions.slice(0, end)).trimEnd();
     return `${first} ${prompt}${withOptions.slice(first.length)}`;
   }
-  const claude = [opts.path?.trim() || DEFAULT_CLAUDE_PATH, opts.args?.trim(), extraArgs].filter(Boolean).join(' ');
+  const claude = [opts.wrapper?.trim(), opts.path?.trim() || DEFAULT_CLAUDE_PATH, opts.args?.trim(), extraArgs].filter(Boolean).join(' ');
   return `${claude}; exec $SHELL -l`;
 }
 
@@ -236,10 +237,38 @@ export function tmuxOptions(raw: unknown): [string, string][] {
 }
 
 /**
+ * Variables Claude Code sets for the programs it runs, which make a Claude started there act as that session's child
+ * (or refuse to start, nested). A tmux server started from inside a Claude session (VS Code launched from one, an agent
+ * that runs tmux) keeps them in its global environment and gives them to every session it starts.
+ */
+export const CLAUDE_CHILD_ENV_KEYS = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_PID',
+] as const;
+
+/**
+ * What a session DevDesk starts is told about itself: its tmux session and server, so the status hook need not ask tmux
+ * (`devdesk_hook.py` reads them).
+ */
+export function launchTags(session: string, server: string): Record<string, string> {
+  return { DEVDESK_TMUX_SESSION: session, DEVDESK_TMUX_SERVER: server };
+}
+
+/**
  * Attaches to session `name`, or creates it in `cwd` running `command` with `env` added to its environment (`-e`,
  * tmux 3.0+). Each of `options` is then set on the session (and its current window, for window options), on attach
  * too, so a changed setting reaches running sessions. tmux runs `;`-separated commands in one invocation.
  * `detached`: create it in the background instead (no client attaches; the Claude Board opens it later).
+ * First it removes Claude's child-session variables (CLAUDE_CHILD_ENV_KEYS) from the server's global environment, which
+ * the session would inherit: `-e` can only set a variable, and `start-server` lets this run before any session exists.
  */
 export function attachArgs(
   name: string,
@@ -249,9 +278,10 @@ export function attachArgs(
   options: readonly [string, string][] = [],
   detached = false,
 ): string[] {
+  const unset = CLAUDE_CHILD_ENV_KEYS.flatMap((k) => ['set-environment', '-g', '-u', k, ';']);
   const vars = Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
   const set = options.flatMap(([option, value]) => [';', 'set-option', '-t', `=${name}:`, option, value]);
-  return ['new-session', detached ? '-d' : '-A', '-s', name, '-c', cwd, ...vars, command, ...set];
+  return ['start-server', ';', ...unset, 'new-session', detached ? '-d' : '-A', '-s', name, '-c', cwd, ...vars, command, ...set];
 }
 
 /**
@@ -299,43 +329,85 @@ export function typedLine(text: string): string {
     .trim();
 }
 
-/** Most UTF-8 bytes of text one `send-keys` carries: tmux refuses a command over about 16 KB ("command too long"). */
-export const SEND_KEYS_CHUNK_BYTES = 8 * 1024;
-
 /** tmux arguments that kill session `name` exactly (`=` stops tmux matching a prefix). */
 export function killSessionArgs(name: string): string[] {
   return ['kill-session', '-t', `=${name}`];
 }
 
+/** What stands for an ESC byte in pasted text: plain text, so the paste can neither end early (`ESC [201~`) nor move the cursor. */
+export const INERT_ESCAPE = '<ESC>';
+
 /**
- * The tmux commands that type `text` into pane `target` and submit it: `send-keys -l` (literal, so key names such as
- * `Enter` or `C-c` in the text stay text), one per piece of at most `SEND_KEYS_CHUNK_BYTES` (a whole line in one
- * command can be too long for tmux), and then `Enter`; a line ending in `\` gets a space after it. Run them one after
- * the other, not `;`-joined: tmux reads an argument ending in `;` as a command separator.
+ * `text` as it is pasted into a terminal: each ESC byte as `INERT_ESCAPE` (older tmux pastes control characters as
+ * they are; newer tmux shows them as `^[`), line breaks as `\n`, and the other control characters, except tabs, dropped.
  */
-export function sendKeysArgs(target: string, text: string): { type: string[][]; submit: string[] } {
+export function pastedText(text: string): string {
+  return text
+    .replace(/\x1b/g, INERT_ESCAPE)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+}
+
+/**
+ * `text` as a command line pasted at Claude's prompt: one line (Claude runs a pasted `/command` only when it is one
+ * line; one that spans lines goes to the model as a prompt), its ESC bytes defused. One ending in `\` gets a space
+ * after it: Claude reads Enter right after a `\` as "insert a newline", so nothing would be submitted (it trims the
+ * line it runs).
+ */
+export function commandLine(text: string): string {
+  return typedLine(pastedText(text)).replace(/\\$/, '\\ ');
+}
+
+/**
+ * A command line split into what is typed (`lead`: `/name ` when an argument follows) and what is pasted (`rest`: the
+ * argument, else the whole line). Claude shows a long paste as `[Pasted text #1]`, and a `/command` inside one goes to
+ * the model as a prompt; typed before the paste, the command runs with the pasted argument, however long.
+ */
+export function commandParts(line: string): { lead: string; rest: string } {
+  const m = /^(\/[A-Za-z0-9_.:-]+ )(.+)$/s.exec(line);
+  return m ? { lead: m[1], rest: m[2] } : { lead: '', rest: line };
+}
+
+/** tmux arguments that type `text` into pane `target` literally (`-l`: key names in it stay text). For short safe text: no `;` at its end. */
+export function typeArgs(target: string, text: string): string[] {
   if (!isPaneId(target) && !/^=[^:]+:$/.test(target)) throw new Error(`not a tmux pane target: ${target}`);
-  const pieces: string[] = [];
-  let piece = '';
-  let bytes = 0;
-  // Claude Code reads Enter right after a `\` as "insert a newline", so nothing would be submitted: a space after it
-  // keeps the `\` and submits (Claude trims the line it runs).
-  const line = typedLine(text).replace(/\\$/, '\\ ');
-  for (const char of line) {
-    const size = Buffer.byteLength(char);
-    if (bytes + size > SEND_KEYS_CHUNK_BYTES) {
-      pieces.push(piece);
-      piece = '';
-      bytes = 0;
-    }
-    piece += char;
-    bytes += size;
-  }
-  pieces.push(piece);
-  // tmux also reads an argument ending in `;` as the end of a command and drops that `;` (`\;` keeps it as `;`).
-  const literal = (p: string) => (p.endsWith(';') ? `${p.slice(0, -1)}\\;` : p);
+  // tmux reads an argument ending in `;` as the end of a command.
+  if (text.endsWith(';')) throw new Error(`cannot type text ending in ';': ${text}`);
+  return ['send-keys', '-t', target, '-l', '--', text];
+}
+
+/** The tmux paste buffer of one paste into a session: unique (`unique`), so pastes never take each other's or the user's. */
+export function pasteBufferName(unique: string): string {
+  if (!/^[A-Za-z0-9-]+$/.test(unique)) throw new Error(`not a paste buffer suffix: ${unique}`);
+  return `devdesk-send-${unique}`;
+}
+
+/** Default of `devdesk.board.pasteSettleMs`: how long Claude gets to take in a paste before Enter. */
+export const DEFAULT_PASTE_SETTLE_MS = 500;
+
+/** Bytes a paste is given per millisecond to arrive before Enter, on top of the settle delay. */
+export const PASTE_BYTES_PER_MS = 4096;
+
+/** How long to wait after pasting `bytes` bytes before Enter: `settleMs`, and 1 ms more per `PASTE_BYTES_PER_MS` bytes. */
+export function pasteSubmitDelayMs(settleMs: number, bytes: number): number {
+  const settle = Number.isFinite(settleMs) && settleMs > 0 ? Math.round(settleMs) : 0;
+  return settle + Math.ceil(Math.max(0, bytes) / PASTE_BYTES_PER_MS);
+}
+
+/**
+ * The tmux commands that paste the text in `file` into pane `target` as one bracketed paste, then submit it. Run them
+ * one after the other: `load` reads the file into paste buffer `buffer` (a file, not an argument: tmux refuses a
+ * command over about 16 KB); `paste` pastes it (`-p`: between bracketed-paste markers when the program asked for them,
+ * as Claude does, so nothing in it is read as a key; `-d`: the buffer is deleted after); `drop` deletes the buffer when
+ * the paste failed; `submit` is the Enter, sent on its own after a settle delay (Claude can leave a paste unsent when
+ * Enter comes with it).
+ */
+export function pasteArgs(target: string, buffer: string, file: string): { load: string[]; paste: string[]; drop: string[]; submit: string[] } {
+  if (!isPaneId(target) && !/^=[^:]+:$/.test(target)) throw new Error(`not a tmux pane target: ${target}`);
   return {
-    type: pieces.map((p) => ['send-keys', '-t', target, '-l', '--', literal(p)]),
+    load: ['load-buffer', '-b', buffer, file],
+    paste: ['paste-buffer', '-d', '-p', '-b', buffer, '-t', target],
+    drop: ['delete-buffer', '-b', buffer],
     submit: ['send-keys', '-t', target, 'Enter'],
   };
 }

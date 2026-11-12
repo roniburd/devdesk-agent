@@ -223,6 +223,11 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .card .meta .wt { display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .meta .wt .ico { width: 11px; height: 11px; flex: none; opacity: 0.7; }
 .card .meta .model { white-space: nowrap; opacity: 0.85; }
+/* The Claude account it runs in (devdesk.claude.accounts), when not the default one. */
+.card .meta .account { white-space: nowrap; opacity: 0.85; font-size: 0.9em; padding: 0 4px; border: 1px solid var(--vscode-widget-border, rgba(128, 128, 128, 0.4)); border-radius: 3px; }
+/* The linked ticket's chip (a button: a click opens it). */
+.card .meta .ticket { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: 0.95em; padding: 0 5px; border-radius: 8px; border: 1px solid var(--vscode-badge-background, var(--vscode-widget-border, transparent)); background: transparent; color: var(--vscode-textLink-foreground); cursor: pointer; }
+.card .meta .ticket:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground)); }
 .card .meta .when { margin-left: auto; white-space: nowrap; flex: none; }
 .card .meta .when .glyph { margin-right: 2px; font-size: 0.9em; }
 .card.task .wt {
@@ -239,6 +244,10 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .card .latest::before { content: '>' / ''; margin-right: 4px; font-size: 0.85em; opacity: 0.7; font-family: var(--vscode-editor-font-family, monospace); }
 /* Working: what Claude is doing now, one line under the title (the hover has all of it). */
 .card .doing { color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The note Claude set on its card (`devdesk note`): one line, the hover has all of it. */
+.card .note { font-size: 0.9em; color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A worker's coordinator, or a coordinator's workers (`devdesk worker`): one line, the hover has all of it. */
+.card .team { font-size: 0.9em; color: var(--vscode-descriptionForeground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 /* Needs you: what Claude asks, boxed under the title (scoped to cards: the header's ✨ button is #ask). */
 .card .ask {
   padding: 5px 8px;
@@ -276,6 +285,10 @@ body[data-placement='top'] .pane .popup { top: calc(100% + 4px); bottom: auto; }
 .hc-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--widget-border); color: var(--vscode-descriptionForeground); font-size: 0.88em; }
 .acts { display: flex; flex-wrap: wrap; gap: 4px; }
 .acts .act { padding: 0 6px; font-size: 0.8em; line-height: 1.5; white-space: nowrap; }
+/* A prompt for later's Edit and Delete: quiet icon buttons at the end of its meta line. */
+.card .meta .tools { margin-left: auto; display: inline-flex; gap: 2px; flex: none; }
+.card .meta .tools .act { padding: 0 4px; min-width: 20px; font-size: 0.95em; line-height: 1.5; background: transparent; color: var(--vscode-descriptionForeground); }
+.card .meta .tools .act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 /* Session cards' Fork / End: quiet text buttons until you hover the card. */
 .card:not(.task) .acts .act { background: transparent; color: var(--vscode-descriptionForeground); opacity: 0.7; }
 .card:not(.task):hover .acts .act, .card:not(.task):focus-within .acts .act { opacity: 1; }
@@ -385,6 +398,7 @@ button.link:hover { background: none; text-decoration: underline; }
 .composer .icon { width: 26px; padding: 0; justify-content: center; }
 .composer .icon.mode { width: auto; padding: 0 6px; }
 .composer .pill { padding: 0 8px; font-size: 0.85em; }
+.composer .footer button[hidden] { display: none; }
 .composer .pill .ico:last-child { width: 12px; height: 12px; }
 .composer .label { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .composer .mode .label { font-size: 0.85em; }
@@ -493,6 +507,12 @@ button.link:hover { background: none; text-decoration: underline; }
 .stats-note { margin-top: 8px; font-size: 0.8em; }
 .stats-progress { display: block; width: 100%; margin-top: 6px; }
 .stats-more { display: block; margin: 8px 0 0 auto; }
+.stats-limits { margin-bottom: 8px; }
+.stats-limits .stats-section { margin-top: 0; }
+.stats-limit { display: grid; grid-template-columns: 4.5em minmax(3em, 1fr) 3em; column-gap: 8px; align-items: center; }
+.stats-limit-bar { width: 100%; height: 0.7em; }
+.stats-limit-reset { grid-column: 1 / -1; font-size: 0.85em; color: var(--vscode-descriptionForeground); }
+.stats-limits-setup { margin: 0 0 6px; }
 .stats-scope { display: flex; gap: 6px; margin: 2px 0 6px; }
 .stats-scope select { min-width: 0; flex: 1 1 auto; max-width: 100%; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; padding: 1px 4px; text-overflow: ellipsis; }
 .stats-place { cursor: pointer; border-radius: 3px; }

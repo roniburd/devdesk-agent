@@ -1,0 +1,89 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "script/identity-e2e/fixture_test.go",
+              "line": 133,
+              "originalLine": 133,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "\ud83d\uded1 Requirement: Enforce keyring isolation for the offline fixtures.\n\nPutting a security shim on PATH does not isolate macOS keyring access: docs/macos-keyring.md documents that the backend invokes /usr/bin/security directly. Bound credential lookups reach TokenForUser, which probes the native keyring",
+                    "author": {
+                      "login": "copilot-pull-request-reviewer"
+                    },
+                    "url": "https://github.com/cli/cli/pull/14927#discussion_r4460644833"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "acceptance/acceptance_test.go",
+              "line": 939,
+              "originalLine": 939,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "\ud83d\uded1 Requirement: Keep the ordinary full acceptance run usable without ghdebug\n\nAn unfiltered acceptance run with a user-capable token includes this lifecycle: script selection filters on token capability, not build tags. Consequently, the documented invocation with only -tags=acceptance now always fai",
+                    "author": {
+                      "login": "copilot-pull-request-reviewer"
+                    },
+                    "url": "https://github.com/cli/cli/pull/14927#discussion_r4460644885"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "done.go",
+              "line": 3,
+              "originalLine": 3,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "fixed already",
+                    "author": {
+                      "login": "someone"
+                    },
+                    "url": "https://github.com/cli/cli/pull/14927#discussion_r1"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": true,
+              "path": "old.go",
+              "line": null,
+              "originalLine": 9,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "on an older line",
+                    "author": {
+                      "login": "someone"
+                    },
+                    "url": "https://github.com/cli/cli/pull/14927#discussion_r2"
+                  },
+                  {
+                    "body": "reply here",
+                    "author": null,
+                    "url": "https://github.com/cli/cli/pull/14927#discussion_r3"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

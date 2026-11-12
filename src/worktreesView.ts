@@ -1,6 +1,5 @@
-import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { type DiffMode, diffSides } from './core/git';
+import type { DiffMode } from './core/git';
 import { featureForCwd } from './core/sessions';
 import { stateLook } from './core/sessionsView';
 import { LOOKS } from './core/stateLooks';
@@ -11,13 +10,16 @@ import { discoverFeatures, type Feature } from './core/worktrees';
 import { isClaudeTerminal, killClaude } from './claudeSessions';
 import { featureDiscovery, openSettings, sessionsStuckMs, setGlobalSetting, workspaceRoot, worktreesPauseWhenUnfocused, worktreesRefreshSeconds } from './config';
 import { type FeatureNode, FeaturesTree, type FileNode, type Node } from './featuresTree';
-import { GitContentProvider, SCHEME, toGitUri } from './gitContent';
+import { GitContentProvider, SCHEME } from './gitContent';
 import { log, registerTimedCommand } from './log';
 import type { SessionsModel } from './sessionsModel';
 import { cardOf, openFeatureSession } from './sessionsCommands';
 import type { SessionsTree } from './sessionsTree';
+import type { TicketLinks } from './ticketLinks';
+import type { WorktreeChecks } from './worktreeChecks';
 import { cleanUpWorktrees, suggestCleanup } from './worktreeCleanup';
 import { deleteWorktreeRow } from './worktreeDelete';
+import { openDiff } from './worktreeDiffs';
 
 /** `workspaceState` key of the Worktrees view's diff base (`branch` or `uncommitted`). */
 const MODE_KEY = 'devdesk.mode';
@@ -27,20 +29,15 @@ export function updateWorkspaceContext(): void {
   void vscode.commands.executeCommand('setContext', 'devdesk.inWorkspace', workspaceRoot() !== undefined);
 }
 
-async function openDiff(node: FileNode): Promise<void> {
-  const { pkg, base, change } = node;
-  const sides = diffSides(change, base);
-  const empty = toGitUri({ dir: pkg.dir, ref: '', path: change.path });
-  const left = sides.left === 'empty' ? empty : toGitUri({ dir: pkg.dir, ...sides.left });
-  const right = sides.right === 'empty' ? empty : vscode.Uri.file(join(pkg.dir, change.path));
-  await vscode.commands.executeCommand('vscode.diff', left, right, `${pkg.name}/${change.path} (${base.label} ↔ working tree)`);
-}
-
 /** The Worktrees view and its rows' state text (each worktree's most urgent session's), by worktree directory. */
 export interface WorktreesView {
   tree: FeaturesTree;
   view: vscode.TreeView<Node>;
   urgent: () => ReadonlyMap<string, string>;
+  /** Shows the worktrees' checks hints on their rows, fetched on the view's refresh tick for the worktrees it lists. */
+  setChecks(checks: WorktreeChecks): void;
+  /** Shows the worktrees' linked tickets on their rows; finds them in the listed worktrees' names and branches. */
+  setTickets(tickets: TicketLinks): void;
 }
 
 /**
@@ -68,6 +65,8 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
   // One refresh at a time: the next starts refreshSeconds after the last one's git work is done, and only while the
   // view is visible and (unless pauseWhenUnfocused is off) the window is in front.
   let paused: boolean | undefined;
+  let checks: WorktreeChecks | undefined;
+  let tickets: TicketLinks | undefined;
   const inFront = () => view.visible && (vscode.window.state.focused || !worktreesPauseWhenUnfocused());
   tree.setActive(inFront);
   const loop = tickLoop({
@@ -81,6 +80,10 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
     tick: async () => {
       const start = Date.now();
       log.debug('auto-refresh');
+      // In the background, each worktree at most every devdesk.checks.refreshMinutes: the git refresh does not wait for it.
+      checks?.refreshDue(tree.listedFeatures());
+      // Tickets in new worktrees' names and branches, and the titles and statuses due: in the background too.
+      void tickets?.detectWorktrees(tree.listedFeatures());
       await tree.refreshChanges();
       log.debug(`auto-refresh: done in ${Date.now() - start}ms`);
     },
@@ -197,5 +200,20 @@ export function registerWorktreesView(ctx: vscode.ExtensionContext, sessions: Se
     registerTimedCommand('devdesk.features.openSettings', () => openSettings('devdesk.worktrees')),
     loop,
   );
-  return { tree, view, urgent: () => urgent };
+  return {
+    tree,
+    view,
+    urgent: () => urgent,
+    setChecks: (c) => {
+      checks = c;
+      tree.setChecks(c);
+      ctx.subscriptions.push(c.onDidChange(() => tree.refreshLabels()));
+    },
+    setTickets: (t) => {
+      tickets = t;
+      tree.setTickets((dir) => t.chip(t.forWorktree(dir)));
+      ctx.subscriptions.push(t.onDidChange(() => tree.refreshLabels()));
+      void t.detectWorktrees(tree.listedFeatures());
+    },
+  };
 }

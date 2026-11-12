@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { listClaude } from '../claudeCommands';
-import { claudeConfigDir, claudeInvocation, workspaceRoot } from '../config';
+import { claudeConfigDir, claudeDefaultAccount, claudeInvocation, workspaceRoot } from '../config';
+import { accountEnv } from '../core/accounts';
 import type { CliListing } from '../core/cliStream';
 import { discoverSlashCommands, type SlashCommand, withBuiltins, withDiskCommands } from '../core/slashCommands';
 
@@ -121,7 +122,7 @@ export class CliListings {
       this.commandsVersion++;
       this.onChange();
     };
-    const listed = vscode.workspace.isTrusted ? listClaude(claudeInvocation(), dir, update) : Promise.resolve(undefined);
+    const listed = vscode.workspace.isTrusted ? listClaude(claudeInvocation(), dir, update, accountEnv(claudeDefaultAccount())) : Promise.resolve(undefined);
     void listed.then((listing) => {
       entry.asking = false;
       // A listing `update` already showed as it arrived is not shown again (an open `/` menu would ask twice).
@@ -141,5 +142,6 @@ export class CliListings {
 /** The skills and commands the folders hold; none when they cannot be read. */
 async function folderCommands(dir: string): Promise<SlashCommand[]> {
   const dirs = [...new Set([dir, workspaceRoot()].filter((d): d is string => !!d))];
+  // The default Claude account's skills and commands, as the CLI lists them for it.
   return discoverSlashCommands(claudeConfigDir(), dirs).catch(() => []);
 }

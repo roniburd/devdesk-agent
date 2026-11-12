@@ -96,14 +96,14 @@ async function startDaemon(over: Partial<DaemonConfig> = {}, env: Record<string,
     root: repo,
     scopeDirs: [repo],
     scope: 'workspace',
-    claudeSessionsDir: join(tmp, 'no-registry'),
+    claudeSessionsDirs: [join(tmp, 'no-registry')],
     insights: false,
     identityHeader: USER_HEADER,
     allowedUsers: ['roni'],
     pollMs: 500,
     tmux: { bin: tmuxBin, server: 'devdesk', options: [], env: {} },
     // A Claude that is not there: asking it for its `/` list fails at once, never the real one.
-    claude: { modeArgs: '', path: join(tmp, 'no-claude'), configDir: join(tmp, 'claude-home') },
+    claude: { modeArgs: '', env: {}, path: join(tmp, 'no-claude'), configDir: join(tmp, 'claude-home') },
     ...over,
     port,
   };
@@ -281,8 +281,13 @@ describe('web access daemon (header auth, tunnel)', () => {
     const ok = await post(d.port, '/api/sessions/sess-1/send', { text: 'hello' });
     expect(ok.status, ok.body).toBe(200);
     expect(JSON.parse(ok.body)).toEqual({ ok: true });
-    const sent = (await tmuxCalls()).filter((c) => c.startsWith('send-keys'));
-    expect(sent).toEqual(['send-keys -t %1 -l -- hello', 'send-keys -t %1 Enter']);
+    // Pasted through a tmux buffer of its own, as the Claude Board types, then Enter.
+    const sent = (await tmuxCalls()).filter((c) => /^(load-buffer|paste-buffer|send-keys)/.test(c));
+    expect(sent).toEqual([
+      expect.stringMatching(/^load-buffer -b devdesk-send-\w+ /),
+      expect.stringMatching(/^paste-buffer -d -p -b devdesk-send-\w+ -t %1$/),
+      'send-keys -t %1 Enter',
+    ]);
     expect(d.stderr()).toMatch(/POST send sess-1 200 user=roni/);
     expect(d.stderr()).not.toContain('hello');
   });

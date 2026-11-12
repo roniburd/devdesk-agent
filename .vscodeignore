@@ -10,5 +10,6 @@ vitest.config.ts
 .gitignore
 Config
 vsix/**
+docs/**
 tsconfig.webview.json
 media/*.js

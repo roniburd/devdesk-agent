@@ -1,12 +1,13 @@
 import { basename } from 'node:path';
 import { DEFAULT_CHOICE, type LaunchChoice, type ModelChoice } from './composer';
 import { runningCount } from './sessionChildren';
-import type { SessionCard, SessionState } from './sessions';
+import { type SessionCard, type SessionState, waitKindOf } from './sessions';
 import { DEFAULT_SERVER } from './tmux';
+import { teamText } from './workers';
+import { sortSessions, type SortMode } from './urgency';
 import { oneLine, truncate } from './text';
 import { HIDDEN_PARKED_MAX, IDLE_DIVIDER, searchFields, searchLane, type SearchFields } from './boardSearch';
 import {
-  attentionOrder,
   cardCapabilities,
   cardTitles,
   cardView,
@@ -19,6 +20,7 @@ import {
   type ViewContext,
 } from './sessionsView';
 import { LOOKS, type StateLook } from './stateLooks';
+import { statusFromText } from './statusMerge';
 
 /** The Claude Board's swim lanes: the backlog, then one lane per kind of session state. */
 export type LaneId = 'backlog' | 'needs' | 'working' | 'review';
@@ -136,6 +138,19 @@ export interface BoardSession {
   ask?: string;
   /** In the Working lane: what Claude is doing now, in one line (DevDesk's live status, else the hook's detail). */
   doing?: string;
+  /** The note Claude set on its card (`devdesk note`), in any lane. */
+  note?: string;
+  /** Its worktree's pull request checks hint (`2 checks failing`), when they have something to fix: the card offers Fix checks. */
+  checks?: string;
+  /** The ticket linked to it or its worktree: the chip's text (`ABC-123 · In progress`), its hover, and where it opens. */
+  ticket?: { text: string; hover: string; url: string };
+  /**
+   * Its place among coordinator and worker sessions (`devdesk worker`): `worker "lint" · working · of <coordinator>` on a
+   * worker, "3 workers: 1 done, 2 working" on its coordinator.
+   */
+  team?: string;
+  /** A worker's coordinator's card id, when listed (clicking the team line goes there). */
+  coordinatorId?: string;
   worktree: string;
   look: StateLook;
   lookLabel: string;
@@ -164,6 +179,8 @@ export interface BoardSession {
   canEnd: boolean;
   /** The model the board started it with (its pill row's name), when not Default. */
   model?: string;
+  /** The Claude account it runs in (`devdesk.claude.accounts`), when not the default one. */
+  account?: string;
   /** Not running: opening it resumes it, and End removes it from the list. */
   parked: boolean;
   /**
@@ -236,6 +253,8 @@ export interface BoardOptions {
   models?: readonly Pick<ModelChoice, 'value' | 'label'>[];
   /** The models the board started sessions with, by `launchKey`. */
   launchedModels?: ReadonlyMap<string, string>;
+  /** The Claude account a card's session runs in, when not the default one (none: no account shown). */
+  accountOf?: (card: SessionCard) => string | undefined;
   /** How many parked sessions to show (the newest); the rest are counted in their lane's `more`. All when undefined. */
   parkedLimit?: number;
   /**
@@ -243,6 +262,14 @@ export interface BoardOptions {
    * with the latest prompt's title under it; `latest`, the latest prompt's title only. `latest` when undefined.
    */
   cardTitle?: CardTitleMode;
+  /** How sessions are ordered in each lane (`devdesk.sessions.sort`); `attention` when undefined. */
+  sort?: SortMode;
+  /** With `urgency`: how long an unread finished turn sorts as recently finished. `view.idleMs` when undefined. */
+  recentMs?: number;
+  /** A worktree's checks hint (`2 checks failing`), empty when it has nothing to fix, by worktree directory. */
+  checks?: (featureDir: string) => string;
+  /** A card's ticket chip: its session's linked ticket, else its worktree's. */
+  ticket?: (card: SessionCard) => { text: string; hover: string; url: string } | undefined;
 }
 
 export type { CardTitleMode };
@@ -267,7 +294,13 @@ export function liveLaunches(launches: ReadonlyMap<string, Launch>, listed: Read
   return new Map([...launches].filter(([key, l]) => listed.has(key) || now - l.at < LAUNCH_GRACE_MS));
 }
 
-/** The board: prompts for later newest first, and the sessions in attention order, each in its state's lane. */
+/** A card's `ticket` field, when it has one. */
+function ticketOf(card: SessionCard, o: BoardOptions): { ticket?: BoardSession['ticket'] } {
+  const ticket = o.ticket?.(card);
+  return ticket ? { ticket } : {};
+}
+
+/** The board: prompts for later newest first, and the sessions in `sort` order, each in its state's lane. */
 export function buildBoard(cards: readonly SessionCard[], backlog: readonly BacklogItem[], o: BoardOptions): BoardData {
   const { view } = o;
   const { now, unread } = view;
@@ -287,11 +320,13 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
   let parked = 0;
   let hiddenCount = 0;
   const shown: { card: SessionCard; look: StateLook; lane: BoardLane; hidden: boolean; idle: boolean }[] = [];
-  for (const card of attentionOrder(cards, view)) {
+  const ordered = sortSessions(cards, { ...view, unreadFirst: view.unreadFirst ?? false, mode: o.sort ?? 'attention', recentMs: o.recentMs ?? view.idleMs });
+  for (const card of ordered) {
     const look = stateLook(card, view);
     const toReview = card.state === 'parked' && unread.has(card.id);
     const lane = byId.get(laneForLook(look))!;
     // Under the divider: read sessions that sort as idle or later (see `attentionOrder`); unread ones are to review.
+    // They are moved under the cards to review below, whatever the order put between them.
     const idle = lane.id === 'review' && !unread.has(card.id) && IDLE_STATES.has(displayState(card, view));
     if (card.state === 'parked' && !toReview && o.parkedLimit !== undefined && ++parked > o.parkedLimit) {
       lane.more = (lane.more ?? 0) + 1;
@@ -315,6 +350,13 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
   );
   const apart: (string | undefined)[] = shown.map(() => undefined);
   visible.forEach(([, i], k) => (apart[i] = visibleApart[k]));
+  /** A worker's coordinator, by its tmux session: its card's id and title (the tmux session's name when not shown). */
+  const coordinatorOf = (card: SessionCard) => {
+    const c = card.team?.workerOf?.coordinator;
+    if (!c) return undefined;
+    const i = shown.findIndex(({ card: o }) => o.tmuxSession === c.session && (o.tmuxServer ?? DEFAULT_SERVER) === c.server);
+    return i >= 0 ? { id: shown[i].card.id, title: truncate(titles[i], 40) } : { id: undefined, title: c.session };
+  };
   for (const [i, { card, look, lane, hidden, idle }] of shown.entries()) {
     const can = cardCapabilities(card);
     const isParked = can.parked;
@@ -325,6 +367,8 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
     const model = card.tmuxSession && !isParked ? o.launchedModels?.get(launchKey(card.tmuxServer, card.tmuxSession)) : undefined;
     // A parked session keeps the look its last turn ended with (a green tick when done), under the Done / idle lane's divider.
     const shown = shownLook(card, view);
+    const coordinator = coordinatorOf(card);
+    const team = teamLine(card, coordinator?.title);
     const session: BoardSession = {
       id: card.id,
       title,
@@ -337,9 +381,14 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
       ago: v.ago,
       detail: v.liveStatus || v.detail,
       insight: v.liveStatus ? '' : v.insight,
-      hoverParts: hoverOf(titles[i], card, v, look, model, byObjective ? latestTitles[i] : undefined),
+      hoverParts: hoverOf(titles[i], card, v, look, model, now, byObjective ? latestTitles[i] : undefined, team),
       ...(lane.id === 'needs' ? { ask: askLine(card) } : {}),
       ...(lane.id === 'working' && (v.liveStatus || v.detail) ? { doing: v.liveStatus || v.detail } : {}),
+      ...(card.note ? { note: card.note } : {}),
+      ...(card.featureDir && o.checks?.(card.featureDir) ? { checks: o.checks(card.featureDir) } : {}),
+      ...ticketOf(card, o),
+      ...(team ? { team } : {}),
+      ...(coordinator?.id ? { coordinatorId: coordinator.id } : {}),
       unread: unread.has(card.id),
       ...(o.colors?.get(card.id) ? { color: o.colors.get(card.id) } : {}),
       ...(o.focused === card.id ? { focused: true as const } : {}),
@@ -350,6 +399,7 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
       parked: isParked,
       ...(idle ? { idle: true as const } : {}),
       ...(model ? { model } : {}),
+      ...(o.accountOf?.(card) ? { account: o.accountOf(card) } : {}),
       search: searchFields({
         title,
         worktree: v.worktree,
@@ -357,22 +407,34 @@ export function buildBoard(cards: readonly SessionCard[], backlog: readonly Back
         lookLabel: shown.label,
         state: card.state,
         model,
-        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight],
+        texts: [card.prompt, card.summary, card.insightTitle, card.insightObjective, card.liveStatus, card.askSummary, card.detail, v.insight, card.note, o.ticket?.(card)?.hover],
       }),
     };
     if (hidden) (lane.hidden ??= []).push(session);
     else lane.sessions.push(session);
   }
+  // The divider sits above the lane's first idle card, so every card to review goes above every idle one (a stable split).
+  for (const lane of lanes) if (lane.divider) lane.sessions = [...lane.sessions.filter((s) => !s.idle), ...lane.sessions.filter((s) => s.idle)];
   const names = new Set(lanes.flatMap((l) => l.sessions.map((s) => s.worktree)));
   const worktrees = [...names].filter((n) => n !== 'no worktree').sort();
   if (names.has('no worktree')) worktrees.push('no worktree');
   return { lanes, needYou: byId.get('needs')!.sessions.length, working: byId.get('working')!.sessions.length, worktrees };
 }
 
-/** What a card in the Needs you lane says Claude asks: Haiku's line for this wait, else the hook's detail. */
+/** The card's team line: a worker's name, coordinator and status; a coordinator's workers by status. */
+function teamLine(card: SessionCard, coordinator: string | undefined): string | undefined {
+  const w = card.team?.workerOf;
+  const parts: string[] = [];
+  if (w) parts.push(`worker "${w.name}" · ${w.status} · of ${coordinator ?? w.coordinator.session}`);
+  if (card.team?.workers?.length) parts.push(teamText(card.team.workers));
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
+/** What a card in the Needs you lane says Claude asks: Haiku's line for this wait, else the hook's detail (a question's without its `Asking:`). */
 function askLine(card: SessionCard): string {
   if (card.askSummary) return card.askSummary;
-  return truncate(oneLine(card.detail).replace(/^Asking:\s*/, ''), 160);
+  const detail = oneLine(card.detail);
+  return truncate(waitKindOf(card) === 'question' ? detail.replace(/^Asking:\s*/, '') : detail, 160);
 }
 
 const PROMPT_MAX = 600;
@@ -384,7 +446,9 @@ function hoverOf(
   v: ReturnType<typeof cardView>,
   look: StateLook,
   model: string | undefined,
+  now: number,
   latest?: string,
+  team?: string,
 ): HoverPart[] {
   const prompt = card.prompt ? oneLine(card.prompt) : '';
   const running = card.children ? runningCount(card.children) : 0;
@@ -392,11 +456,14 @@ function hoverOf(
   const parts: (HoverPart | false)[] = [
     { text: title },
     !!latest && latest !== title && { label: 'Latest step', text: latest },
+    !!card.note && { label: "Claude's note", text: card.note },
+    !!team && { label: 'Team', text: team },
     !!v.liveStatus && { label: 'Doing now', text: v.liveStatus },
     !!v.insight && { label: 'Where it stands', text: v.insight },
     !!v.summary && { label: "Claude's recap", text: v.summary },
     !!prompt && prompt !== title && { label: 'Last prompt', text: truncate(prompt, PROMPT_MAX) },
     !!v.detail && { label: waiting ? 'Waiting on' : 'Latest', text: v.detail },
+    !!card.statusFrom && { label: 'Status', text: statusFromText(card, now)! },
     running > 0 && { label: 'Running', text: `${running} (subagents, shells, workflows)` },
     !!model && { label: 'Started with', text: model },
     !!v.times && { label: 'Times', text: v.times },

@@ -45,22 +45,23 @@ const deps = (tmux: FakeTmux, over: Partial<ActionDeps> = {}): ActionDeps & { se
     },
     listProcesses: claudeRuns,
     tmpDir: tmp,
-    submitDelayMs: 0,
+    settleMs: 0,
     servers,
     ...over,
   };
 };
 const sendKeys = (t: FakeTmux) => t.calls.filter((c) => c[0] === 'send-keys');
+/** The first tmux call from its `new-session` on (attachArgs clears Claude's child variables first). */
+const newSession = (t: FakeTmux) => t.calls[0].slice(t.calls[0].indexOf('new-session'));
 
 describe('sendText', () => {
   it('types the text at an empty prompt, then Enter', async () => {
     const t = fakeTmux({ capture: EMPTY_SCREEN });
     const d = deps(t);
     expect(await sendText(card(), 'hello', 'devdesk', d)).toEqual({ status: 200, body: { ok: true } });
-    expect(sendKeys(t)).toEqual([
-      ['send-keys', '-t', '%3', '-l', '--', 'hello'],
-      ['send-keys', '-t', '%3', 'Enter'],
-    ]);
+    // Pasted through a tmux buffer of its own (as the Claude Board types), then Enter.
+    expect(t.calls.slice(1).map((c) => c[0])).toEqual(['load-buffer', 'paste-buffer', 'send-keys']);
+    expect(sendKeys(t)).toEqual([['send-keys', '-t', '%3', 'Enter']]);
     expect(d.servers).toEqual(['devdesk']);
   });
 
@@ -84,6 +85,17 @@ describe('sendText', () => {
     expect(r).toMatchObject({ status: 409, body: { code: 'blocked' } });
     expect(r.body).toHaveProperty('error', expect.stringMatching(/not at an empty prompt/));
     expect(sendKeys(t)).toEqual([]);
+  });
+
+  it("refuses while Claude's own report says it works or a dialog is open, as the board does", async () => {
+    for (const state of ['working', 'blocked'] as const) {
+      const t = fakeTmux({ capture: EMPTY_SCREEN });
+      const d = deps(t, { programStatus: async () => ({ state, at: Date.now(), pid: 101 }) });
+      expect(await sendText(card(), 'hello', 'devdesk', d), state).toMatchObject({ status: 409, body: { code: 'blocked' } });
+      expect(sendKeys(t)).toEqual([]);
+    }
+    const idle = deps(fakeTmux({ capture: EMPTY_SCREEN }), { programStatus: async () => ({ state: 'idle', at: Date.now(), pid: 101 }) });
+    expect(await sendText(card(), 'hello', 'devdesk', idle)).toMatchObject({ status: 200 });
   });
 
   it('refuses in copy mode', async () => {
@@ -121,10 +133,11 @@ describe('sendText', () => {
     expect(t.calls).toEqual([]);
   });
 
-  it('types key names and separators as text', async () => {
+  it('pastes key names and separators as text, never as tmux arguments', async () => {
     const t = fakeTmux({ capture: EMPTY_SCREEN });
     await sendText(card(), 'C-c Enter ; kill-server;', 'devdesk', deps(t));
-    expect(sendKeys(t)[0]).toEqual(['send-keys', '-t', '%3', '-l', '--', 'C-c Enter ; kill-server\\;']);
+    expect(t.calls.flat()).not.toContain('C-c Enter ; kill-server;');
+    expect(sendKeys(t)).toEqual([['send-keys', '-t', '%3', 'Enter']]);
   });
 });
 
@@ -159,7 +172,7 @@ describe('startSession', () => {
   ];
   const cfg: Pick<DaemonConfig, 'tmux' | 'claude'> = {
     tmux: { bin: 'tmux', server: 'devdesk', options: [['mouse', 'on']], env: { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' } },
-    claude: { path: 'claude', modeArgs: '--permission-mode auto' },
+    claude: { path: 'claude', modeArgs: '--permission-mode auto', env: {} },
   };
 
   it('refuses a folder that is not listed, and runs no tmux', async () => {
@@ -176,26 +189,34 @@ describe('startSession', () => {
     const r = await startSession({ dir: '/w', prompt: "fix it's tests" }, features, ['cc-main', 'cc-feat'], cfg, d);
     expect(r).toEqual({ status: 201, body: { tmuxSession: 'cc-main-2', server: 'devdesk' } });
     expect(d.servers).toEqual(['devdesk']);
-    expect(t.calls).toEqual([
-      [
-        'new-session', '-d', '-s', 'cc-main-2', '-c', '/w',
-        '-e', 'CLAUDE_CODE_DISABLE_AGENT_VIEW=1',
-        `claude --permission-mode auto -- 'fix it'\\''s tests'; exec $SHELL -l`,
-        ';', 'set-option', '-t', '=cc-main-2:', 'mouse', 'on',
-      ],
+    expect(t.calls).toHaveLength(1);
+    expect(newSession(t)).toEqual([
+      'new-session', '-d', '-s', 'cc-main-2', '-c', '/w',
+      '-e', 'CLAUDE_CODE_DISABLE_AGENT_VIEW=1',
+      '-e', 'DEVDESK_TMUX_SESSION=cc-main-2',
+      '-e', 'DEVDESK_TMUX_SERVER=devdesk',
+      `claude --permission-mode auto -- 'fix it'\\''s tests'; exec $SHELL -l`,
+      ';', 'set-option', '-t', '=cc-main-2:', 'mouse', 'on',
     ]);
   });
 
   it('accepts the realpath of a folder, and no prompt', async () => {
     const t = fakeTmux();
     expect(await startSession({ dir: '/real/w', prompt: '' }, features, [], cfg, deps(t))).toMatchObject({ status: 201, body: { tmuxSession: 'cc-main' } });
-    expect(t.calls[0][8]).toBe('claude --permission-mode auto; exec $SHELL -l');
+    expect(newSession(t)[12]).toBe('claude --permission-mode auto; exec $SHELL -l');
+  });
+
+  it("starts Claude as the Claude view does: the Program Status relay, in the default account's environment", async () => {
+    const t = fakeTmux();
+    const claude = { path: 'claude', args: '--verbose', wrapper: "'python3' -I 'relay.py' '/s'", modeArgs: '', env: { CLAUDE_CONFIG_DIR: '/home/u/.claude-work' } };
+    await startSession({ dir: '/w', prompt: 'hi' }, features, [], { ...cfg, claude }, deps(t));
+    expect(newSession(t)[12]).toBe(`export CLAUDE_CONFIG_DIR='/home/u/.claude-work'; 'python3' -I 'relay.py' '/s' claude --verbose -- 'hi'; exec $SHELL -l`);
   });
 
   it('runs a long prompt from a script', async () => {
     const t = fakeTmux();
     await startSession({ dir: '/w/worktrees/feat', prompt: 'x'.repeat(10_000) }, features, [], cfg, deps(t));
-    const command = t.calls[0][t.calls[0].indexOf('CLAUDE_CODE_DISABLE_AGENT_VIEW=1') + 1];
+    const command = t.calls[0][t.calls[0].indexOf('DEVDESK_TMUX_SERVER=devdesk') + 1];
     expect(command).toMatch(/^\. '.*devdesk-claude-start-.*\/start\.sh'$/);
     expect((await readdir(tmp)).length).toBe(1);
   });
@@ -204,7 +225,7 @@ describe('startSession', () => {
     const t = fakeTmux();
     const withModes = { ...cfg, claude: { ...cfg.claude, modes: [{ name: 'Auto', args: '--permission-mode auto' }, { name: 'Plan', args: '--permission-mode plan' }], defaultMode: 'Auto' } };
     expect(await startSession({ dir: '/w', prompt: 'go', mode: 'Plan', model: 'opus', effort: 'high' }, features, [], withModes, deps(t))).toMatchObject({ status: 201 });
-    expect(t.calls[0][8]).toBe("claude --permission-mode plan --model 'opus' --effort 'high' -- 'go'; exec $SHELL -l");
+    expect(newSession(t)[12]).toBe("claude --permission-mode plan --model 'opus' --effort 'high' -- 'go'; exec $SHELL -l");
     for (const bad of [{ mode: 'Bypass' }, { model: '--dangerously-skip-permissions' }, { effort: 'ludicrous' }]) {
       expect(await startSession({ dir: '/w', prompt: '', ...bad }, features, [], withModes, deps(t))).toMatchObject({ status: 400, body: { code: 'bad-request' } });
     }
@@ -218,7 +239,7 @@ describe('startSession', () => {
 });
 
 describe('sessionDetail', () => {
-  const o = { now: Date.now(), stuckMs: 600_000, idleMs: 30 * 60_000, unread: new Set<string>(), server: 'devdesk' };
+  const o = { now: Date.now(), stuckMs: 600_000, idleMs: 30 * 60_000, unread: new Set<string>(), mode: 'urgency' as const, recentMs: 900_000, unreadFirst: true, server: 'devdesk' };
 
   it('gives the turns, the screen and the prompt state', async () => {
     const transcript = join(tmp, 's1.jsonl');
@@ -241,6 +262,12 @@ describe('sessionDetail', () => {
     expect(r.body.screen[0]).toEqual([{ text: '<script>x</script>', fg: 1 }]);
     expect(r.body.prompt).toEqual({ empty: true, dialog: false, working: false, inMode: false, exited: false });
     expect(r.body.ended).toBe(false);
+  });
+
+  it("shows the keys when Claude's own report says a dialog is open", async () => {
+    const d = deps(fakeTmux({ capture: EMPTY_SCREEN }), { programStatus: async () => ({ state: 'blocked', kind: 'permission', at: Date.now(), pid: 101 }) });
+    const r = await sessionDetail(card(), o, d);
+    expect(r).toMatchObject({ status: 200, body: { prompt: { empty: false, dialog: true, working: false } } });
   });
 
   it('is ended when the pane is gone', async () => {

@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { claudeIsWorking, claudePromptIsEmpty, claudePromptShown } from '../src/core/claudePrompt';
+import { claudeIsWorking, claudePromptIsEmpty, claudePromptShown, type PaneFlags, paneScreenArgs, parsePaneFlags, parsePaneScreen } from '../src/core/claudePrompt';
 
 const E = '\x1b';
 const rule = `${E}[38;5;244m${'─'.repeat(40)} devdesk-agents ─`;
@@ -92,6 +93,122 @@ describe('claudeIsWorking', () => {
   });
 });
 
+/**
+ * Real captures of Claude Code 2.1.319 in a 120x40 tmux pane (`capture-pane -p -e`; banner text and paths replaced),
+ * with what `display-message -p` reported for the pane at the same moment (`flags.json`).
+ */
+const NBSP = '\u00a0';
+type Recorded = { inMode: number; bracketPaste: number; cursorX: number; cursorY: number };
+const recorded = JSON.parse(readFileSync(new URL('./fixtures/claudePrompt/flags.json', import.meta.url), 'utf8')) as Record<string, Recorded>;
+const capture = (name: string) => readFileSync(new URL(`./fixtures/claudePrompt/${name}.txt`, import.meta.url), 'utf8');
+const flagsOf = (name: string): PaneFlags => {
+  const r = recorded[name];
+  return parsePaneFlags([r.inMode, r.bracketPaste, r.cursorX, r.cursorY].map(String))!;
+};
+const emptyComposer = `❯${NBSP}${E}[7m ${E}[0m`;
+
+describe('claudePromptIsEmpty on real Claude Code captures', () => {
+  const cases: [string, boolean][] = [
+    ['empty', true],
+    ['idle-after-turn', true],
+    // Claude keeps the composer open and empty while it works: `claudeIsWorking` tells.
+    ['working', true],
+    ['text', false],
+    ['text-cursor-mid', false],
+    ['text-cursor-home', false],
+    ['spaces', false],
+    ['multiline', false],
+    ['slash-menu', false],
+    ['shell-mode', false],
+    ['copy-mode', false],
+    ['permission-dialog', false],
+    ['question-dialog', false],
+    ['trust-dialog', false],
+    ['after-exit', false],
+  ];
+  it.each(cases)('%s: %s with the pane flags', (name, empty) => {
+    expect(claudePromptIsEmpty(capture(name), flagsOf(name))).toBe(empty);
+  });
+
+  // Copy mode shows the screen beneath it: only the flags tell.
+  it.each(cases.filter(([name]) => name !== 'copy-mode'))('%s: %s from the capture alone', (name, empty) => {
+    expect(claudePromptIsEmpty(capture(name))).toBe(empty);
+  });
+
+  it("draws the composer as `❯` and a no-break space, the transcript's prompts with a plain space", () => {
+    expect(capture('empty')).toContain(emptyComposer);
+    expect(capture('idle-after-turn')).toContain(`❯ ${E}[38;5;231mReply with only the word hi`);
+  });
+
+  it('is false once Claude exited, its empty prompt box still above the shell prompt, as the cursor shows', () => {
+    // As after Ctrl+C twice at an empty prompt: the last box stays on screen, the shell prompt below it.
+    const stale = capture('after-exit').replace(`❯${NBSP}${E}[38;5;153m/exit${E}[7m${E}[39m ${E}[0m`, emptyComposer);
+    expect(stale).not.toBe(capture('after-exit'));
+    expect(claudePromptIsEmpty(stale, flagsOf('after-exit'))).toBe(false);
+    // Without the cursor, the box looks like a live empty prompt.
+    expect(claudePromptIsEmpty(stale)).toBe(true);
+  });
+
+  it('is false while the pane is in copy mode or bracketed paste is off, whatever the screen shows', () => {
+    expect(claudePromptIsEmpty(capture('empty'), { ...flagsOf('empty'), inMode: true })).toBe(false);
+    expect(claudePromptIsEmpty(capture('empty'), { ...flagsOf('empty'), bracketPaste: false })).toBe(false);
+    expect(claudePromptIsEmpty(capture('empty'), { ...flagsOf('empty'), bracketPaste: undefined })).toBe(true);
+  });
+
+  it('is false when the cursor is not at the caret right after `❯ `', () => {
+    expect(claudePromptIsEmpty(capture('empty'), { ...flagsOf('empty'), cursor: { x: 3, y: 11 } })).toBe(false);
+    expect(claudePromptIsEmpty(capture('empty'), { ...flagsOf('empty'), cursor: { x: 2, y: 12 } })).toBe(false);
+    expect(claudePromptIsEmpty(capture('empty'), { inMode: false })).toBe(true);
+  });
+
+  it("is true while Claude's dimmed placeholder shows after the caret", () => {
+    const placeholder = capture('empty').replace(emptyComposer, `❯${NBSP}${E}[7mT${E}[27m${E}[2mry "fix the tests"${E}[22m`);
+    expect(placeholder).not.toBe(capture('empty'));
+    expect(claudePromptIsEmpty(placeholder, flagsOf('empty'))).toBe(true);
+    expect(claudePromptIsEmpty(placeholder)).toBe(true);
+  });
+
+  it('falls back to the older parser when the composer has a plain space (Claude before the no-break space)', () => {
+    const older = (name: string) => capture(name).replaceAll(`❯${NBSP}`, '❯ ');
+    expect(claudePromptIsEmpty(older('empty'), flagsOf('empty'))).toBe(true);
+    expect(claudePromptIsEmpty(older('text'), flagsOf('text'))).toBe(false);
+    expect(claudePromptIsEmpty(older('spaces'), flagsOf('spaces'))).toBe(false);
+    expect(claudePromptIsEmpty(older('copy-mode'), flagsOf('copy-mode'))).toBe(false);
+  });
+});
+
+describe('claudeIsWorking on real Claude Code captures', () => {
+  it('is true during a turn, false at an idle prompt, in a dialog, or after Claude exited', () => {
+    expect(claudeIsWorking(capture('working'))).toBe(true);
+    for (const name of ['empty', 'idle-after-turn', 'text', 'permission-dialog', 'question-dialog', 'after-exit']) expect(claudeIsWorking(capture(name)), name).toBe(false);
+  });
+});
+
+describe('paneScreenArgs and parsePaneScreen', () => {
+  const SEP = '|^|';
+  it('captures the pane and prints its flags, then the extra fields, in one tmux call', () => {
+    expect(paneScreenArgs('=s:', SEP, ['#{pane_pid}'])).toEqual([
+      'capture-pane', '-p', '-e', '-t', '=s:', ';', 'display-message', '-p', '-t', '=s:',
+      '#{pane_in_mode}|^|#{bracket_paste_flag}|^|#{cursor_x}|^|#{cursor_y}|^|#{pane_pid}',
+    ]);
+  });
+
+  it('splits the capture (blank lines kept) from the flags line', () => {
+    const out = `\nline 1\n❯${NBSP}\n\n0|^|1|^|2|^|1|^|4242|^|claude\n`;
+    expect(parsePaneScreen(out, SEP)).toEqual({
+      capture: `\nline 1\n❯${NBSP}\n`,
+      flags: { inMode: false, bracketPaste: true, cursor: { x: 2, y: 1 } },
+      extra: ['4242', 'claude'],
+    });
+  });
+
+  it('leaves out what an older tmux does not report', () => {
+    expect(parsePaneScreen('x\n1|^||^|3|^|4\n', SEP).flags).toEqual({ inMode: true, bracketPaste: undefined, cursor: { x: 3, y: 4 } });
+    expect(parsePaneScreen('x\n0|^|1|^||^|\n', SEP).flags).toEqual({ inMode: false, bracketPaste: true, cursor: undefined });
+    expect(parsePaneScreen('x\nnot flags\n', SEP).flags).toBeUndefined();
+  });
+});
+
 describe('claudePromptShown', () => {
   it('is true with the prompt box on screen, empty or with text typed', () => {
     expect(claudePromptShown(screen(`${E}[39m❯ ${E}[7m ${E}[0m`))).toBe(true);
@@ -106,5 +223,10 @@ describe('claudePromptShown', () => {
       '   3. No, and tell Claude what to do differently (esc)',
     ].join('\n');
     expect(claudePromptShown(dialog)).toBe(false);
+  });
+
+  it('is true with the composer on screen (real captures), false while a dialog takes its place', () => {
+    for (const name of ['empty', 'idle-after-turn', 'working', 'text']) expect(claudePromptShown(capture(name)), name).toBe(true);
+    for (const name of ['permission-dialog', 'question-dialog']) expect(claudePromptShown(capture(name)), name).toBe(false);
   });
 });

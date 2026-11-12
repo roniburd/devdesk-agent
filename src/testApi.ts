@@ -1,6 +1,11 @@
 import type { SharedMemento } from './state/sharedMemento';
 import * as vscode from 'vscode';
 import type { BoardPanel } from './boardPanel';
+import type { CliBridge } from './devdeskCli';
+import type { WorkerHub } from './workers';
+import type { ReviewComments } from './reviewComments';
+import type { TicketLinks } from './ticketLinks';
+import type { WorktreeChecks } from './worktreeChecks';
 import { claudeTerminalSession, restoreTerminals } from './claudeSessions';
 import { type OpenTerminal, REATTACH_KEY, reattachKey } from './state/reattachTerminals';
 import { sessionsTmuxServer } from './config';
@@ -9,6 +14,10 @@ import { SEEN_KEY } from './sessionsReadState';
 import type { SessionNode, SessionsTree } from './sessionsTree';
 import { hostKey } from './state/mementoState';
 import type { UsageScope } from './core/usageScope';
+import { planLimits } from './planLimits';
+import { startNotice } from './edition';
+import { forkTestHooks } from './forkTurn';
+import { shownPick } from './pick';
 import type { UsagePanel } from './usagePanel';
 import type { UsageScopeState } from './usageScopeState';
 import type { WebAccess } from './webAccess';
@@ -37,6 +46,11 @@ export function testApi(
     board,
     usagePanel,
     usageScope,
+    cli,
+    review,
+    checks,
+    workers,
+    tickets,
     globalState,
     projectState,
     web,
@@ -46,6 +60,11 @@ export function testApi(
     board: BoardPanel;
     usagePanel: UsagePanel;
     usageScope: UsageScopeState;
+    cli: CliBridge;
+    review: ReviewComments;
+    checks: WorktreeChecks;
+    workers: WorkerHub;
+    tickets: TicketLinks;
     globalState: SharedMemento;
     projectState: SharedMemento;
     web: WebAccess;
@@ -66,6 +85,17 @@ export function testApi(
       return { label, description: item.description, tooltip, icon, contextValue: item.contextValue, unread: node.kind === 'session' && sessionsTree.state.unreadIds.has(node.card.id), expanded, command: item.command, children };
     });
   return {
+    /** What v2 told the user when it started (v1 enabled too, or its views missing), if anything. */
+    editionNotice: startNotice,
+    /** The DevDesk quick pick shown now (a turn picker, Fork from a Turn's choices): its items, and a way to answer it. */
+    shownPick: () => {
+      const pick = shownPick();
+      return pick && { title: pick.title, labels: pick.labels, choose: (label: string, button?: string) => pick.choose(label, button) };
+    },
+    /** Answers Fork from a Turn's rewind confirmation with what `answer` says of its message (tests cannot answer a modal); undefined shows the dialog again. */
+    answerForkConfirm: (answer: ((message: string) => boolean) | undefined) => {
+      forkTestHooks.confirm = answer;
+    },
     /** Web access's daemon state (read again from `web.json`), and its status bar item. */
     webStatus: () => web.refresh(),
     webStatusBar: () => web.statusBar,
@@ -137,7 +167,7 @@ export function testApi(
     worktreeRoots: async () =>
       (await tree.getChildren()).map((node) => {
         const item = tree.getTreeItem(node);
-        return { label: item.label, description: item.description, contextValue: item.contextValue };
+        return { label: item.label, description: item.description, contextValue: item.contextValue, tooltip: typeof item.tooltip === 'string' ? item.tooltip : item.tooltip?.value };
       }),
     /** The tmux session a terminal is attached to, when it is one of DevDesk's Claude terminals (their names are titles). */
     claudeTerminalSession: (terminal: vscode.Terminal) => claudeTerminalSession(terminal),
@@ -159,6 +189,8 @@ export function testApi(
     /** How many Worktrees package loads ran git so far. */
     worktreeGitLoads: () => tree.gitLoads,
     ...board.testHooks(),
+    /** The 📊 popup's plan limits now (from DevDesk's status line), or its offer to install that. */
+    boardPlanLimits: () => planLimits(),
     /** Whether the Claude Usage page is open, and what it shows (for the window's scope or `scope`). */
     usagePageOpen: () => usagePanel.isOpen,
     usagePage: (scope?: UsageScope) => usagePanel.data(scope),
@@ -170,5 +202,38 @@ export function testApi(
     /** Whether the Claude view is showing. */
     sessionsViewVisible: () => sessionsTree.visible,
     claudeTerminalActive,
+    /** The card of the Claude terminal in front, as ← finds it. */
+    focusedCard: () => sessionsTree.state.focusedCard(),
+    /** The `devdesk` command's path, and how many of its requests this window has handled. */
+    cliCommand: () => cli.command,
+    cliHandled: () => cli.handled,
+    /** Notices and replies the worker hub has typed into sessions so far. */
+    workersTyped: () => workers.typed,
+    /** Adds a note for Claude on lines `start`-`end` (0-based) of `file` in the worktree at `featureDir`, as the diff's comment box does. */
+    addReviewNote: (file: string, featureDir: string, start: number, end: number, text: string) =>
+      review.addAt(vscode.Uri.file(file), featureDir, new vscode.Range(start, 0, end, 0), text),
+    /** Notes for Claude not sent yet, by worktree directory. */
+    reviewNoteCounts: () => Object.fromEntries(review.counts()),
+    /** Fetches the checks of the worktrees the Worktrees view lists, as its refresh tick does when they are due (but now). */
+    refreshChecks: async () => {
+      for (const f of tree.listedFeatures()) await checks.fetch(f);
+    },
+    /** Every ticket link, by target (`worktree:<dir>`, `session:<id>`). */
+    ticketLinks: () => tickets.all(),
+    /** Looks for tickets in the listed worktrees' names and branches now, as the view's refresh tick does. */
+    detectTickets: () => tickets.detectWorktrees(tree.listedFeatures()),
+    /** Reads every linked ticket's title and status again now. */
+    refreshTickets: () => tickets.refreshAll(),
+    /** How many times tickets were fetched. */
+    ticketFetches: () => tickets.fetches,
+    /** Each worktree's checks hint, by directory (only those with one). */
+    checksHints: () => checks.hints(),
+    /** How many times checks were fetched. */
+    checksFetches: () => checks.fetches,
+    /** The prompt Ask Claude to Fix Checks would send for the worktree at `dir` (or why it would send none). */
+    checksFixRequest: async (dir: string) => {
+      const f = tree.listedFeatures().find((x) => x.dir === dir);
+      return f ? checks.fixRequest(f) : { message: `no worktree at ${dir}` };
+    },
   };
 }

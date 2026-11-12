@@ -3,13 +3,15 @@ import { isAbsolute } from 'node:path';
 import * as vscode from 'vscode';
 import { endedDir, removeEndedRecord } from './core/ended';
 import { featureForCwd, runningCopy, type SessionCard } from './core/sessions';
-import { readRegistry } from './core/sessionInfo';
+import { readRegistries } from './core/sessionInfo';
+import { pickClaudeAccount, sessionAccount } from './claudeAccounts';
+import type { ClaudeAccount } from './core/accounts';
 import { cardView, truncate } from './core/sessionsView';
 import { forkArgs, isSessionId, listSessions, nextSessionName, resumeArgs, sessionName } from './core/tmux';
 import { discoverFeatures, type Feature } from './core/worktrees';
 import { attachSession, endTmuxSession, killTmuxSession, startClaude, startClaudeDetached } from './claudeSessions';
 import type { LaunchMode } from './core/modes';
-import { claudeSessionsDir, featureDiscovery, openSettings, sessionsClaudeCommand, sessionsDefaultMode, sessionsModes, sessionsStateDir, sessionsTmux, sessionsTmuxServer, workspaceRoot } from './config';
+import { claudeSessionsDirs, featureDiscovery, openSettings, sessionsClaudeCommand, sessionsDefaultMode, sessionsModes, sessionsStateDir, sessionsTmux, sessionsTmuxServer, workspaceRoot } from './config';
 import { log, noteLatency, stepTimer } from './log';
 import type { SessionsModel } from './sessionsModel';
 import type { SessionNode, SessionsTree } from './sessionsTree';
@@ -74,29 +76,36 @@ export function openFeatureSession(model: SessionsModel, tree: SessionRowSelecto
  * + : another Claude in main (the workspace root), in the first free `cc-main[-<n>]`; no folder to pick. Runs in
  * the default mode (`devdesk.sessions.defaultMode`) unless `mode` is given (New Session with Mode…).
  */
-export async function newSession(model: SessionsModel, tree: SessionRowSelector, mode = sessionsDefaultMode()): Promise<void> {
+export async function newSession(model: SessionsModel, tree: SessionRowSelector, mode = sessionsDefaultMode(), account?: ClaudeAccount): Promise<void> {
   const root = workspaceRoot();
   if (!root) {
     void vscode.window.showInformationMessage('Open a folder to start a Claude session.');
     return;
   }
-  await startNumbered(model, tree, sessionName({ name: 'main', dir: root, isMain: true }), root, sessionsClaudeCommand('', mode));
+  // More than one Claude account (devdesk.claude.accounts): asks which.
+  const chosen = account ?? (await pickClaudeAccount('New Claude Session'));
+  if (!chosen) return;
+  await startNumbered(model, tree, sessionName({ name: 'main', dir: root, isMain: true }), root, sessionsClaudeCommand('', mode, chosen));
 }
 
 /**
  * Fork: a copy of the conversation (`claude --resume <id> --fork-session`) in the folder the session is in now, in a
- * new tmux session named after that folder's worktree, in the default mode unless `mode` is given. The original
- * session is untouched.
+ * new tmux session named after that folder's worktree, in the default mode unless `mode` is given, in the session's
+ * Claude account. The original session is untouched.
  */
 export async function forkSession(model: SessionsModel, tree: SessionRowSelector, card: SessionCard, mode = sessionsDefaultMode()): Promise<void> {
   if (!isSessionId(card.sessionId) || !card.cwd) {
     void vscode.window.showInformationMessage('This session has no Claude status record yet, so it cannot be forked.');
     return;
   }
+  await startNumbered(model, tree, await forkSessionBase(card.cwd), card.cwd, sessionsClaudeCommand(forkArgs(card.sessionId), mode, sessionAccount(card)));
+}
+
+/** The tmux session name a fork in `cwd` is numbered after: its worktree's, else `cc-fork`. */
+export async function forkSessionBase(cwd: string): Promise<string> {
   const root = workspaceRoot();
-  const feature = root ? featureForCwd(await discoverFeatures(root, featureDiscovery()), card.cwd) : undefined;
-  const base = feature ? sessionName(feature) : 'cc-fork';
-  await startNumbered(model, tree, base, card.cwd, sessionsClaudeCommand(forkArgs(card.sessionId), mode));
+  const feature = root ? featureForCwd(await discoverFeatures(root, featureDiscovery()), cwd) : undefined;
+  return feature ? sessionName(feature) : 'cc-fork';
 }
 
 const LAST_CUSTOM_KEY = 'devdesk.sessions.lastCustomArgs';
@@ -177,7 +186,7 @@ const RESUME_SETTLE_MS = 5_000;
 
 async function resumeOnce(model: SessionsModel, tree: SessionRowSelector, card: SessionCard, sessionId: string, cwd: string): Promise<void> {
   // The card may predate a resume from another window, or a copy started some other way: open that one instead.
-  const registry = await readRegistry(claudeSessionsDir()).catch(() => []);
+  const registry = await readRegistries(claudeSessionsDirs());
   let copy = runningCopy(model.current, registry, sessionId);
   // A Claude on it that the cards do not show yet (started a moment ago): look again once a refresh lists it.
   if (copy === 'elsewhere') copy = runningCopy(await model.fresh(), registry, sessionId);
@@ -191,7 +200,8 @@ async function resumeOnce(model: SessionsModel, tree: SessionRowSelector, card: 
     log.info(`Claude session ${sessionId} already runs in tmux session ${copy.tmuxSession}: opening it instead of resuming it again`);
     return openTerminal(tree, copy);
   }
-  const command = sessionsClaudeCommand(resumeArgs(sessionId));
+  // In the Claude account it ran in: its transcript is in that account's config directory.
+  const command = sessionsClaudeCommand(resumeArgs(sessionId), undefined, sessionAccount(card));
   log.info(`resuming parked Claude session ${sessionId} in ${cwd}`);
   if (card.tmuxSession && card.tmuxPane) {
     try {

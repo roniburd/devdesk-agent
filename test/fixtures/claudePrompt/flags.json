@@ -1,0 +1,122 @@
+{
+  "trust-dialog": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 1,
+    "cursorY": 15,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "empty": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 2,
+    "cursorY": 11,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "text": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 13,
+    "cursorY": 11,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "text-cursor-mid": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 10,
+    "cursorY": 11,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "text-cursor-home": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 2,
+    "cursorY": 11,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "spaces": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 5,
+    "cursorY": 11,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "multiline": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 8,
+    "cursorY": 12,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "copy-mode": {
+    "inMode": 1,
+    "bracketPaste": 0,
+    "cursorX": 2,
+    "cursorY": 36,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "working": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 2,
+    "cursorY": 15,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "idle-after-turn": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 2,
+    "cursorY": 17,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "permission-dialog": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 1,
+    "cursorY": 29,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "question-dialog": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 0,
+    "cursorY": 29,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "slash-menu": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 3,
+    "cursorY": 17,
+    "cursorVisible": 0,
+    "alternate": 0
+  },
+  "after-exit": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 24,
+    "cursorY": 39,
+    "cursorVisible": 1,
+    "alternate": 0
+  },
+  "shell-mode": {
+    "inMode": 0,
+    "bracketPaste": 1,
+    "cursorX": 2,
+    "cursorY": 35,
+    "cursorVisible": 0,
+    "alternate": 0
+  }
+}

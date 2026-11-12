@@ -3,6 +3,7 @@ import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import { listClaude } from '../core/cliList';
 import { listProcesses } from '../core/processes';
+import { programStatusDirIn, readCardProgramStatus } from '../core/programStatus';
 import { discoverSlashCommands } from '../core/slashCommands';
 import { claudeInvocationOf } from '../core/web/composer';
 import { ComposerCache } from '../core/web/composerCache';
@@ -67,12 +68,18 @@ async function main(): Promise<void> {
   const server = createWebServer({
     config,
     snapshot,
-    actions: { tmux: runner, listProcesses, tmpDir: tmpdir() },
+    actions: {
+      tmux: runner,
+      listProcesses,
+      tmpDir: tmpdir(),
+      settleMs: config.pasteSettleMs,
+      programStatus: (card) => readCardProgramStatus(programStatusDirIn(config.stateDir), card, processAlive),
+    },
     page: PAGE,
     publicHost: () => config.publicHost || tunnelHost,
     log,
     composer: new ComposerCache({
-      list: (dir) => listClaude(claudeInvocationOf(config.claude), dir, undefined, (m) => log(m)),
+      list: (dir) => listClaude(claudeInvocationOf(config.claude), dir, undefined, (m) => log(m), config.claude.env),
       disk: (dir) => discoverSlashCommands(config.claude.configDir || join(homedir(), '.claude'), [dir]),
       now: Date.now,
     }),

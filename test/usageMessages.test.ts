@@ -3,7 +3,7 @@ import { parseUsageMessage } from '../src/usage/messages';
 
 describe('parseUsageMessage', () => {
   it('keeps the messages the Claude Usage page sends, field by field', () => {
-    for (const type of ['ready', 'refresh', 'settings']) expect(parseUsageMessage({ type, extra: 1 })).toEqual({ type });
+    for (const type of ['ready', 'refresh', 'settings', 'setupLimits']) expect(parseUsageMessage({ type, extra: 1 })).toEqual({ type });
     expect(parseUsageMessage({ type: 'setScope', scope: { kind: 'all' } })).toEqual({ type: 'setScope', scope: { kind: 'all' } });
     expect(parseUsageMessage({ type: 'setScope', scope: { kind: 'project', project: '/w/a', worktree: 'feat' } })).toEqual({
       type: 'setScope',
