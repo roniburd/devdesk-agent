@@ -6,6 +6,8 @@ import { MementoValue } from '../state/mementoState';
 export const KEPT_KEYS = {
   choice: 'devdesk.board.choice',
   draft: 'devdesk.board.draft',
+  /** The New Session view's box keeps a draft of its own (the rest it shares with the board's). */
+  sideDraft: 'devdesk.board.sideDraft',
   history: 'devdesk.board.promptHistory',
   view: 'devdesk.board.view',
 } as const;
@@ -19,21 +21,28 @@ export const KEPT_KEYS = {
 export class BoardProjectState {
   private readonly choice: MementoValue<ReturnType<typeof parseKeptChoice>>;
   private readonly draft: MementoValue<string | undefined>;
+  private readonly sideDraft: MementoValue<string | undefined>;
   private readonly history: MementoValue<string[]>;
   private readonly view: MementoValue<ReturnType<typeof parseView>>;
 
   constructor(memento: vscode.Memento) {
     this.choice = new MementoValue(memento, KEPT_KEYS.choice, parseKeptChoice);
-    this.draft = new MementoValue(memento, KEPT_KEYS.draft, (raw) => (typeof raw === 'string' ? raw : undefined));
+    const parseDraft = (raw: unknown) => (typeof raw === 'string' ? raw : undefined);
+    this.draft = new MementoValue(memento, KEPT_KEYS.draft, parseDraft);
+    this.sideDraft = new MementoValue(memento, KEPT_KEYS.sideDraft, parseDraft);
     this.history = new MementoValue(memento, KEPT_KEYS.history, parseHistory);
     this.view = new MementoValue(memento, KEPT_KEYS.view, parseView);
   }
 
-  /** What a webview that loaded starts with: only what is saved (a field not there: the webview may bring its own). */
-  restore(): KeptState {
+  /**
+   * What a webview that loaded starts with: only what is saved (a field not there: the webview may bring its own).
+   * `side`: the New Session view's box, with its own draft.
+   */
+  restore(side = false): KeptState {
+    const draft = side ? this.sideDraft : this.draft;
     return {
       ...(this.choice.saved ? { choice: this.choice.get() } : {}),
-      ...(this.draft.saved ? { draft: this.draft.get() ?? '' } : {}),
+      ...(draft.saved ? { draft: draft.get() ?? '' } : {}),
       ...(this.history.saved ? { history: this.history.get() } : {}),
       ...(this.view.saved ? this.view.get() : {}),
     };
@@ -41,14 +50,15 @@ export class BoardProjectState {
 
   /** Forgets all of it: the defaults again (for tests). */
   async forget(): Promise<void> {
-    await Promise.all([this.choice, this.draft, this.history, this.view].map((v) => v.set(undefined as never)));
+    await Promise.all([this.choice, this.draft, this.sideDraft, this.history, this.view].map((v) => v.set(undefined as never)));
   }
 
-  /** Saves a webview's change. */
-  async keep(patch: KeepPatch): Promise<void> {
+  /** Saves a webview's change (`side`: from the New Session view's box). */
+  async keep(patch: KeepPatch, side = false): Promise<void> {
     const writes: Thenable<void>[] = [];
+    const draft = side ? this.sideDraft : this.draft;
     if (patch.choice) writes.push(this.choice.update((c) => ({ ...c, ...patch.choice })));
-    if (patch.draft !== undefined && patch.draft !== this.draft.get()) writes.push(this.draft.set(patch.draft));
+    if (patch.draft !== undefined && patch.draft !== draft.get()) writes.push(draft.set(patch.draft));
     if (patch.remember !== undefined) writes.push(this.history.update((h) => rememberPrompt(h, patch.remember!)));
     if (patch.filter !== undefined || patch.query !== undefined) {
       const { filter, query } = patch;

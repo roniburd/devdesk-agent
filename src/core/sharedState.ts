@@ -33,6 +33,7 @@ export const SHARED_PROJECT_KEYS: ReadonlySet<string> = new Set([
   // What the board's prompt box keeps (`board/projectState.ts`).
   'devdesk.board.choice',
   'devdesk.board.draft',
+  'devdesk.board.sideDraft',
   'devdesk.board.promptHistory',
   'devdesk.board.view',
   // The project whose usage this window shows (`usageScopeState.ts`).
