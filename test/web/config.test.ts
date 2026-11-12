@@ -135,6 +135,12 @@ describe('parseDaemonConfig', () => {
     expect('config' in parsed && parsed.config.claude).toEqual({ command: 'c', path: 'p', args: 'a', modeArgs: '--x' });
   });
 
+  it("keeps the prompt box's modes, models and Claude config directory", () => {
+    const claude = { modeArgs: '', modes: [{ name: 'Plan', args: '--permission-mode plan', description: 'Plan only' }], defaultMode: 'Plan', models: ['Default', 'opus'], configDir: '/h/.claude' };
+    const parsed = parseDaemonConfig({ ...good(), claude });
+    expect('config' in parsed && parsed.config.claude).toEqual(claude);
+  });
+
   it('re-applies the clamps', () => {
     const parsed = parseDaemonConfig({ ...good(), pollMs: 1, identityHeader: 'X-H', publicHost: 'A.B' });
     expect('config' in parsed && parsed.config.pollMs).toBe(500);
@@ -162,6 +168,9 @@ describe('parseDaemonConfig', () => {
     ['tmux env with a number', () => ({ ...good(), tmux: { ...good().tmux, env: { A: 1 } } })],
     ['missing tmux', () => ({ ...good(), tmux: undefined })],
     ['missing modeArgs', () => ({ ...good(), claude: {} })],
+    ['modes not modes', () => ({ ...good(), claude: { modeArgs: '', modes: [{ args: 1 }] } })],
+    ['models with a number', () => ({ ...good(), claude: { modeArgs: '', models: [1] } })],
+    ['configDir a number', () => ({ ...good(), claude: { modeArgs: '', configDir: 1 } })],
     ['root a number', () => ({ ...good(), root: 3 })],
     ['missing discovery', () => ({ ...good(), discovery: undefined })],
     ['stuckMs negative', () => ({ ...good(), stuckMs: -1 })],

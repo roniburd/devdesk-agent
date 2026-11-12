@@ -1,7 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
+import { listClaude } from '../core/cliList';
 import { listProcesses } from '../core/processes';
+import { discoverSlashCommands } from '../core/slashCommands';
+import { claudeInvocationOf } from '../core/web/composer';
+import { ComposerCache } from '../core/web/composerCache';
 import { processAlive } from '../core/sessions';
 import { tmuxRunner } from '../core/tmux';
 import { type DaemonConfig, defaultDaemonConfig, fillTunnelCommand, parseDaemonArgs, parseDaemonConfig } from '../core/web/config';
@@ -67,6 +71,11 @@ async function main(): Promise<void> {
     page: PAGE,
     publicHost: () => config.publicHost || tunnelHost,
     log,
+    composer: new ComposerCache({
+      list: (dir) => listClaude(claudeInvocationOf(config.claude), dir, undefined, (m) => log(m)),
+      disk: (dir) => discoverSlashCommands(config.claude.configDir || join(homedir(), '.claude'), [dir]),
+      now: Date.now,
+    }),
     ...(accessKeys ? { accessKeys } : {}),
   });
 

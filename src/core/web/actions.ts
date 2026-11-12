@@ -13,7 +13,8 @@ import { toWebCard, type WebView } from './cards';
 import type { DaemonConfig } from './config';
 import { keyArgs } from './keys';
 import { DETAIL_MAX_TAIL_BYTES, DETAIL_TAIL_BYTES, DETAIL_TURNS, transcriptTurns } from './transcript';
-import type { ErrorCode, ErrorResponse, NewSessionRequest, NewSessionResponse, OkResponse, ScreenState, SessionDetail, Turn, WebKey } from './types';
+import { launchArgs, webModels } from './composer';
+import type { ErrorCode, ErrorResponse, NewSessionRequest, NewSessionResponse, OkResponse, ScreenState, SessionDetail, Turn, WebKey, WebModel } from './types';
 
 /** What the web access routes do to a session: read it, type into it, press a key in it, or start a new one. */
 
@@ -102,10 +103,16 @@ export async function pressKey(card: SessionCard, key: WebKey, server: string, d
   return { status: 200, body: { ok: true } };
 }
 
+/** The feature `dir` is (its dir, or its realDir), if it is one of `features`. */
+export function featureOf(dir: string, features: readonly Feature[]): Feature | undefined {
+  return features.find((f) => f.dir === dir || (f.realDir !== undefined && f.realDir === dir));
+}
+
 /**
  * Starts Claude in a new detached tmux session in one of `features` (`req.dir` must be its dir, or its realDir: else
  * 400), named after the feature (`cc-main`, then `cc-main-2`, … past `existing`), on cfg.tmux.server, with DevDesk's
- * environment and tmux options; the prompt, when given, as Claude's first prompt.
+ * environment and tmux options; the mode, model and effort chosen (only what `models`, the model pill's rows, and the
+ * configured modes offer: else 400); the prompt, when given, as Claude's first prompt.
  */
 export async function startSession(
   req: NewSessionRequest,
@@ -113,12 +120,15 @@ export async function startSession(
   existing: readonly string[],
   cfg: Pick<DaemonConfig, 'tmux' | 'claude'>,
   d: ActionDeps,
+  models: readonly WebModel[] = webModels(cfg.claude, undefined),
 ): Promise<ActionResult<NewSessionResponse>> {
-  const feature = features.find((f) => f.dir === req.dir || (f.realDir !== undefined && f.realDir === req.dir));
+  const feature = featureOf(req.dir, features);
   if (!feature) return fail(400, 'bad-request', 'Sessions can only start in one of the listed folders.');
+  const launch = launchArgs(req, cfg.claude, models);
+  if ('error' in launch) return fail(400, 'bad-request', launch.error);
   const name = nextSessionName(sessionName(feature), existing);
   const { command, path, args } = cfg.claude;
-  const shell = claudeShellCommand({ command, path, args }, joinArgs(cfg.claude.modeArgs, req.prompt ? promptArg(req.prompt) : ''));
+  const shell = claudeShellCommand({ command, path, args }, joinArgs(launch.args, req.prompt ? promptArg(req.prompt) : ''));
   try {
     const run = tmuxStartCommand(shell, d.tmpDir);
     await d.tmux(cfg.tmux.server)(attachArgs(name, feature.dir, run, cfg.tmux.env, cfg.tmux.options, true));

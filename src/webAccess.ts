@@ -34,7 +34,7 @@ const LOCK_WAIT_MS = 20_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const QR_PANEL = 'devdesk.web.qr';
 /** Settings the daemon's config is built from: a change restarts a running daemon when its config differs. */
-const AFFECTS = ['devdesk.web', 'devdesk.sessions', 'devdesk.insights', 'devdesk.worktrees.kind'];
+const AFFECTS = ['devdesk.web', 'devdesk.sessions', 'devdesk.insights', 'devdesk.worktrees.kind', 'devdesk.board.models'];
 
 /** True when `pid` runs the daemon (not some process that took over a stale pid); false when `ps` can't tell. */
 async function isDaemon(pid: number): Promise<boolean> {

@@ -715,7 +715,8 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
   const stateDir = sessionsStateDir();
   const { bin = 'tmux', configFile } = sessionsTmuxSetup();
   const c = cfg();
-  const claude: DaemonConfig['claude'] = { modeArgs: sessionsDefaultMode().args };
+  const mode = sessionsDefaultMode();
+  const claude: DaemonConfig['claude'] = { modeArgs: mode.args, modes: sessionsModes(), defaultMode: mode.name, models: boardModels(), configDir: claudeConfigDir() };
   const command = c.get<string>('sessions.command');
   const path = claudeBinary();
   const args = c.get<string>('sessions.claudeArgs');

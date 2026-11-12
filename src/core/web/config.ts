@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { isFiniteNumber } from '../json';
+import { type LaunchMode, parseModes } from '../modes';
 import { shellQuote } from '../shell';
 import { isServerName } from '../tmux';
 import { isSessionView, type SessionView } from './types';
@@ -187,8 +188,21 @@ export interface DaemonConfig extends WebAccessSettings {
     /** sessionsClaudeEnv() (+ DEVDESK_TMUX when bin !== 'tmux') */
     env: Record<string, string>;
   };
-  /** modeArgs: sessionsDefaultMode().args */
-  claude: { command?: string; path?: string; args?: string; modeArgs: string };
+  /**
+   * modeArgs: sessionsDefaultMode().args. For the page's prompt box: modes (sessionsModes(), absent: only the default
+   * mode) with defaultMode its name, models (boardModels(): replaces the CLI's list when not empty), configDir
+   * (claudeConfigDir(): the skills and commands `/` offers).
+   */
+  claude: {
+    command?: string;
+    path?: string;
+    args?: string;
+    modeArgs: string;
+    modes?: LaunchMode[];
+    defaultMode?: string;
+    models?: string[];
+    configDir?: string;
+  };
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -249,6 +263,9 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (!isObject(c)) return 'claude must be an object';
   if (!optionalString(c.command) || !optionalString(c.path) || !optionalString(c.args)) return 'claude.command, path and args must be strings';
   if (typeof c.modeArgs !== 'string') return 'claude.modeArgs must be a string';
+  if (c.modes !== undefined && (!Array.isArray(c.modes) || parseModes(c.modes).length !== c.modes.length)) return 'claude.modes must be launch modes';
+  if (!optionalString(c.defaultMode) || !optionalString(c.configDir)) return 'claude.defaultMode and configDir must be strings';
+  if (c.models !== undefined && (!Array.isArray(c.models) || !c.models.every((m) => typeof m === 'string'))) return 'claude.models must be strings';
   return undefined;
 }
 
@@ -288,6 +305,10 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
       ...(claude.path !== undefined ? { path: claude.path } : {}),
       ...(claude.args !== undefined ? { args: claude.args } : {}),
       modeArgs: claude.modeArgs,
+      ...(claude.modes !== undefined ? { modes: parseModes(claude.modes) } : {}),
+      ...(claude.defaultMode !== undefined ? { defaultMode: claude.defaultMode } : {}),
+      ...(claude.models !== undefined ? { models: [...(claude.models as string[])] } : {}),
+      ...(claude.configDir !== undefined ? { configDir: claude.configDir } : {}),
     },
   };
   return { config };

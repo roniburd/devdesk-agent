@@ -200,6 +200,17 @@ describe('startSession', () => {
     expect((await readdir(tmp)).length).toBe(1);
   });
 
+  it('starts in the chosen mode with the chosen model and effort, and refuses what is not offered', async () => {
+    const t = fakeTmux();
+    const withModes = { ...cfg, claude: { ...cfg.claude, modes: [{ name: 'Auto', args: '--permission-mode auto' }, { name: 'Plan', args: '--permission-mode plan' }], defaultMode: 'Auto' } };
+    expect(await startSession({ dir: '/w', prompt: 'go', mode: 'Plan', model: 'opus', effort: 'high' }, features, [], withModes, deps(t))).toMatchObject({ status: 201 });
+    expect(t.calls[0][8]).toBe("claude --permission-mode plan --model 'opus' --effort 'high' -- 'go'; exec $SHELL -l");
+    for (const bad of [{ mode: 'Bypass' }, { model: '--dangerously-skip-permissions' }, { effort: 'ludicrous' }]) {
+      expect(await startSession({ dir: '/w', prompt: '', ...bad }, features, [], withModes, deps(t))).toMatchObject({ status: 400, body: { code: 'bad-request' } });
+    }
+    expect(t.calls).toHaveLength(1);
+  });
+
   it('gives 502 when tmux fails', async () => {
     const t = fakeTmux({ fail: { 'new-session': 'duplicate session: cc-main' } });
     expect(await startSession({ dir: '/w', prompt: '' }, features, [], cfg, deps(t))).toMatchObject({ status: 502, body: { code: 'tmux' } });

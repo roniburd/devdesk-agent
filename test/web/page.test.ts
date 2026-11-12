@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { buildSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CardsResponse, FoldersResponse, SessionDetail, WebCard } from '../../src/core/web/types';
+import type { CardsResponse, ComposerResponse, FoldersResponse, SessionDetail, WebCard } from '../../src/core/web/types';
 import { cssColor, fitLine } from '../../src/web/page/screen';
 
 const PAGE = join(__dirname, '..', '..', 'src', 'web', 'page');
@@ -491,6 +491,131 @@ describe('new session', () => {
     await p.settle();
     expect(p.$('.composer .notice')!.textContent).toBe('Not an allowed folder.');
     expect((p.$('textarea.prompt') as HTMLTextAreaElement).value).toBe('keep me');
+  });
+});
+
+describe('prompt box tools', () => {
+  const folders: FoldersResponse = { folders: [{ dir: '/ws/main', name: 'main', isMain: true }] };
+  const info: ComposerResponse = {
+    commands: [
+      { name: 'model', description: 'Set the model', origin: 'built-in', category: 'A', argumentHint: '[model]' },
+      { name: 'clear', description: 'Clear the prompt box', origin: 'built-in', category: 'A' },
+      { name: 'compact', description: 'Summarize', origin: 'built-in', category: 'C' },
+      { name: 'plan', description: 'Plan mode', origin: 'built-in', category: 'B', argumentHint: '<task>' },
+      { name: 'superpowers:brainstorming', description: 'Design first', origin: 'superpowers', aliases: ['brainstorming'] },
+    ],
+    models: [
+      { value: 'Default', label: 'Default', description: '', efforts: ['low', 'high'] },
+      { value: 'global.opus', label: 'Opus', description: 'Opus 5.5', efforts: ['low', 'high', 'max'] },
+      { value: 'router', label: 'Router', description: '', efforts: [] },
+    ],
+    modes: [
+      { name: 'Auto', description: 'auto' },
+      { name: 'Plan', description: 'plan' },
+    ],
+    defaultMode: 'Auto',
+    planMode: 'Plan',
+    listing: false,
+  };
+  const answers = (m: string, url: string) => {
+    if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
+    if (m === 'GET' && url === 'api/composer?dir=%2Fws%2Fmain') return { status: 200, body: info };
+    if (m === 'POST' && url === 'api/sessions') return { status: 201, body: { tmuxSession: 'cc-main-1', server: 'devdesk' } };
+    return undefined;
+  };
+  type Page = Awaited<ReturnType<typeof page>>;
+  const box = (p: Page) => p.$('textarea.prompt') as HTMLTextAreaElement;
+  const type = (p: Page, text: string) => {
+    const prompt = box(p);
+    prompt.focus();
+    prompt.value = text;
+    prompt.setSelectionRange(text.length, text.length);
+    prompt.dispatchEvent(new p.win.Event('input', { bubbles: true }));
+  };
+  const press = (p: Page, key: string) => box(p).dispatchEvent(new p.win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  const pick = (p: Page, label: string, value: string) => {
+    const select = p.$(`select[aria-label="${label}"]`) as HTMLSelectElement;
+    select.value = value;
+    select.dispatchEvent(new p.win.Event('change', { bubbles: true }));
+  };
+  const startClick = async (p: Page) => {
+    (p.$('button.start') as HTMLButtonElement).click();
+    await p.settle();
+  };
+  const posted = (p: Page) => p.calls.find((x) => x.method === 'POST')?.body;
+
+  it('opens the / menu as you type, filters it, and Tab or Enter puts the command in the box', async () => {
+    const p = await page(answers);
+    type(p, '/');
+    expect(p.visible(p.$('.slash-menu'))).toBe(true);
+    expect(p.$$('.slash-row .slash-name').map((e) => e.textContent)).toContain('/superpowers:brainstorming');
+    type(p, '/brain');
+    expect(p.$$('.slash-row .slash-name').map((e) => e.textContent)).toEqual(['/superpowers:brainstorming']);
+    press(p, 'Tab');
+    expect(box(p).value).toBe('/superpowers:brainstorming ');
+    expect(p.visible(p.$('.slash-menu'))).toBe(false);
+    type(p, '/mo');
+    expect(p.$('.slash-row.active .slash-hint')!.textContent).toBe('[model]');
+    press(p, 'Enter');
+    expect(box(p).value).toBe('/model ');
+    expect(posted(p)).toBeUndefined();
+  });
+
+  it('moves with the arrows and closes with Escape', async () => {
+    const p = await page(answers);
+    type(p, '/');
+    const first = p.$('.slash-row.active')!.textContent;
+    press(p, 'ArrowDown');
+    expect(p.$('.slash-row.active')!.textContent).not.toBe(first);
+    press(p, 'Escape');
+    expect(p.visible(p.$('.slash-menu'))).toBe(false);
+  });
+
+  it('the / button opens the menu (for a phone keyboard)', async () => {
+    const p = await page(answers);
+    (p.$('button.slash-button') as HTMLButtonElement).click();
+    expect(box(p).value).toBe('/');
+    expect(p.visible(p.$('.slash-menu'))).toBe(true);
+  });
+
+  it('posts the mode, model and effort picked in the pills, and keeps them for the next visit', async () => {
+    const p = await page(answers);
+    expect([...(p.$('select[aria-label="Model"]') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Default model', 'Opus', 'Router']);
+    pick(p, 'Mode', 'Plan');
+    pick(p, 'Model', 'global.opus');
+    expect([...(p.$('select[aria-label="Effort"]') as HTMLSelectElement).options].map((o) => o.value)).toEqual(['Default', 'low', 'high', 'max']);
+    pick(p, 'Effort', 'max');
+    type(p, 'go');
+    await startClick(p);
+    expect(posted(p)).toEqual({ dir: '/ws/main', prompt: 'go', mode: 'Plan', model: 'global.opus', effort: 'max' });
+    expect(JSON.parse(p.win.localStorage.getItem('devdesk.web.choice')!)).toEqual({ mode: 'Plan', model: 'global.opus', effort: 'max' });
+  });
+
+  it('hides the effort pill for a model without effort, and resets the effort', async () => {
+    const p = await page(answers);
+    pick(p, 'Effort', 'high');
+    pick(p, 'Model', 'router');
+    expect(p.visible(p.$('select[aria-label="Effort"]'))).toBe(false);
+    type(p, 'go');
+    await startClick(p);
+    expect(posted(p)).toEqual({ dir: '/ws/main', prompt: 'go', model: 'router' });
+  });
+
+  it('/model sets the pill instead of starting, /compact says where it works, /plan starts in plan mode', async () => {
+    const p = await page(answers);
+    type(p, '/model opus');
+    await startClick(p);
+    expect((p.$('select[aria-label="Model"]') as HTMLSelectElement).value).toBe('global.opus');
+    expect(box(p).value).toBe('');
+    expect(p.$('.composer .notice')!.textContent).toBe('Model: Opus.');
+    type(p, '/compact');
+    press(p, 'Escape');
+    await startClick(p);
+    expect(p.$('.composer .notice')!.textContent).toContain('works in a running session');
+    expect(posted(p)).toBeUndefined();
+    type(p, '/plan add a cache');
+    await startClick(p);
+    expect(posted(p)).toEqual({ dir: '/ws/main', prompt: 'add a cache', mode: 'Plan', model: 'global.opus' });
   });
 });
 

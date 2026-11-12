@@ -9,6 +9,8 @@ describe('parseRoute', () => {
     ['GET', '/api/sessions', { kind: 'cards' }],
     ['GET', '/api/events', { kind: 'events' }],
     ['GET', '/api/folders', { kind: 'folders' }],
+    ['GET', '/api/composer', { kind: 'composer' }],
+    ['GET', '/api/composer?dir=%2Fw', { kind: 'composer' }],
     ['POST', '/api/sessions', { kind: 'start' }],
     ['GET', '/api/sessions/abc-123', { kind: 'detail', id: 'abc-123' }],
     ['POST', '/api/sessions/abc-123/send', { kind: 'send', id: 'abc-123' }],
@@ -117,6 +119,12 @@ describe('parseNewSessionBody', () => {
 
   it.each([[null], [{}], [{ dir: '' }], [{ dir: 3, prompt: '' }], [{ dir: '/w', prompt: 3 }], [{ dir: ['/w'] }]])('400 for %j', (raw) => {
     expect(parseNewSessionBody(raw)).toMatchObject({ status: 400 });
+  });
+
+  it('takes a mode, model and effort as names', () => {
+    expect(parseNewSessionBody({ dir: '/w', prompt: 'x', mode: 'Plan', model: 'opus', effort: 'high' })).toEqual({ dir: '/w', prompt: 'x', mode: 'Plan', model: 'opus', effort: 'high' });
+    expect(parseNewSessionBody({ dir: '/w', model: 3 })).toMatchObject({ status: 400 });
+    expect(parseNewSessionBody({ dir: '/w', effort: 'x'.repeat(600) })).toMatchObject({ status: 400 });
   });
 
   it('413 for a long prompt', () => {
