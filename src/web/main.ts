@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   let tunnel: { pid?: number; stop(): void } | undefined;
   const startTunnel = () => {
     if (!config.tunnelCommand) return;
-    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user, host: hostname(), publicHost: config.publicHost, ngrokPolicy: ngrokPolicyPath });
+    const command = fillTunnelCommand(config.tunnelCommand, { port, user: config.user, host: hostname(), tunnelName: config.tunnelName, publicHost: config.publicHost, ngrokPolicy: ngrokPolicyPath });
     const spec = { urlHost: config.tunnelUrlHost, actionHost: config.tunnelActionHost };
     const rules = {
       classify: (url: string) => classifyTunnelUrl(url, spec, config.publicHost),

@@ -2,14 +2,15 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, type FSWatcher, openSync, watch } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice } from './config';
+import { cfg, openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice, webTunnelPreview } from './config';
 import { writeFileAtomic } from './core/atomicWrite';
 import { FileLockBusy, withFileLock } from './core/fileLock';
 import { processAlive } from './core/sessions';
 import { execText } from './core/shellRun';
-import { type DaemonConfig, parseDaemonConfig } from './core/web/config';
+import { type DaemonConfig, parseDaemonConfig, shortHostName, tunnelNameProblem } from './core/web/config';
 import { isDaemonCommand, launchFailure, statusBarText, type WebMenuId, webMenuChoices } from './core/web/launch';
 import { daemonScript, type WebPanelRow } from './core/web/panel';
 import { qrMatrix, qrSvg } from './core/web/qr';
@@ -166,6 +167,33 @@ export class WebAccess implements vscode.Disposable {
       this.qrWhenUp = false;
       if (fitsQr(s.url)) this.showQr(s.url);
     }
+  }
+
+  /**
+   * Set Web Access Tunnel Name: asks for `devdesk.web.tunnelName`, showing the tunnel name and URL it gives as you
+   * type, and saves it for this machine. A running daemon restarts with it (settingsChanged).
+   */
+  async setTunnelName(): Promise<void> {
+    const current = cfg().get<string>('web.tunnelName') ?? '';
+    const host = shortHostName(hostname(), webAccessConfig().user);
+    const typed = await vscode.window.showInputBox({
+      title: 'Web Access Tunnel Name',
+      prompt: `This machine's part of the tunnel's name, so each machine gets a tunnel of its own (for example mac or cloud). Empty: the host name (${host}).`,
+      value: current,
+      placeHolder: host,
+      validateInput: (v) => {
+        const problem = tunnelNameProblem(v);
+        if (problem) return { message: `Can't use this name: ${problem}.`, severity: vscode.InputBoxValidationSeverity.Error };
+        const p = webTunnelPreview(v.trim());
+        return {
+          message: p ? `Tunnel: ${p.name}${p.url ? `  ·  ${p.url}` : ''}` : 'The tunnel this window runs has no {host} in its command: this name shows nowhere until it does.',
+          severity: vscode.InputBoxValidationSeverity.Info,
+        };
+      },
+    });
+    if (typed === undefined || typed.trim() === current) return;
+    await cfg().update('web.tunnelName', typed.trim(), vscode.ConfigurationTarget.Global);
+    await this.refresh();
   }
 
   /** Choose Web Access Tunnel: saves the choice, then starts (or restarts) web access with it. */
@@ -500,6 +528,7 @@ export function registerWebAccess(ctx: vscode.ExtensionContext): WebAccess {
     vscode.commands.registerCommand('devdesk.web.openLog', () => vscode.window.showTextDocument(vscode.Uri.file(web.logPath()))),
     vscode.commands.registerCommand('devdesk.web.openSettings', () => openSettings('devdesk.web')),
     vscode.commands.registerCommand('devdesk.web.chooseTunnel', () => web.chooseTunnel()),
+    vscode.commands.registerCommand('devdesk.web.setTunnelName', () => web.setTunnelName()),
   );
   web.panel = registerWebAccessView(ctx, web);
   return web;

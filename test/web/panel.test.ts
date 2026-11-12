@@ -93,4 +93,13 @@ describe('webPanelRows', () => {
     expect(access({ ...settings, allowedUsers: [] })).toMatchObject({ label: 'Access: nobody', color: 'problemsWarningIcon.foreground' });
     expect(access({ ...settings, identityHeader: '' })).toMatchObject({ description: 'no identity header', color: 'problemsWarningIcon.foreground' });
   });
+
+  it('shows the tunnel name, off or on, and changes it on click', () => {
+    const tunnelName = { label: 'cloud', fromSetting: true, name: 'devdesk-v1-cloud', url: 'https://u-devdesk-v1-cloud.example/' };
+    expect(ids({ tunnelName })).toEqual(['status', 'tunnelName', 'settings']);
+    const rows = webPanelRows(input({ status: { kind: 'on', state: state() }, tunnelName }));
+    expect(rows.find((r) => r.id === 'tunnelName')).toMatchObject({ description: 'devdesk-v1-cloud', action: 'tunnelName', contextValue: 'webTunnelName' });
+    expect(rows.find((r) => r.id === 'tunnelName')?.tooltip).toContain('https://u-devdesk-v1-cloud.example/');
+    expect(ids({})).not.toContain('tunnelName');
+  });
 });

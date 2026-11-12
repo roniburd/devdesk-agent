@@ -4,6 +4,10 @@ import {
   defaultDaemonConfig,
   fillTunnelCommand,
   shortHostName,
+  tunnelLabel,
+  tunnelNameIn,
+  tunnelNameProblem,
+  tunnelPreview,
   parseDaemonArgs,
   parseDaemonConfig,
   resolveWebSettings,
@@ -24,6 +28,7 @@ describe('resolveWebSettings', () => {
       publicHost: '',
       tunnelCommand: '',
       pollMs: 2000,
+      tunnelName: '',
       tunnel: '',
       tunnelUrlHost: '',
       tunnelReadyLine: '',
@@ -281,5 +286,58 @@ describe('fillTunnelCommand', () => {
   it('leaves other text alone', () => {
     expect(fillTunnelCommand('t --name devdesk-v1-{host}', { port: 1, user: 'roni', host: 'box-roni-2a-x.example.com' })).toBe('t --name devdesk-v1-2a-x');
     expect(fillTunnelCommand('run {other} $HOME', { port: 1, user: 'u', host: 'h' })).toBe('run {other} $HOME');
+  });
+});
+
+describe('tunnel names', () => {
+  it('cleans a typed name the way {host} takes it', () => {
+    expect(tunnelLabel('Cloud')).toBe('cloud');
+    expect(tunnelLabel(' my_mac ')).toBe('my-mac');
+    expect(tunnelLabel('--a--b--')).toBe('a-b');
+    expect(tunnelLabel('x'.repeat(30))).toBe('x'.repeat(24));
+    expect(tunnelLabel('___')).toBe('');
+  });
+
+  it('says what is wrong with a typed name, and accepts an empty one', () => {
+    expect(tunnelNameProblem('')).toBeUndefined();
+    expect(tunnelNameProblem('  ')).toBeUndefined();
+    expect(tunnelNameProblem('Cloud-2')).toBeUndefined();
+    expect(tunnelNameProblem('my mac')).toMatch(/letters, digits and dashes/);
+    expect(tunnelNameProblem('a.b')).toMatch(/letters, digits and dashes/);
+    expect(tunnelNameProblem('x'.repeat(25))).toMatch(/24 characters/);
+    expect(tunnelNameProblem('---')).toMatch(/at least one/);
+  });
+
+  it('fills {host} with the tunnel name when set, else the short host name', () => {
+    const v = { port: 1, user: 'roni', host: 'box-roni-2a-x.example.com' };
+    expect(fillTunnelCommand('t --name devdesk-v1-{host}', { ...v, tunnelName: 'cloud' })).toBe('t --name devdesk-v1-cloud');
+    expect(fillTunnelCommand('t --name devdesk-v1-{host}', { ...v, tunnelName: '' })).toBe('t --name devdesk-v1-2a-x');
+    // The user's name is kept in a name you chose (it is only dropped from host names).
+    expect(fillTunnelCommand('t {host}', { ...v, tunnelName: 'roni-mac' })).toBe('t roni-mac');
+  });
+
+  it('finds the tunnel name in a command', () => {
+    expect(tunnelNameIn('tunnel create {port} --name devdesk-v1-{host} --allow {user}', 'mac')).toBe('devdesk-v1-mac');
+    expect(tunnelNameIn("cloudflared tunnel info devdesk-{host} >/dev/null || x", 'mac')).toBe('devdesk-mac');
+    expect(tunnelNameIn('devtunnel host -p {port}', 'mac')).toBeUndefined();
+  });
+
+  it('previews the name and, with a template, the URL', () => {
+    const o = { command: 'expose {port} --name devdesk-v1-{host}', host: 'box-roni-2a-x', user: 'Roni' };
+    expect(tunnelPreview(o)).toEqual({ label: '2a-x', fromSetting: false, name: 'devdesk-v1-2a-x' });
+    expect(tunnelPreview({ ...o, tunnelName: 'Cloud', urlTemplate: 'https://{user}-{name}.example/' })).toEqual({
+      label: 'cloud',
+      fromSetting: true,
+      name: 'devdesk-v1-cloud',
+      url: 'https://roni-devdesk-v1-cloud.example/',
+    });
+    expect(tunnelPreview({ ...o, command: '' })).toBeUndefined();
+  });
+
+  it('is a setting, a config field and a flag', () => {
+    expect(resolveWebSettings({ ...empty, tunnelName: ' My_Mac ' }, { user: 'u' }).tunnelName).toBe('my-mac');
+    expect(resolveWebSettings(empty, { user: 'u' }).tunnelName).toBe('');
+    expect(parseDaemonArgs(['--tunnel-name', 'cloud'])).toMatchObject({ overrides: { tunnelName: 'cloud' } });
+    expect(parseDaemonArgs(['--tunnel-name', 'a b'])).toMatchObject({ error: expect.stringMatching(/--tunnel-name/) });
   });
 });

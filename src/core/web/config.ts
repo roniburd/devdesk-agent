@@ -20,6 +20,8 @@ const MAX_POLL_MS = 60_000;
 export interface WebProviderDefaults {
   tunnelCommand: string;
   identityHeader: string;
+  /** The URL its tunnel gets, with {user} and {name} (the tunnel's name), for the Web Access view's preview. */
+  tunnelUrl?: string;
 }
 
 /** devdesk.web.* as read from VS Code, untrimmed. */
@@ -31,6 +33,8 @@ export interface WebSettings {
   publicHost: unknown;
   tunnelCommand: unknown;
   pollMs: unknown;
+  /** devdesk.web.tunnelName */
+  tunnelName?: unknown;
   /** devdesk.web.tunnel; in a DaemonConfig, the preset that ran ('' none). */
   tunnel?: unknown;
   /** devdesk.web.cloudflare.team / .audience; in a DaemonConfig, `cloudflare`. */
@@ -60,6 +64,8 @@ export interface WebAccessSettings {
   tunnelCommand: string;
   /** 500..60000, default 2000. */
   pollMs: number;
+  /** What fills {host} (tunnelLabel()); '' -> this machine's short host name. */
+  tunnelName: string;
   /** The preset's URL rules (TunnelSpec); '' with none. */
   tunnelUrlHost: string;
   tunnelReadyLine: string;
@@ -102,6 +108,7 @@ export function resolveWebSettings(s: WebSettings, ctx: { provider?: WebProvider
     port: validPort(s.port) ? s.port : DEFAULT_WEB_PORT,
     publicHost,
     pollMs: pollOf(s.pollMs),
+    tunnelName: tunnelLabel(str(s.tunnelName)),
     cloudflare: { team: cloudflareTeamOf(s.cloudflareTeam ?? cf.team), audience: cloudflareAudienceOf(s.cloudflareAudience ?? cf.audience) },
     ngrokProvider: ngrokProviderOf(s.ngrokProvider),
     sessionView: isSessionView(s.sessionView) ? s.sessionView : 'transcript',
@@ -200,6 +207,7 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (r.auth === 'tunnel' && (r.tunnel !== 'devtunnel' || allowsAnonymous(str(r.tunnelCommand)))) {
     return "auth 'tunnel' runs only with the devtunnel preset, without anonymous access";
   }
+  if (!optionalString(r.tunnelName)) return 'tunnelName must be a string';
   for (const k of ['tunnelUrlHost', 'tunnelReadyLine', 'tunnelActionHost'] as const) {
     if (r[k] === undefined) continue;
     if (typeof r[k] !== 'string') return `${k} must be a string`;
@@ -300,6 +308,7 @@ export function defaultDaemonConfig(home: string, user: string): DaemonConfig {
     publicHost: '',
     tunnelCommand: '',
     pollMs: DEFAULT_POLL_MS,
+    tunnelName: '',
     tunnel: '',
     tunnelUrlHost: '',
     tunnelReadyLine: '',
@@ -341,6 +350,11 @@ const FLAGS: Readonly<Record<string, Flag>> = {
   '--allow-user': (v, o) => void (o.allowedUsers = [...(o.allowedUsers ?? []), v]),
   '--public-host': (v, o) => void (o.publicHost = v),
   '--tunnel-command': (v, o) => void (o.tunnelCommand = v),
+  '--tunnel-name': (v, o) => {
+    if (tunnelNameProblem(v)) return `--tunnel-name: ${tunnelNameProblem(v)}`;
+    o.tunnelName = tunnelLabel(v);
+    return undefined;
+  },
   '--tunnel': (v, o) => {
     if (v !== '' && !isTunnelPreset(v)) return `--tunnel must be one of ${TUNNEL_PRESETS.join(', ')}`;
     o.tunnel = v as TunnelPreset | '';
@@ -396,6 +410,30 @@ export function parseDaemonArgs(argv: readonly string[]): { configPath?: string;
   return configPath !== undefined ? { configPath, overrides } : { overrides };
 }
 
+/** The longest name {host} gets. */
+export const TUNNEL_NAME_MAX = 24;
+
+/** `name` as {host} takes it: lower case, letters, digits and dashes (others become dashes), at most 24 characters; '' when nothing is left. */
+export function tunnelLabel(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+/, '')
+    .slice(0, TUNNEL_NAME_MAX)
+    .replace(/-+$/, '');
+}
+
+/** What is wrong with a typed `devdesk.web.tunnelName` (trimmed; '' is fine: the host name), or undefined. */
+export function tunnelNameProblem(typed: string): string | undefined {
+  const t = typed.trim();
+  if (!t) return undefined;
+  if (!/^[A-Za-z0-9-]+$/.test(t)) return 'use only letters, digits and dashes';
+  if (t.length > TUNNEL_NAME_MAX) return `use at most ${TUNNEL_NAME_MAX} characters`;
+  if (!tunnelLabel(t)) return 'use at least one letter or digit';
+  return undefined;
+}
+
 /**
  * This machine in a tunnel name: the host name's first label, lower case, in letters, digits and dashes, without
  * anything up to and including the user's name, which the tunnel URL already has (`box-roni-2a-d1` -> `2a-d1`), at most
@@ -406,18 +444,46 @@ export function shortHostName(hostname: string, user: string): string {
   let h = (hostname.split('.')[0] ?? '').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   const at = u ? `-${h}-`.indexOf(`-${u}-`) : -1;
   if (at >= 0) h = h.slice(at + u.length + 1);
-  h = h.replace(/-+/g, '-').slice(0, 24).replace(/^-+|-+$/g, '');
-  return h || 'host';
+  return tunnelLabel(h) || 'host';
+}
+
+/** What fills {host}: `devdesk.web.tunnelName` (tunnelLabel()) when set, else shortHostName(). */
+export function tunnelHostLabel(v: { tunnelName?: string; host: string; user: string }): string {
+  return tunnelLabel(v.tunnelName ?? '') || shortHostName(v.host, v.user);
+}
+
+/** The tunnel's name in `command`: the word that has {host} (`devdesk-v1-{host}`), filled in; undefined without one. */
+export function tunnelNameIn(command: string, label: string): string | undefined {
+  const word = /[^\s'"]*\{host\}[^\s'"]*/.exec(command)?.[0];
+  return word?.replace(/\{host\}/g, label);
+}
+
+/** What the tunnel is called with a tunnel name: {host} (`label`), the tunnel's name, and its URL when the workspace kind says it. */
+export interface TunnelPreview {
+  label: string;
+  /** The label is `devdesk.web.tunnelName`, not the host name. */
+  fromSetting: boolean;
+  name: string;
+  url?: string;
+}
+
+/** The tunnel `command` runs, named with `tunnelName` (else the host name); undefined when the command has no {host}. */
+export function tunnelPreview(o: { command: string; tunnelName?: string; host: string; user: string; urlTemplate?: string }): TunnelPreview | undefined {
+  const label = tunnelHostLabel(o);
+  const name = tunnelNameIn(o.command, label);
+  if (!name) return undefined;
+  const url = o.urlTemplate?.replace(/\{user\}/g, o.user.toLowerCase()).replace(/\{name\}/g, name);
+  return { label, fromSetting: !!tunnelLabel(o.tunnelName ?? ''), name, ...(url ? { url } : {}) };
 }
 
 /**
- * {port}, {user}, {host}, {publicHost} and {ngrokPolicy} replaced: the port as digits, the host as shortHostName(), the
+ * {port}, {user}, {host}, {publicHost} and {ngrokPolicy} replaced: the port as digits, the host as tunnelHostLabel(), the
  * others shellQuote()d (an unset publicHost or ngrokPolicy as ''); other text untouched.
  */
-export function fillTunnelCommand(command: string, v: { port: number; user: string; host: string; publicHost?: string; ngrokPolicy?: string }): string {
+export function fillTunnelCommand(command: string, v: { port: number; user: string; host: string; tunnelName?: string; publicHost?: string; ngrokPolicy?: string }): string {
   return command.replace(/\{(port|user|host|publicHost|ngrokPolicy)\}/g, (_, k: string) => {
     if (k === 'port') return String(Math.trunc(v.port));
-    if (k === 'host') return shortHostName(v.host, v.user);
+    if (k === 'host') return tunnelHostLabel(v);
     return shellQuote(k === 'user' ? v.user : k === 'publicHost' ? (v.publicHost ?? '') : (v.ngrokPolicy ?? ''));
   });
 }
