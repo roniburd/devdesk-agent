@@ -1,6 +1,6 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { GrowingFiles, isFiniteNumber, LineScan, parseObject, readJson } from './json';
+import { GrowingFiles, LineScan, parseObject, readJson } from './json';
 
 /**
  * What a Claude session spun off, read from its transcript: subagents (and theirs), background shell commands and
@@ -9,8 +9,7 @@ import { GrowingFiles, isFiniteNumber, LineScan, parseObject, readJson } from '.
  * `.../subagents/workflows/<runId>/` and a finished workflow's summary to `<dir>/<session>/workflows/<runId>.json`.
  */
 export type ChildKind = 'agent' | 'shell' | 'workflow' | 'phase' | 'more';
-/** `idle`: an agent team's teammate that finished its turn and waits for a message (from the hooks' roster only). */
-export type ChildState = 'running' | 'done' | 'failed' | 'stopped' | 'idle';
+export type ChildState = 'running' | 'done' | 'failed' | 'stopped';
 
 export interface SessionChild {
   /** Unique within the session (the launching tool use id, or derived from it). */
@@ -27,53 +26,6 @@ export interface SessionChild {
   children: SessionChild[];
 }
 
-/**
- * One subagent in a session's hook record (`subagents`, by agent id), as the SubagentStart, SubagentStop and
- * TeammateIdle hooks saw it. Times are epoch ms; `stoppedAt` and `idleAt` are set only while it is stopped or idle.
- */
-export interface RosterAgent {
-  type?: string;
-  /** An agent team teammate's name. */
-  name?: string;
-  startedAt?: number;
-  /** When it last started (a resume, or a teammate taking a new message). */
-  runningSince?: number;
-  stoppedAt?: number;
-  idleAt?: number;
-  /** It started again after it had stopped or gone idle. */
-  resumed?: boolean;
-}
-export type SubagentRoster = Record<string, RosterAgent>;
-
-/** The roster in a hook record, or undefined when it has none (an older hook script, or no subagent yet). */
-export function parseRoster(value: unknown): SubagentRoster | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const roster: SubagentRoster = {};
-  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (!id || !raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
-    const e = raw as Record<string, unknown>;
-    const agent: RosterAgent = {};
-    for (const k of ['startedAt', 'runningSince', 'stoppedAt', 'idleAt'] as const) if (isFiniteNumber(e[k])) agent[k] = e[k] as number;
-    for (const k of ['type', 'name'] as const) if (typeof e[k] === 'string' && e[k]) agent[k] = e[k] as string;
-    if (e.resumed === true) agent.resumed = true;
-    roster[id] = agent;
-  }
-  return Object.keys(roster).length ? roster : undefined;
-}
-
-/**
- * What the roster says of a launched agent whose transcript shows `transcript`, or undefined to go by the transcript.
- * A stop or idle is taken at once (the transcript shows it late, if at all). Running is taken while the transcript
- * says so too, or when the agent was resumed, which its launch in the transcript does not show.
- */
-export function rosterState(agent: RosterAgent | undefined, transcript: ChildState): ChildState | undefined {
-  if (!agent) return undefined;
-  if (agent.idleAt !== undefined) return 'idle';
-  if (agent.stoppedAt !== undefined) return transcript === 'failed' || transcript === 'stopped' ? transcript : 'done';
-  if (transcript === 'running' || agent.resumed) return 'running';
-  return undefined;
-}
-
 /** A tool call that started a child, as seen in the transcript so far. */
 interface Launch {
   id: string;
@@ -88,8 +40,6 @@ interface Launch {
   runId?: string;
   outputPath?: string;
   scriptPath?: string;
-  /** Its state is the hooks' roster's (`rosterState`), not the transcript's. */
-  rostered?: boolean;
 }
 
 /** What one transcript says so far; fed incrementally since transcripts only grow. */
@@ -282,16 +232,6 @@ export interface ChildrenOptions {
   finishedLimit: number;
   /** False when the session's Claude process is gone: nothing it started can still be running. */
   live: boolean;
-  /**
-   * When the running Claude process started the session (a resume, or a /clear): what started before ran in an earlier
-   * process, which is gone, so it cannot still be running either.
-   */
-  since?: number;
-  /**
-   * The session's subagents as its hooks saw them (`HookRecord.subagents`): an agent in it is shown as the roster says
-   * (`rosterState`). Without one (an older hook script or Claude Code), states come from the transcripts alone.
-   */
-  roster?: SubagentRoster;
 }
 
 /** A child whose subtree can no longer change, kept so later refreshes skip its files (`ChildrenReader.final`). */
@@ -350,13 +290,13 @@ export class ChildrenReader {
   private async under(transcript: string, sessionDir: string, options: ChildrenOptions, depth: number, read?: TranscriptScan): Promise<SessionChild[]> {
     const scan = read ?? (await this.scans.read(transcript));
     if (!scan) return [];
-    const launches = scan.list().map((l) => withRoster(l, options.roster));
+    const launches = scan.list();
     // A launch the transcript shows finished stays finished (as does every one once the session is gone): when at least
     // `finishedLimit` of those follow it, limitFinished folds it into the "more" row whatever its subtree is, so it is
     // not read.
     const folded = new Array<boolean>(launches.length).fill(false);
     for (let i = launches.length - 1, after = 0; i >= 0; i--) {
-      if (options.live && shownAlways(launches[i].state)) continue;
+      if (options.live && launches[i].state === 'running') continue;
       folded[i] = after >= options.finishedLimit;
       after++;
     }
@@ -384,7 +324,7 @@ export class ChildrenReader {
       const file = join(sessionDir, 'subagents', `agent-${l.agentId}.jsonl`);
       base.file = file;
       if (depth < MAX_DEPTH) base.children = await this.under(file, sessionDir, options, depth + 1);
-      if (base.state === 'running' && !l.rostered) {
+      if (base.state === 'running') {
         ended = await this.agentFinished(file);
         if (ended) base.state = 'done';
       } else if (cacheable && !anyRunning(base.children)) {
@@ -402,8 +342,7 @@ export class ChildrenReader {
       }
       this.final.set(key, kept);
     }
-    // The roster is of the running Claude process only (a new one starts it over): an agent in it runs in this one.
-    if (!options.live || (options.since !== undefined && !l.rostered && l.startedAt !== undefined && l.startedAt < options.since)) stopAll(base);
+    if (!options.live) stopAll(base);
     return base;
   }
 
@@ -490,21 +429,9 @@ function workflowEnded(summary: Record<string, unknown>): boolean {
   return state !== undefined && state !== 'running';
 }
 
-/** `l` with the state the roster gives its agent, if any (`rosterState`). */
-function withRoster(l: Launch, roster: SubagentRoster | undefined): Launch {
-  if (!roster || l.kind !== 'agent' || !l.agentId) return l;
-  const state = rosterState(roster[l.agentId], l.state);
-  return state === undefined ? l : { ...l, state, rostered: true };
-}
-
-/** Shown whatever `finishedLimit` says: what runs, and an idle teammate, which still takes messages. */
-function shownAlways(state: ChildState): boolean {
-  return state === 'running' || state === 'idle';
-}
-
 /** A finished launch that limitFinished folds into the "more" row: only its id and (finished) state are used. */
 function foldedChild(l: Launch): SessionChild {
-  return { id: l.id, kind: l.kind, label: l.label, detail: l.detail, state: shownAlways(l.state) ? 'stopped' : l.state, startedAt: l.startedAt, background: l.background, children: [] };
+  return { id: l.id, kind: l.kind, label: l.label, detail: l.detail, state: l.state === 'running' ? 'stopped' : l.state, startedAt: l.startedAt, background: l.background, children: [] };
 }
 
 function anyRunning(children: readonly SessionChild[]): boolean {
@@ -515,7 +442,7 @@ function anyRunning(children: readonly SessionChild[]): boolean {
 const MAX_DEPTH = 4;
 
 function stopAll(node: SessionChild): void {
-  if (shownAlways(node.state)) node.state = 'stopped';
+  if (node.state === 'running') node.state = 'stopped';
   node.children.forEach(stopAll);
 }
 
@@ -562,13 +489,13 @@ function aggregate(children: readonly SessionChild[]): ChildState {
   return 'done';
 }
 
-/** Keeps every running (or idle) child and the `limit` most recent finished ones (in their order); the rest become one row. */
+/** Keeps every running child and the `limit` most recent finished ones (in their order); the rest become one row. */
 export function limitFinished(children: SessionChild[], limit: number): SessionChild[] {
-  const finished = children.filter((c) => !shownAlways(c.state));
+  const finished = children.filter((c) => c.state !== 'running');
   if (finished.length <= limit) return children;
   const keep = new Set(finished.slice(finished.length - limit));
   const hidden = finished.length - limit;
-  const shown = children.filter((c) => shownAlways(c.state) || keep.has(c));
+  const shown = children.filter((c) => c.state === 'running' || keep.has(c));
   return [
     { id: `${children[0].id}/more`, kind: 'more', label: `${hidden} earlier finished`, state: 'done', background: false, children: [] },
     ...shown,

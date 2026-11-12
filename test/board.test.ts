@@ -91,15 +91,6 @@ describe('buildBoard', () => {
     expect(stuck.lookLabel).toBe('NO PROGRESS (STUCK?)');
   });
 
-  it("shows the note Claude set on its card (devdesk note), in its hover too, and finds it", () => {
-    const board = buildBoard([card('a', { note: 'waiting for CI' }), card('b')], [], opts);
-    const [a, b] = ['a', 'b'].map((id) => board.lanes.flatMap((l) => l.sessions).find((s) => s.id === id)!);
-    expect(a.note).toBe('waiting for CI');
-    expect(a.hoverParts).toContainEqual({ label: "Claude's note", text: 'waiting for CI' });
-    expect(a.search.all).toContain('waiting for ci');
-    expect(b.note).toBeUndefined();
-  });
-
   it('marks the card whose Claude terminal is in front', () => {
     const board = buildBoard([card('a'), card('b')], [], { ...opts, focused: 'b' });
     const flags = board.lanes.flatMap((l) => l.sessions).map((s) => [s.id, s.focused]);
@@ -269,15 +260,12 @@ describe('buildBoard', () => {
         card('a', { state: 'waiting', detail: 'Claude needs your permission to use Bash', askSummary: 'Allow npm uninstall aws-sdk?' }),
         card('b', { state: 'waiting', detail: 'Asking: Cursor or page numbers?' }),
         card('c', { state: 'done' }),
-        card('d', { state: 'waiting', detail: 'Asking: Which file?', waitKind: 'question' }),
-        // Only a question's detail starts with what it asks.
-        card('e', { state: 'waiting', detail: 'Asking: docs-server needs a token', waitKind: 'elicitation' }),
       ],
       [],
       opts,
     );
     const byId = Object.fromEntries(board.lanes.flatMap((l) => l.sessions).map((s) => [s.id, s]));
-    expect([byId.a.ask, byId.b.ask, byId.d.ask, byId.e.ask]).toEqual(['Allow npm uninstall aws-sdk?', 'Cursor or page numbers?', 'Which file?', 'Asking: docs-server needs a token']);
+    expect([byId.a.ask, byId.b.ask]).toEqual(['Allow npm uninstall aws-sdk?', 'Cursor or page numbers?']);
     expect(byId.a.hoverParts).toContainEqual({ label: 'Waiting on', text: 'Claude needs your permission to use Bash' });
     expect(byId.c).not.toHaveProperty('ask');
   });
@@ -450,16 +438,5 @@ describe('buildBoard: colors given by hand', () => {
     const sessions = board.lanes.flatMap((l) => l.sessions);
     expect(sessions.find((s) => s.id === 'a')?.color).toBe('purple');
     expect(sessions.find((s) => s.id === 'b')).not.toHaveProperty('color');
-  });
-});
-
-describe('buildBoard: pull request checks', () => {
-  it("gives a card its worktree's checks hint, so it offers Fix checks, and none without one", () => {
-    const hints = new Map([['/ws/worktrees/a', '2 checks failing']]);
-    const board = buildBoard([card('a'), card('b')], [], { ...opts, checks: (dir) => hints.get(dir) ?? '' });
-    const sessions = board.lanes.flatMap((l) => l.sessions);
-    expect(sessions.find((s) => s.id === 'a')?.checks).toBe('2 checks failing');
-    expect(sessions.find((s) => s.id === 'b')).not.toHaveProperty('checks');
-    expect(buildBoard([card('a')], [], opts).lanes.flatMap((l) => l.sessions)[0]).not.toHaveProperty('checks');
   });
 });

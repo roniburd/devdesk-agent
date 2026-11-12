@@ -1,11 +1,10 @@
 import type { SessionCard } from '../sessions';
 import { claudeGone, sessionTitle } from '../sessionSend';
-import { displayState, stateLook, timeAgo, waitsOnBackground } from '../sessionsView';
+import { attentionOrder, displayState, stateLook, timeAgo, waitsOnBackground } from '../sessionsView';
 import { LOOKS } from '../stateLooks';
 import { oneLine, truncate } from '../text';
 import { paneTarget } from '../tmux';
 import type { Feature } from '../worktrees';
-import { type SortMode, sortSessions } from '../urgency';
 import type { WebCard, WebFolder, WebGroup, WebTone } from './types';
 
 /** The session cards as the page shows them: the same titles, looks and labels as the Claude view and the board. */
@@ -13,18 +12,12 @@ import type { WebCard, WebFolder, WebGroup, WebTone } from './types';
 const TONES: ReadonlySet<string> = new Set<WebTone>(['yellow', 'orange', 'red', 'blue', 'green', 'purple', 'dim']);
 const LINE_MAX = 200;
 
-/**
- * What the list goes by, as the Claude view: the time, the stuck and idle limits, the sessions you have not read, and
- * the order (`devdesk.sessions.sort`: `mode`, with `recentMs` and `unreadFirst`).
- */
+/** What the list goes by, as the Claude view: the time, the stuck and idle limits, and the sessions you have not read. */
 export interface WebView {
   now: number;
   stuckMs: number;
   idleMs: number;
   unread: ReadonlySet<string>;
-  mode: SortMode;
-  recentMs: number;
-  unreadFirst: boolean;
 }
 
 /**
@@ -63,9 +56,9 @@ export function toWebCard(card: SessionCard, o: WebView): WebCard {
   };
 }
 
-/** In the Claude view's order (`sortSessions`, working sessions not settled), so the phone lists sessions as VS Code does. */
+/** In the Claude view's order (`attentionOrder`), so the phone lists sessions as VS Code does. */
 export function webCards(cards: readonly SessionCard[], v: WebView): WebCard[] {
-  return sortSessions(cards, v).map((c) => toWebCard(c, v));
+  return attentionOrder(cards, v).map((c) => toWebCard(c, v));
 }
 
 /** The folders a new session may start in: main first, then the others by name. */

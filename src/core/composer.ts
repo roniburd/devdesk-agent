@@ -155,8 +155,6 @@ export interface LaunchChoice {
   model: string;
   effort: string;
   ultracode: boolean;
-  /** The Claude account (`devdesk.claude.accounts`) by name; none: the default one. */
-  account?: string;
 }
 
 export interface ComposeRequest extends LaunchChoice {
@@ -175,8 +173,6 @@ export interface ComposeAllowed {
   efforts?: Readonly<Record<string, readonly string[]>>;
   /** Directories of the existing worktrees (main excluded). */
   worktrees: readonly string[];
-  /** The Claude accounts' names (`devdesk.claude.accounts`); none or one: no choice. */
-  accounts?: readonly string[];
 }
 
 /** What a compose message may choose, from the model pill's rows. */
@@ -205,9 +201,6 @@ export function parseChoice(m: Record<string, unknown>, allowed: ComposeAllowed)
     ultracode: m.ultracode === true,
   };
   if (choice.where === 'new' && worktreeName) choice.worktreeName = worktreeName;
-  // An account that is not listed (any more) is the default one.
-  const account = str(m.account);
-  if (account && allowed.accounts && allowed.accounts.length > 1 && allowed.accounts.includes(account)) choice.account = account;
   return choice;
 }
 

@@ -8,7 +8,7 @@ import type { DaemonConfig } from '../../src/core/web/config';
 import { boxAction, slashMenu } from '../../src/core/web/promptBox';
 import type { ComposerResponse } from '../../src/core/web/types';
 
-const claude: DaemonConfig['claude'] = { path: 'claude', modeArgs: '--permission-mode auto', env: {}, modes: [...DEFAULT_MODES], defaultMode: 'Auto', models: [], configDir: '/h/.claude' };
+const claude: DaemonConfig['claude'] = { path: 'claude', modeArgs: '--permission-mode auto', modes: [...DEFAULT_MODES], defaultMode: 'Auto', models: [], configDir: '/h/.claude' };
 
 const listing: CliListing = {
   commands: [
@@ -54,7 +54,7 @@ describe('composerResponse', () => {
   });
 
   it('uses devdesk.board.models instead of the CLI list, and the default mode alone when no modes were passed', () => {
-    const r = composerResponse({ claude: { path: 'claude', modeArgs: '--x', env: {}, models: ['Default', 'sonnet'] }, listing, onDisk: [], pending: false });
+    const r = composerResponse({ claude: { path: 'claude', modeArgs: '--x', models: ['Default', 'sonnet'] }, listing, onDisk: [], pending: false });
     expect(r.models.map((m) => m.value)).toEqual(['Default', 'sonnet']);
     expect(r.modes).toEqual([{ name: 'Default', description: '--x' }]);
     expect(r.planMode).toBeUndefined();

@@ -60,7 +60,7 @@ async function subdirectories(dir: string): Promise<string[]> {
 }
 
 /** Directories under `<featureDir>/src` that are git repositories or worktrees. */
-export async function discoverPackages(featureDir: string): Promise<PackageRepo[]> {
+async function discoverPackages(featureDir: string): Promise<PackageRepo[]> {
   const src = join(featureDir, 'src');
   const packages: PackageRepo[] = [];
   for (const name of await subdirectories(src)) {

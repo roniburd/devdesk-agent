@@ -15,8 +15,6 @@ switch (args[0]) {
     break;
   case 'capture-pane':
     out(state.capture);
-    // paneScreenArgs: then the pane's flags (mode, bracketed paste, cursor), its pid and command.
-    if (args.includes(';')) out(`\n0${SEP}1${SEP}${SEP}${SEP}${state.pid}${SEP}claude\n`);
     break;
   case 'display-message':
     out(`${state.pid}${SEP}0${SEP}claude\n`);

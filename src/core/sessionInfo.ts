@@ -45,11 +45,6 @@ export function readRegistry(dir: string): Promise<RegistryEntry[]> {
   return readJsonFiles(dir, (n) => /^\d+\.json$/.test(n), parseRegistryEntry);
 }
 
-/** The registries of several config directories (one per Claude account), together; one that cannot be read lists nothing. */
-export async function readRegistries(dirs: readonly string[]): Promise<RegistryEntry[]> {
-  return (await Promise.all(dirs.map((d) => readRegistry(d).catch(() => [] as RegistryEntry[])))).flat();
-}
-
 /** The registry entry of a session: by session id, else by its Claude process (whose session id a /clear changes). */
 export function registryFor(entries: readonly RegistryEntry[], sessionId: string | undefined, pid: number | undefined): RegistryEntry | undefined {
   return (sessionId ? entries.find((e) => e.sessionId === sessionId) : undefined) ?? (pid !== undefined ? entries.find((e) => e.pid === pid) : undefined);

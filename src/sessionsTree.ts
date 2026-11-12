@@ -13,7 +13,6 @@ import {
 } from './core/sessionsView';
 import { LOOKS } from './core/stateLooks';
 import { oneLine } from './core/text';
-import { statusFromText } from './core/statusMerge';
 import { groupCards, type WorktreeGroup } from './core/worktreeTasks';
 import { findByTmux } from './claudeSessions';
 import { sessionsDimRead, sessionsFinishedSessions, sessionsGroupByWorktree, sessionsStatusBar, sessionsStuckMs, sessionsTmuxServer, sessionsUnreadBadge } from './config';
@@ -47,7 +46,7 @@ function worktreeRows(groupKey: string, cards: readonly SessionCard[]): SessionN
 }
 
 const CHILD_ICONS: Record<SessionChild['kind'], string> = { agent: 'hubot', shell: 'terminal', workflow: 'type-hierarchy', phase: 'list-tree', more: 'ellipsis' };
-const CHILD_COLORS: Record<SessionChild['state'], string | undefined> = { running: undefined, done: 'charts.green', failed: 'charts.red', stopped: 'disabledForeground', idle: 'charts.blue' };
+const CHILD_COLORS: Record<SessionChild['state'], string | undefined> = { running: undefined, done: 'charts.green', failed: 'charts.red', stopped: 'disabledForeground' };
 const CHILD_KIND_TEXT: Record<SessionChild['kind'], string> = { agent: 'agent', shell: 'shell', workflow: 'workflow', phase: 'phase', more: '' };
 
 /** How long a just-started session may take to show up before the view stops waiting to select it. */
@@ -56,8 +55,8 @@ const PENDING_SELECT_MS = 30_000;
 const SESSION_SCHEME = 'devdesk-session';
 
 /**
- * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in the order
- * of `devdesk.sessions.sort`, unread ones marked (a dot badge, read titles greyed: `devdesk.sessions.unreadBadge`, `dimRead`), with a
+ * The Claude view: sessions grouped by worktree (or one flat list, `devdesk.sessions.groupByWorktree`) in attention
+ * order, unread ones marked (a dot badge, read titles greyed: `devdesk.sessions.unreadBadge`, `dimRead`), with a
  * needs-input badge and a "needs you" status bar item.
  */
 export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscode.FileDecorationProvider, vscode.Disposable {
@@ -99,12 +98,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
       this.decorationsChanged,
       vscode.window.registerFileDecorationProvider(this),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        const reorders = ['groupByWorktree', 'resortWorkingMinutes', 'sort', 'recentlyFinishedMinutes', 'unreadFirst', 'idleMinutes', 'stuckMinutes'];
-        if (reorders.some((k) => e.affectsConfiguration(`devdesk.sessions.${k}`))) {
-          this.changed.fire(undefined);
-          // The Worktrees view shows each worktree's first session in this order.
-          this.urgentChanged.fire();
-        }
+        if (e.affectsConfiguration('devdesk.sessions.groupByWorktree') || e.affectsConfiguration('devdesk.sessions.resortWorkingMinutes')) this.changed.fire(undefined);
         if (e.affectsConfiguration('devdesk.sessions.dimRead') || e.affectsConfiguration('devdesk.sessions.unreadBadge')) this.decorationsChanged.fire(undefined);
       }),
       state.onDidChange((change) => {
@@ -155,7 +149,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     );
   }
 
-  /** Top-level rows: the worktrees with sessions or a recorded task (by their first card), each with its cards in order. */
+  /** Top-level rows: the worktrees with sessions or a recorded task, each with its cards in attention order. */
   groups(): WorktreeGroup[] {
     return groupCards(this.state.cards, this.model.featureList, this.tasks.all());
   }
@@ -384,8 +378,6 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode>, vscod
     if (v.summary) tooltip.appendText(`${v.summary}\n\n`);
     if (v.prompt) tooltip.appendText(`Last prompt: ${v.prompt}\n\n`);
     if (v.detail) tooltip.appendText(`${v.detail}\n\n`);
-    const from = statusFromText(card, now);
-    if (from) tooltip.appendText(`${from}\n\n`);
     if (v.times) tooltip.appendText(`${v.times}\n\n`);
     if (parked) tooltip.appendText(`Not running (${card.endReason ?? 'ended'}). Opening it resumes the conversation: claude --resume ${card.sessionId}\n\n`);
     tooltip.appendText(v.location);

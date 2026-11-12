@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import type { SessionCard } from './core/sessions';
-import { cardShown, cardSignature, cardView, stateLook, truncate, SettledOrder, type Settle, type ViewContext } from './core/sessionsView';
-import { sortSessions, urgentByWorktree, type SortOptions } from './core/urgency';
+import { attentionOrder, cardShown, cardSignature, cardView, stateLook, truncate, urgentByWorktree, SettledOrder, type Settle, type ViewContext } from './core/sessionsView';
 import { cardTerminal, findByTmux, claudeTerminalOfTab, claudeTerminalSession } from './claudeSessions';
-import { sessionsIdleMs, sessionsReadAfterMs, sessionsRecentlyFinishedMs, sessionsResortWorkingMs, sessionsSort, sessionsStuckMs, sessionsTmuxServer, sessionsUnreadFirst } from './config';
+import { sessionsIdleMs, sessionsReadAfterMs, sessionsResortWorkingMs, sessionsStuckMs, sessionsTmuxServer, sessionsUnreadFirst } from './config';
 import type { SessionsModel } from './sessionsModel';
 import { SessionsReadState } from './sessionsReadState';
 import { hostKey, MementoEntries } from './state/mementoState';
@@ -82,20 +81,14 @@ export class SessionViewState implements vscode.Disposable {
     return { now, idleMs: sessionsIdleMs(), stuckMs: sessionsStuckMs(), unread: this.read.unread, unreadFirst: sessionsUnreadFirst(), settle: this.settle };
   }
 
-  /** How the sessions are sorted now: `devdesk.sessions.sort`'s mode, with the view context and the recently finished limit. */
-  sortOptions(now = Date.now()): SortOptions {
-    return { ...this.viewContext(now), unreadFirst: sessionsUnreadFirst(), mode: sessionsSort(), recentMs: sessionsRecentlyFinishedMs() };
-  }
-
-  /** Cards in the order `devdesk.sessions.sort` names (urgency or attention). */
+  /** Cards in attention order. */
   get cards(): SessionCard[] {
-    return sortSessions(this.model.current, this.sortOptions());
+    return attentionOrder(this.model.current, this.viewContext());
   }
 
-  /** The most urgent session of each worktree directory, in the order `devdesk.sessions.sort` names (working sessions not settled). */
+  /** The most urgent session of each worktree directory. */
   urgentByWorktree(): Map<string, SessionCard> {
-    const { settle: _settle, ...options } = this.sortOptions();
-    return urgentByWorktree(this.model.current, options);
+    return urgentByWorktree(this.model.current, this.viewContext());
   }
 
   /** The color given to a session by hand, if any. */

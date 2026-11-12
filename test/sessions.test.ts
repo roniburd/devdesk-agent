@@ -64,43 +64,6 @@ describe('parseHookRecord', () => {
     expect(parseHookRecord(JSON.stringify({ ...rec({ state: 'done' }), asksQuestion: false }))).not.toHaveProperty('asksQuestion');
     expect(parseHookRecord(JSON.stringify({ ...rec({}), asksQuestion: null }))).not.toHaveProperty('asksQuestion');
   });
-  it("keeps when the session's Claude process started it, and puts it on the card", () => {
-    expect(parseHookRecord(JSON.stringify({ ...rec({}), sessionStartedAt: 900 }))?.sessionStartedAt).toBe(900);
-    expect(parseHookRecord(JSON.stringify({ ...rec({}), sessionStartedAt: null }))).not.toHaveProperty('sessionStartedAt');
-    const [card] = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [rec({ sessionStartedAt: 900 })], features, alive);
-    expect(card.sessionStartedAt).toBe(900);
-  });
-  it('keeps the subagent roster the hooks wrote, without its malformed or empty fields, and puts it on the card', () => {
-    const subagents = { a1: { type: 'Explore', name: null, startedAt: 5, runningSince: 5, stoppedAt: null, idleAt: 9, resumed: false }, bad: 'x' };
-    const parsed = parseHookRecord(JSON.stringify({ ...rec({}), subagents }));
-    expect(parsed?.subagents).toEqual({ a1: { type: 'Explore', startedAt: 5, runningSince: 5, idleAt: 9 } });
-    expect(parseHookRecord(JSON.stringify({ ...rec({}), subagents: null }))).not.toHaveProperty('subagents');
-    expect(parseHookRecord(JSON.stringify({ ...rec({}), subagents: { bad: 1 } }))).not.toHaveProperty('subagents');
-    const [card] = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [rec({ subagents: parsed?.subagents })], features, alive);
-    expect(card.subagents).toEqual(parsed?.subagents);
-  });
-  it("lists one card after a /clear: the new session's record wins the Claude process", () => {
-    const old = rec({ sessionId: 'old', state: 'waiting', updatedAt: 1000 });
-    const cleared = rec({ sessionId: 'new', state: 'idle', detail: 'Ready', updatedAt: 2000 });
-    const cards = buildSessionCards([pane('cc-af2-dp-alarms', '%1')], [old, cleared], features, alive);
-    expect(cards.map((c) => [c.id, c.tmuxSession])).toEqual([['new', 'cc-af2-dp-alarms']]);
-  });
-  it('reads what a waiting record waits on, and ignores it otherwise', () => {
-    const waiting = { ...rec({ state: 'waiting', detail: 'Asking: which?' }), wait: { kind: 'question', toolUseId: 'toolu_1' } };
-    expect(parseHookRecord(JSON.stringify(waiting))?.waitKind).toBe('question');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: { kind: 'other' } }))).not.toHaveProperty('waitKind');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, wait: null }))).not.toHaveProperty('waitKind');
-    expect(parseHookRecord(JSON.stringify({ ...waiting, state: 'working' }))).not.toHaveProperty('waitKind');
-  });
-  it("reads a blocked record's error kind and how a turn ended, and ignores them otherwise", () => {
-    const blocked = { ...rec({ state: 'blocked', detail: 'rate_limit: Too many requests' }), errorKind: 'rate_limit' };
-    expect(parseHookRecord(JSON.stringify(blocked))?.errorKind).toBe('rate_limit');
-    expect(parseHookRecord(JSON.stringify({ ...blocked, errorKind: null }))).not.toHaveProperty('errorKind');
-    expect(parseHookRecord(JSON.stringify({ ...blocked, state: 'done' }))).not.toHaveProperty('errorKind');
-    const ended = { ...rec({ state: 'done', detail: 'Interrupted' }), endKind: 'interrupted' };
-    expect(parseHookRecord(JSON.stringify(ended))?.endKind).toBe('interrupted');
-    expect(parseHookRecord(JSON.stringify({ ...ended, endKind: 'other' }))).not.toHaveProperty('endKind');
-  });
   it('rejects broken or incomplete records', () => {
     expect(parseHookRecord('{"sessionId":')).toBeUndefined();
     expect(parseHookRecord('null')).toBeUndefined();
@@ -143,11 +106,9 @@ describe('readHookRecords', () => {
     await writeFile(join(dir, 's4.json'), JSON.stringify(rec({ sessionId: 's4', transcriptPath: stopped, state: 'done', detail: 'Fixed', updatedAt: 1000 })));
     await writeFile(join(dir, 's5.json'), JSON.stringify(rec({ sessionId: 's5', transcriptPath: join(dir, 'gone.jsonl'), state: 'waiting' })));
     const byId = Object.fromEntries((await readHookRecords(dir)).map((r) => [r.sessionId, r]));
-    expect(byId.s1).toMatchObject({ state: 'idle', detail: MOVED_DETAIL, endKind: 'moved' });
-    expect(byId.s1).not.toHaveProperty('waitKind');
-    expect(byId.s2).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL, endKind: 'interrupted' });
+    expect(byId.s1).toMatchObject({ state: 'idle', detail: MOVED_DETAIL });
+    expect(byId.s2).toMatchObject({ state: 'done', detail: INTERRUPTED_DETAIL });
     expect(byId.s3).toMatchObject({ state: 'working', detail: 'Running Bash' });
-    expect(byId.s3).not.toHaveProperty('endKind');
     expect(byId.s4).toMatchObject({ state: 'done', detail: 'Fixed' });
     expect(byId.s5).toMatchObject({ state: 'waiting', detail: 'Running Bash' });
   });

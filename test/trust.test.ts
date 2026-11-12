@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { claudeConfigFilePath, needsTrust, repoRootFromGitFile, trustNotice, trustWorktree } from '../src/core/trust';
+import { claudeConfigFilePath, needsTrust, repoRootFromGitFile, trustNotice } from '../src/core/trust';
 
 const trusting = (...paths: string[]) => ({ projects: Object.fromEntries(paths.map((p) => [p, { hasTrustDialogAccepted: true }])) });
 
@@ -79,71 +79,5 @@ describe('repoRootFromGitFile', () => {
 describe('trustNotice', () => {
   it('names the folder and says the session opens', () => {
     expect(trustNotice('/w/repo')).toMatch(/\/w\/repo.*opens/);
-  });
-});
-
-describe('trustWorktree', () => {
-  const ws = { dir: '/ws' };
-  const wsWorktree = { dir: '/ws/worktrees/feat' };
-  const wsPkg = { dir: '/ws/worktrees/feat/src/PkgA', gitRoot: '/ws/worktrees/feat/src/PkgA', repoRoot: '/ws/src/PkgA' };
-  const claudeWorktree = { dir: '/ws/src/PkgA/.claude/worktrees/fix', gitRoot: '/ws/src/PkgA/.claude/worktrees/fix', repoRoot: '/ws/src/PkgA' };
-
-  it('trusts the folders Claude would ask in, when it trusts their parent, and keeps every other key', () => {
-    const config = { numStartups: 7, oauthAccount: { email: 'me@x' }, projects: { '/ws': { hasTrustDialogAccepted: true, allowedTools: ['Bash'] }, '/other': { lastCost: 1 } } };
-    const next = trustWorktree(config, { parent: ws, folders: [wsWorktree, wsPkg, claudeWorktree] });
-    // The workspace worktree itself is trusted already (no git root stops the walk up to /ws).
-    expect(next?.trusted).toEqual(['/ws/worktrees/feat/src/PkgA', '/ws/src/PkgA/.claude/worktrees/fix']);
-    expect(next?.json).toMatchObject({ numStartups: 7, oauthAccount: { email: 'me@x' } });
-    const projects = next!.json.projects as Record<string, Record<string, unknown>>;
-    expect(projects['/ws']).toEqual({ hasTrustDialogAccepted: true, allowedTools: ['Bash'] });
-    expect(projects['/other']).toEqual({ lastCost: 1 });
-    expect(projects['/ws/worktrees/feat/src/PkgA']).toMatchObject({ hasTrustDialogAccepted: true, allowedTools: [], mcpServers: {} });
-    expect(needsTrust(next!.json, wsPkg)).toBe(false);
-    expect(needsTrust(next!.json, claudeWorktree)).toBe(false);
-    // The input is not changed.
-    expect(Object.keys(config.projects)).toEqual(['/ws', '/other']);
-  });
-
-  it('keeps the fields of a record the folder has, setting only hasTrustDialogAccepted', () => {
-    const config = { projects: { '/ws': { hasTrustDialogAccepted: true }, '/ws/src/PkgA/.claude/worktrees/fix': { hasTrustDialogAccepted: false, allowedTools: ['Read'], lastSessionId: 's' } } };
-    const next = trustWorktree(config, { parent: ws, folders: [claudeWorktree] });
-    expect((next!.json.projects as Record<string, unknown>)['/ws/src/PkgA/.claude/worktrees/fix']).toEqual({ hasTrustDialogAccepted: true, allowedTools: ['Read'], lastSessionId: 's' });
-  });
-
-  it('trusts nothing when Claude does not trust the parent', () => {
-    expect(trustWorktree({ projects: { '/elsewhere': { hasTrustDialogAccepted: true } } }, { parent: ws, folders: [wsPkg] })).toBeUndefined();
-    expect(trustWorktree({}, { parent: ws, folders: [wsPkg] })).toBeUndefined();
-    // A git repository is not trusted by a trusted folder above it, so neither are its worktrees.
-    const repo = { dir: '/dev/repo', gitRoot: '/dev/repo', repoRoot: '/dev/repo' };
-    const wt = { dir: '/dev/repo/.claude/worktrees/x', gitRoot: '/dev/repo/.claude/worktrees/x', repoRoot: '/dev/repo' };
-    expect(trustWorktree({ projects: { '/dev': { hasTrustDialogAccepted: true } } }, { parent: repo, folders: [wt] })).toBeUndefined();
-  });
-
-  it('never trusts a folder outside the parent, the parent itself, or the home folder', () => {
-    const config = { projects: { '/': { hasTrustDialogAccepted: true } } };
-    const git = (dir: string) => ({ dir, gitRoot: dir, repoRoot: dir });
-    expect(trustWorktree({ projects: { '/ws': { hasTrustDialogAccepted: true } } }, { parent: ws, folders: [git('/elsewhere'), git('/wsx/a'), git('/ws')] })).toBeUndefined();
-    expect(trustWorktree(config, { parent: { dir: '/' }, folders: [git('/Users/me')], home: '/Users/me' })).toBeUndefined();
-    expect(trustWorktree(config, { parent: { dir: '/' }, folders: [git('/Users/me/x')], home: '/Users/me' })?.trusted).toEqual(['/Users/me/x']);
-    expect(trustWorktree({ projects: { '/ws': { hasTrustDialogAccepted: true } } }, { parent: ws, folders: [git('ws/rel')] })).toBeUndefined();
-  });
-
-  it('is idempotent: nothing changes once the folders are trusted', () => {
-    const config = { projects: { '/ws': { hasTrustDialogAccepted: true } } };
-    const once = trustWorktree(config, { parent: ws, folders: [wsPkg, wsPkg] });
-    expect(once?.trusted).toEqual(['/ws/worktrees/feat/src/PkgA']);
-    expect(trustWorktree(once!.json, { parent: ws, folders: [wsPkg] })).toBeUndefined();
-  });
-
-  it('does not touch a config it does not understand, nor a linked worktree of a trusted repository', () => {
-    expect(trustWorktree(null, { parent: ws, folders: [wsPkg] })).toBeUndefined();
-    expect(trustWorktree([], { parent: ws, folders: [wsPkg] })).toBeUndefined();
-    expect(trustWorktree({ projects: [] }, { parent: ws, folders: [wsPkg] })).toBeUndefined();
-    const trusted = { projects: { '/ws': { hasTrustDialogAccepted: true }, '/ws/src/PkgA': { hasTrustDialogAccepted: true } } };
-    expect(trustWorktree(trusted, { parent: ws, folders: [claudeWorktree, wsPkg] })).toBeUndefined();
-  });
-
-  it('writes nothing for a sandboxed Claude, which never asks', () => {
-    expect(trustWorktree({ projects: {} }, { parent: ws, folders: [wsPkg] }, { CLAUDE_CODE_SANDBOXED: '1' })).toBeUndefined();
   });
 });

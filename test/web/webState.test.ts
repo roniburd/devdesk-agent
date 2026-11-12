@@ -21,8 +21,7 @@ const state: WebState = { version: 1, pid: 123, host: '127.0.0.1', port: 7690, s
 
 describe('web state paths', () => {
   it('keeps its files out of the hook records', () => {
-    // Apart from v1's daemon (`/s/web`): both can run on one host.
-    expect(webDir('/s')).toBe('/s/web-v2');
+    expect(webDir('/s')).toBe('/s/web');
     expect(webStatePath('/s/web')).toBe('/s/web/web.json');
     expect(webConfigPath('/s/web')).toBe('/s/web/config.json');
     expect(webLogPath('/s/web')).toBe('/s/web/daemon.log');

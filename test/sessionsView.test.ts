@@ -23,6 +23,7 @@ import {
   transitionsToWaiting,
   truncate,
   unreadCards,
+  urgentByWorktree,
   withHandMarks,
   type ViewContext,
 } from '../src/core/sessionsView';
@@ -371,20 +372,9 @@ describe('attention', () => {
     expect(look({ state: 'waiting', detail: 'Plan ready for your review' })).toBe('plan');
     expect(look({ state: 'waiting', detail: 'Claude needs your permission to use Bash' })).toBe('permission');
     expect(look({ state: 'waiting', detail: 'Claude needs your input' })).toBe('input');
-    // A record that says what it waits on wins over its detail.
-    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'question' })).toBe('question');
-    expect(look({ state: 'waiting', detail: 'Claude needs your permission', waitKind: 'plan' })).toBe('plan');
-    expect(look({ state: 'waiting', detail: 'Asking: which one?', waitKind: 'permission' })).toBe('permission');
-    expect(look({ state: 'waiting', detail: 'Needs your permission? no', waitKind: 'elicitation' })).toBe('input');
     expect(look({ state: 'blocked', detail: 'rate_limit: Too many requests' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'You have reached your usage limit' })).toBe('limited');
     expect(look({ state: 'blocked', detail: 'API Error: 500' })).toBe('error');
-    // A record that says what error it is: a rate limit is one whatever its detail; others still go by the detail.
-    expect(look({ state: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit' })).toBe('limited');
-    // A StopFailure error given as an object records the API's type for its kind.
-    expect(look({ state: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit_error' })).toBe('limited');
-    expect(look({ state: 'blocked', detail: 'API Error: 500', errorKind: 'server_error' })).toBe('error');
-    expect(look({ state: 'blocked', detail: 'You have reached your usage limit', errorKind: 'unknown' })).toBe('limited');
     expect(look({ state: 'working' })).toBe('working');
     expect(look({ state: 'working', updatedAt: NOW - STUCK - 1 })).toBe('stuck');
     expect(look({ state: 'stopped', crashed: true })).toBe('crashed');
@@ -392,8 +382,6 @@ describe('attention', () => {
     // A finished turn stays done however old (it only sorts lower); Esc's interrupt is done in its own colour.
     expect(look({ state: 'done', updatedAt: NOW - IDLE - 1 })).toBe('done');
     expect(look({ state: 'done', detail: 'Interrupted' })).toBe('interrupted');
-    // Said by the record (its transcript), whatever the detail; without it, only the detail tells (an older ended record).
-    expect(look({ state: 'done', detail: 'Stopped', endKind: 'interrupted' })).toBe('interrupted');
     // A reply that ends with a question is done in its own look (it stays in the review lane, not "needs you").
     expect(look({ state: 'done', detail: 'Should I implement these?', asksQuestion: true })).toBe('asked');
     expect(look({ state: 'done', asksQuestion: true, children: [{ id: 'sh', kind: 'shell', label: 'sleep', state: 'running', background: true, children: [] }] })).toBe('background');
@@ -423,6 +411,25 @@ describe('attention', () => {
       card({ id: 'working', state: 'working', updatedAt: NOW - 3000 }),
     ];
     expect(attentionOrder(cards, { now: NOW, idleMs: IDLE, unread: new Set() }).map((c) => c.id)).toEqual(['working', 'bg', 'done']);
+  });
+
+  it('picks the most urgent session of each worktree', () => {
+    const cards = [
+      card({ id: 'w', state: 'working', featureDir: '/w/a' }),
+      card({ id: 'q', state: 'waiting', featureDir: '/w/a' }),
+      card({ id: 'd', state: 'done', featureDir: '/w/b' }),
+      card({ id: 'none', state: 'waiting' }),
+    ];
+    const urgent = urgentByWorktree(cards, { now: NOW, idleMs: IDLE, unread: new Set() });
+    expect([...urgent].map(([dir, c]) => [dir, c.id])).toEqual([
+      ['/w/a', 'q'],
+      ['/w/b', 'd'],
+    ]);
+    // The views' unread-first order does not change what is most urgent: a question beats an unread finished session.
+    const unreadDone = card({ id: 'd2', state: 'done', featureDir: '/w/a' });
+    const view: ViewContext = { now: NOW, idleMs: IDLE, stuckMs: IDLE, unread: new Set(['d2']), unreadFirst: true };
+    const viewed = urgentByWorktree([...cards, unreadDone], view);
+    expect(viewed.get('/w/a')!.id).toBe('q');
   });
 });
 
@@ -466,7 +473,6 @@ describe('shownLook', () => {
     expect(shownLook(card({ state: 'parked', lastState: 'done', detail: 'All set' }), { now: NOW, stuckMs: STUCK })).toEqual({ look: 'done', label: 'DONE · PARKED (NOT RUNNING)' });
     expect(shownLook(card({ state: 'parked', lastState: 'done', asksQuestion: true }), { now: NOW, stuckMs: STUCK }).look).toBe('asked');
     expect(shownLook(card({ state: 'parked', lastState: 'blocked', detail: 'rate_limit: usage limit reached' }), { now: NOW, stuckMs: STUCK }).look).toBe('limited');
-    expect(shownLook(card({ state: 'parked', lastState: 'blocked', detail: 'Too many requests', errorKind: 'rate_limit_error' }), { now: NOW, stuckMs: STUCK }).look).toBe('limited');
   });
   it('shows parked when the turn never ended or it crashed, and the plain look otherwise', () => {
     expect(shownLook(card({ state: 'parked', lastState: 'working' }), { now: NOW, stuckMs: STUCK }).look).toBe('parked');

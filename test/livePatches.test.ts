@@ -65,12 +65,6 @@ describe('withRecord', () => {
     }
   });
 
-  it('takes what the record waits on, and drops it once it waits no more', () => {
-    const waiting = withRecord(card({ state: 'working' }), rec({ event: 'PermissionRequest', state: 'waiting', detail: 'Asking: which?', waitKind: 'question' }));
-    expect(waiting.waitKind).toBe('question');
-    expect(withRecord(waiting, rec({ updatedAt: NOW + 1 })).waitKind).toBeUndefined();
-  });
-
   it('keeps the prompt when the record has none, and takes asksQuestion from it', () => {
     const next = withRecord(card({ state: 'working' }), rec({ event: 'Stop', state: 'done', detail: 'Shall I?', prompt: undefined, asksQuestion: true }));
     expect(next).toMatchObject({ prompt: 'run the tests', asksQuestion: true });
@@ -81,16 +75,6 @@ describe('withRecord after the transcript', () => {
   it('keeps a card whose conversation moved to a background job', () => {
     const moved = card({ state: 'idle', detail: MOVED_DETAIL });
     expect(withRecord(moved, rec({ state: 'waiting', detail: 'Claude needs your permission' }))).toBe(moved);
-    const byKind = card({ state: 'idle', detail: 'Moved on', endKind: 'moved' });
-    expect(withRecord(byKind, rec({ state: 'waiting', detail: 'Claude needs your permission' }))).toBe(byKind);
-  });
-
-  it('takes the error and end kinds from the record, dropping those of the state it replaces', () => {
-    const interrupted = card({ state: 'done', detail: 'Interrupted', endKind: 'interrupted' });
-    const blocked = withRecord(interrupted, rec({ event: 'StopFailure', state: 'blocked', detail: 'rate_limit: slow down', errorKind: 'rate_limit' }));
-    expect(blocked).toMatchObject({ state: 'blocked', errorKind: 'rate_limit' });
-    expect(blocked).not.toHaveProperty('endKind');
-    expect(withRecord(blocked, rec({ updatedAt: NOW + 1 }))).not.toHaveProperty('errorKind');
   });
 
   it("takes the question mark from the record, which keeps it when the same finished turn is rewritten", () => {

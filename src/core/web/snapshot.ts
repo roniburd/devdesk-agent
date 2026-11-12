@@ -1,9 +1,7 @@
 import { readInsight, withInsight } from '../insights';
 import type { ProcessTable } from '../processes';
-import { addSessionChildren, readCardExtras, readClaudeRegistries, sessionCards } from '../sessionCards';
-import { ChildrenReader } from '../sessionChildren';
-import { addSessionInfo, MetaReader } from '../sessionInfo';
-import { cardsInScope, readHookRecords, type SessionCard, TranscriptEnds, withClaudeProcesses } from '../sessions';
+import { addSessionInfo, MetaReader, readRegistry } from '../sessionInfo';
+import { buildSessionCards, cardsInScope, readHookRecords, type SessionCard, TranscriptEnds, withClaudeProcesses } from '../sessions';
 import { STATE_INFO } from '../sessionStates';
 import { DEFAULT_SERVER, listPanes, listSessions, type TmuxPane, type TmuxRunner } from '../tmux';
 import { discoverFeatures, type Feature } from '../worktrees';
@@ -11,13 +9,12 @@ import type { DaemonConfig } from './config';
 
 /**
  * The live sessions' cards without VS Code, for the web access daemon: what `SessionsModel.refresh` does up to the
- * cards, through the same functions (`sessionCards`, `addSessionChildren`, `addSessionInfo`), from the same files: the
- * hook records, every Claude account's session registry, Claude's own reports (Program Status), notes and workers. It
- * only reads: parking sessions and removing dead records stay with the extension.
+ * cards, through the same functions, from the same files. It only reads: parking sessions and removing dead records
+ * stay with the extension.
  */
 
 export interface SnapshotConfig
-  extends Pick<DaemonConfig, 'stateDir' | 'root' | 'scopeDirs' | 'scope' | 'showAll' | 'discovery' | 'claudeSessionsDirs' | 'hooksQuietMs' | 'insights' | 'tmux'> {}
+  extends Pick<DaemonConfig, 'stateDir' | 'root' | 'scopeDirs' | 'scope' | 'showAll' | 'discovery' | 'claudeSessionsDir' | 'insights' | 'tmux'> {}
 
 export interface SnapshotDeps {
   /** The daemon: tmuxRunner(server, { bin, configFile only for cfg.tmux.server }). */
@@ -33,7 +30,6 @@ const REDISCOVER_EVERY = 10;
 export class SessionSnapshot {
   private readonly ends = new TranscriptEnds();
   private readonly meta = new MetaReader();
-  private readonly children = new ChildrenReader();
   private known?: { root: string | undefined; list: Feature[] };
   private calls = 0;
   private reading?: Promise<SessionCard[]>;
@@ -74,30 +70,19 @@ export class SessionSnapshot {
     const listing: Promise<TmuxPane[]>[] = [listPanes(deps.tmux(server), server)];
     // Showing everything also covers your own (default) tmux server.
     if (cfg.showAll && server !== DEFAULT_SERVER) listing.push(listPanes(deps.tmux(DEFAULT_SERVER), DEFAULT_SERVER));
-    const [paneLists, records, procs, registry, extras] = await Promise.all([
+    const [paneLists, records, procs, registry] = await Promise.all([
       Promise.all(listing),
       readHookRecords(cfg.stateDir, this.ends),
       deps.listProcesses(),
-      readClaudeRegistries(cfg.claudeSessionsDirs),
-      readCardExtras(cfg.stateDir, deps.alive),
+      cfg.claudeSessionsDir ? readRegistry(cfg.claudeSessionsDir) : Promise.resolve([]),
     ]);
     const panes = withClaudeProcesses(paneLists.flat(), procs);
     const features = await this.features();
     // No fork parents and no ended records: only sessions running in tmux show (nothing else can be typed into).
-    const all = sessionCards({
-      ...extras,
-      panes,
-      records,
-      features,
-      alive: deps.alive,
-      onlyServer: cfg.showAll ? undefined : server,
-      now: Date.now(),
-      quietMs: cfg.hooksQuietMs,
-    });
+    const all = buildSessionCards(panes, records, features, deps.alive, cfg.showAll ? undefined : server, new Map(), []);
     const scoped = cfg.scope === 'workspace' ? cardsInScope(all, cfg.scopeDirs, features) : all;
     const live = scoped.filter((c) => STATE_INFO[c.state].live);
-    // Children only for what still runs in the background (shown as such), as the Claude view without its child rows.
-    await Promise.all([addSessionChildren(live, this.children, undefined, deps.alive), addSessionInfo(live, registry, this.meta)]);
+    await addSessionInfo(live, registry, this.meta);
     if (!cfg.insights) return live;
     return Promise.all(live.map(async (c) => (c.sessionId ? withInsight(c, await readInsight(cfg.stateDir, c.sessionId)) : c)));
   }

@@ -81,10 +81,3 @@ details summary { cursor: pointer; font-weight: 600; margin-bottom: 8px; }
 .status { margin-bottom: 16px; }
 .status p { margin: 4px 0; }
 .status progress { width: min(480px, 100%); height: 6px; accent-color: var(--vscode-progressBar-background); }
-/* Claude's plan limits, above the totals: label, bar, % used, when it resets. */
-.limits .limit { display: grid; grid-template-columns: 5.5em minmax(80px, 320px) 3.5em auto; align-items: center; gap: 8px; margin: 4px 0; font-variant-numeric: tabular-nums; }
-.limits .limit-bar { width: 100%; height: 8px; }
-.limits-setup { margin: 12px 0; }
-button.link { border: 0; padding: 0; background: none; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; }
-button.link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
-button.link:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }

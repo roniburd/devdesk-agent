@@ -1,11 +1,11 @@
-import { readPaneScreen, typeIntoPane } from '../paneScreen';
-import { type ProgramStatus, programStatusBlocksArrow, screenWithProgramStatus } from '../programStatus';
+import { joinArgs } from '../modes';
+import { readPaneScreen, readPromptScreen, SUBMIT_DELAY_MS, typeIntoPane } from '../paneScreen';
 import type { ProcessTable } from '../processes';
 import type { SessionCard } from '../sessions';
 import { claudeGone, sendBlocker } from '../sessionSend';
-import { claudeLaunchCommand, tmuxStartCommand } from '../sessionStart';
+import { tmuxStartCommand } from '../sessionStart';
 import { promptArg } from '../shell';
-import { attachArgs, DEFAULT_PASTE_SETTLE_MS, launchTags, nextSessionName, paneTarget, sessionName, tmuxTargetGone, type TmuxRunner, typedLine } from '../tmux';
+import { attachArgs, claudeShellCommand, nextSessionName, paneTarget, sessionName, tmuxTargetGone, type TmuxRunner, typedLine } from '../tmux';
 import { readTail } from '../transcriptTail';
 import type { Feature } from '../worktrees';
 import { ansiToSpans } from './ansi';
@@ -23,21 +23,8 @@ export interface ActionDeps {
   listProcesses: () => Promise<ProcessTable | undefined>;
   /** os.tmpdir(), for scripted long commands. */
   tmpDir: string;
-  /** How long Claude gets to take in a paste before Enter (`devdesk.board.pasteSettleMs`; DEFAULT_PASTE_SETTLE_MS). */
-  settleMs?: number;
-  /** Claude's own report for the card's pane (Program Status, `readCardProgramStatus`), when it runs under the relay. */
-  programStatus?: (card: SessionCard) => Promise<ProgramStatus | undefined>;
-}
-
-/**
- * What the pane shows, with Claude's own report on top where there is one (`screenWithProgramStatus`), as the Claude
- * Board reads a session before typing into it: whether it works or a dialog is open.
- */
-async function paneScreen(card: SessionCard, tmux: TmuxRunner, target: string, d: ActionDeps) {
-  const read = await readPaneScreen(tmux, target, d.listProcesses);
-  const status = await d.programStatus?.(card);
-  const screen = screenWithProgramStatus(read.screen, status);
-  return { ...read, screen: { ...read.screen, ...screen }, dialogOpen: !read.promptShown || programStatusBlocksArrow(status) };
+  /** SUBMIT_DELAY_MS (150) */
+  submitDelayMs?: number;
 }
 
 export type ActionResult<T> = { status: 200 | 201; body: T } | { status: 400 | 404 | 409 | 410 | 413 | 502; body: ErrorResponse };
@@ -69,9 +56,9 @@ export async function sessionDetail(card: SessionCard, o: WebView & { server: st
   const target = paneTarget(card);
   if (!target) return { status: 200, body: { ...detail, ended: true } };
   try {
-    const { capture, screen, dialogOpen } = await paneScreen(card, d.tmux(o.server), target, d);
+    const { capture, screen, promptShown } = await readPaneScreen(d.tmux(o.server), target, d.listProcesses);
     detail.screen = ansiToSpans(capture);
-    detail.prompt = { ...screen, dialog: dialogOpen && !screen.exited && !screen.inMode };
+    detail.prompt = { ...screen, dialog: !promptShown && !screen.exited && !screen.inMode };
     detail.ended ||= screen.exited;
   } catch (err) {
     if (!tmuxTargetGone((err as Error).message)) return tmuxFailed(err);
@@ -80,18 +67,18 @@ export async function sessionDetail(card: SessionCard, o: WebView & { server: st
   return { status: 200, body: detail };
 }
 
-/** claudeGone / no pane -> 410; the pane's screen (with Claude's own report); exited -> 410; sendBlocker(card, '', screen, 'your reply') -> 409; typeIntoPane; tmuxTargetGone -> 410; other tmux error -> 502. */
+/** claudeGone / no pane -> 410; readPromptScreen; exited -> 410; sendBlocker(card, '', screen, 'your reply') -> 409; typeIntoPane; tmuxTargetGone -> 410; other tmux error -> 502. */
 export async function sendText(card: SessionCard, text: string, server: string, d: ActionDeps): Promise<ActionResult<OkResponse>> {
   const target = paneTarget(card);
   if (!target || claudeGone(card)) return ended();
   if (!typedLine(text)) return fail(400, 'bad-request', 'There is nothing to send.');
   const tmux = d.tmux(server);
   try {
-    const { screen } = await paneScreen(card, tmux, target, d);
+    const screen = await readPromptScreen(tmux, target, d.listProcesses);
     if (screen.exited) return ended();
     const blocker = sendBlocker(card, '', screen, 'your reply');
     if (blocker) return fail(409, 'blocked', blocker);
-    await typeIntoPane(tmux, target, text, { tmpDir: d.tmpDir, settleMs: d.settleMs ?? DEFAULT_PASTE_SETTLE_MS });
+    await typeIntoPane(tmux, target, text, d.submitDelayMs ?? SUBMIT_DELAY_MS);
   } catch (err) {
     return tmuxTargetGone((err as Error).message) ? ended() : tmuxFailed(err);
   }
@@ -123,11 +110,9 @@ export function featureOf(dir: string, features: readonly Feature[]): Feature | 
 
 /**
  * Starts Claude in a new detached tmux session in one of `features` (`req.dir` must be its dir, or its realDir: else
- * 400), named after the feature (`cc-main`, then `cc-main-2`, … past `existing`), on cfg.tmux.server, as the Claude
- * view starts one (`newSessionShell` in claudeSessions.ts): DevDesk's environment and the session's launch tags, its
- * tmux options, and Claude as `cfg.claude` says (`claudeLaunchCommand`: the Claude account, the Program Status relay)
- * in the mode, with the model and effort chosen (only what `models`, the model pill's rows, and the configured modes
- * offer: else 400); the prompt, when given, as Claude's first prompt.
+ * 400), named after the feature (`cc-main`, then `cc-main-2`, … past `existing`), on cfg.tmux.server, with DevDesk's
+ * environment and tmux options; the mode, model and effort chosen (only what `models`, the model pill's rows, and the
+ * configured modes offer: else 400); the prompt, when given, as Claude's first prompt.
  */
 export async function startSession(
   req: NewSessionRequest,
@@ -142,12 +127,11 @@ export async function startSession(
   const launch = launchArgs(req, cfg.claude, models);
   if ('error' in launch) return fail(400, 'bad-request', launch.error);
   const name = nextSessionName(sessionName(feature), existing);
-  const server = cfg.tmux.server;
-  const shell = claudeLaunchCommand({ ...cfg.claude, modeArgs: launch.args }, req.prompt ? promptArg(req.prompt) : '');
-  const env = { ...cfg.tmux.env, ...launchTags(name, server) };
+  const { command, path, args } = cfg.claude;
+  const shell = claudeShellCommand({ command, path, args }, joinArgs(launch.args, req.prompt ? promptArg(req.prompt) : ''));
   try {
     const run = tmuxStartCommand(shell, d.tmpDir);
-    await d.tmux(server)(attachArgs(name, feature.dir, run, env, cfg.tmux.options, true));
+    await d.tmux(cfg.tmux.server)(attachArgs(name, feature.dir, run, cfg.tmux.env, cfg.tmux.options, true));
   } catch (err) {
     return tmuxFailed(err);
   }

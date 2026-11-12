@@ -1,12 +1,11 @@
 import { join } from 'node:path';
-import { WEB_ACCESS } from '../edition';
 import { isFiniteNumber, parseObject } from '../json';
 import type { SessionCard } from '../sessions';
 import { unreadCards } from '../sessionsView';
 
 /**
  * `web.json`: what the running daemon writes about itself (pid, port, tunnel), for the extension's status bar item and
- * Stop. It lives in `<stateDir>/web-v2/` (`webDir`), with `config.json` and `daemon.log`, out of the hook records in `<stateDir>`.
+ * Stop. It lives in `<stateDir>/web/`, with `config.json` and `daemon.log`, out of the hook records in `<stateDir>`.
  */
 
 export type TunnelStatus = 'none' | 'starting' | 'up' | 'down';
@@ -29,8 +28,7 @@ export interface WebState {
   tunnelAction?: string;
 }
 
-/** The daemon's folder in the sessions state directory (`web-v2`: v1's daemon has `web`, see `WEB_ACCESS`). */
-export const webDir = (stateDir: string) => join(stateDir, WEB_ACCESS.dirName);
+export const webDir = (stateDir: string) => join(stateDir, 'web');
 export const webStatePath = (webDir: string) => join(webDir, 'web.json');
 export const webConfigPath = (webDir: string) => join(webDir, 'config.json');
 export const webLogPath = (webDir: string) => join(webDir, 'daemon.log');

@@ -42,8 +42,6 @@ describe('historyCard', () => {
     expect(historyCard(doc(), '/ws/worktrees/feat-a/src/Pkg', features)).toEqual({
       id: 's1',
       sessionId: 's1',
-      // Its Claude account follows from its transcript's config directory.
-      transcriptPath: '/p/s1.jsonl',
       cwd: '/ws/worktrees/feat-a/src/Pkg',
       state: 'parked',
       detail: '',

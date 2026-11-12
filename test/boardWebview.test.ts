@@ -824,16 +824,6 @@ describe('board webview: session cards', () => {
     expect([...done.querySelectorAll('.acts button')].map((x) => x.textContent)).toEqual(['Fork', 'End']);
   });
 
-  it("offers Fix checks on a card whose worktree's pull request has failing checks", async () => {
-    const b = await board();
-    const doc = b.prompt.ownerDocument;
-    await b.host(boardOf([{ id: 'review', title: 'Done', sessions: [{ id: 'd', look: 'done', lookLabel: 'Done', title: 'T', worktree: 'fix', ago: '2m', canFork: true, canEnd: true, checks: '2 checks failing', hoverParts }] }]));
-    const fix = [...doc.querySelectorAll<HTMLButtonElement>('.card[data-session="d"] .acts button')].find((x) => x.textContent === 'Fix checks')!;
-    expect(fix.title).toBe('Ask Claude to fix: 2 checks failing');
-    fix.click();
-    expect(b.posted.at(-1)).toEqual({ type: 'fixChecks', id: 'd' });
-  });
-
   it('shows in Working what Claude is doing, and ☰ hides the Working and Needs you lines', async () => {
     const b = await board();
     const doc = b.prompt.ownerDocument;

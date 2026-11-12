@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { tmpdir } from 'node:os';
-import { claudeRunsIn, readPaneScreen, readPromptScreen, typeIntoPane } from '../src/core/paneScreen';
+import { claudeRunsIn, readPaneScreen, readPromptScreen, SUBMIT_DELAY_MS, typeIntoPane } from '../src/core/paneScreen';
 import { DIALOG_SCREEN, EMPTY_SCREEN, fakeTmux, processTable, WORKING_SCREEN } from './web/fakes';
 
 const claudeUnder100 = async () => processTable([[100, 1, 'sh'], [101, 100, 'claude']]);
@@ -36,9 +35,8 @@ describe('readPromptScreen', () => {
   it('reads an empty prompt', async () => {
     const tmux = fakeTmux({ capture: EMPTY_SCREEN });
     expect(await readPromptScreen(tmux.run, '%3', claudeUnder100)).toEqual({ empty: true, working: false, exited: false, inMode: false });
-    expect(tmux.calls).toHaveLength(1);
-    expect(tmux.calls[0].slice(0, 6)).toEqual(['capture-pane', '-p', '-e', '-t', '%3', ';']);
-    expect(tmux.calls[0].slice(6, 10)).toEqual(['display-message', '-p', '-t', '%3']);
+    expect(tmux.calls[0]).toEqual(['capture-pane', '-p', '-e', '-t', '%3']);
+    expect(tmux.calls[1].slice(0, 4)).toEqual(['display-message', '-p', '-t', '%3']);
   });
 
   it('reads a working session, a dialog, copy mode and an exit', async () => {
@@ -59,26 +57,26 @@ describe('readPromptScreen', () => {
 });
 
 describe('typeIntoPane', () => {
-  const o = (settleMs: number) => ({ tmpDir: tmpdir(), settleMs });
-
-  it('pastes the text as one line through a buffer of its own, then presses Enter after the delay', async () => {
+  it('types the text, then presses Enter after the delay', async () => {
     const tmux = fakeTmux();
     const start = Date.now();
-    await typeIntoPane(tmux.run, '%3', 'hello\nworld', o(20));
+    await typeIntoPane(tmux.run, '%3', 'hello\nworld', 20);
     expect(Date.now() - start).toBeGreaterThanOrEqual(15);
-    expect(tmux.calls.map((c) => c[0])).toEqual(['load-buffer', 'paste-buffer', 'send-keys']);
-    expect(tmux.calls[0][2]).toMatch(/^devdesk-send-[0-9a-f]+$/);
+    expect(tmux.calls).toEqual([
+      ['send-keys', '-t', '%3', '-l', '--', 'hello world'],
+      ['send-keys', '-t', '%3', 'Enter'],
+    ]);
+    expect(SUBMIT_DELAY_MS).toBe(150);
+  });
+
+  it('sends long text in pieces', async () => {
+    const tmux = fakeTmux();
+    await typeIntoPane(tmux.run, '%3', 'a'.repeat(20_000), 0);
+    expect(tmux.calls).toHaveLength(4);
     expect(tmux.calls.at(-1)).toEqual(['send-keys', '-t', '%3', 'Enter']);
   });
 
-  it('types a /command before pasting its argument', async () => {
-    const tmux = fakeTmux();
-    await typeIntoPane(tmux.run, '%3', '/rename fix the build', o(0));
-    expect(tmux.calls.map((c) => c[0])).toEqual(['load-buffer', 'send-keys', 'paste-buffer', 'send-keys']);
-    expect(tmux.calls[1]).toEqual(['send-keys', '-t', '%3', '-l', '--', '/rename ']);
-  });
-
   it('refuses a bad target', async () => {
-    await expect(typeIntoPane(fakeTmux().run, 'cc-main', 'x', o(0))).rejects.toThrow();
+    await expect(typeIntoPane(fakeTmux().run, 'cc-main', 'x', 0)).rejects.toThrow();
   });
 });

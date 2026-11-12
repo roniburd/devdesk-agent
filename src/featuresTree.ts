@@ -124,9 +124,6 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
   private activity: ReadonlyMap<string, Activity> = new Map();
   /** Whether loading now is worth it (the view is visible and in front); changes found meanwhile load on the next tick. */
   private active: () => boolean = () => true;
-  private checks: { hint(dir: string): string; hasFixes(dir: string): boolean } | undefined;
-  /** A worktree's linked ticket chip (`ABC-123 · In progress`), its hover and URL (see `TicketLinks`). */
-  private tickets: ((dir: string) => { text: string; hover: string } | undefined) | undefined;
   /** Rows with changed packages waiting to be redrawn, and the timer that does it (signals come in bursts). */
   private readonly pendingRows = new Set<FeatureNode>();
   private pendingTimer: NodeJS.Timeout | undefined;
@@ -214,21 +211,6 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
   async loadsDone(): Promise<void> {
     await this.gitPool.idle();
     await this.packages.allSettled();
-  }
-
-  /** The worktrees the view lists now (the checks are fetched for them). */
-  listedFeatures(): Feature[] {
-    return this.featureNodes.map((n) => n.feature);
-  }
-
-  /** Where a worktree row's checks hint (`2 checks failing`) comes from, and whether it has checks to fix (see `WorktreeChecks`). */
-  setChecks(checks: { hint(dir: string): string; hasFixes(dir: string): boolean }): void {
-    this.checks = checks;
-  }
-
-  /** Where a worktree row's ticket chip comes from (see `TicketLinks`). */
-  setTickets(tickets: (dir: string) => { text: string; hover: string } | undefined): void {
-    this.tickets = tickets;
   }
 
   /** The view's state the tree can't see itself: whether loading now is worth it. */
@@ -563,16 +545,13 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
     }
   }
 
-  /** A worktree row's description (its Claude state, its ticket, then `N changed`, then its checks hint) and context value. */
+  /** A worktree row's description (its Claude state, then `N changed`) and context value. */
   private featureLook(node: FeatureNode): { description: string; contextValue: string } {
     const session = this.sessionState().get(node.feature.dir) ?? sessionLabel(node.session);
-    const checks = this.checks?.hint(node.feature.dir);
-    const ticket = this.tickets?.(node.feature.dir);
     return {
-      description: [session, ticket ? `🎫 ${ticket.text}` : '', this.changesSummary(node.feature), checks].filter(Boolean).join(' · '),
-      // `feature.session` while its own Claude session runs; `deletable` for a worktree (not the workspace itself);
-      // `checks` when its pull request has failing checks or open comments; `ticket` when a ticket is linked to it.
-      contextValue: `${node.session ? 'feature.session' : 'feature'}${node.feature.isMain ? '' : ' deletable'}${this.checks?.hasFixes(node.feature.dir) ? ' checks' : ''}${ticket ? ' ticket' : ''}`,
+      description: [session, this.changesSummary(node.feature)].filter(Boolean).join(' · '),
+      // `feature.session` while its own Claude session runs; `deletable` for a worktree (not the workspace itself).
+      contextValue: `${node.session ? 'feature.session' : 'feature'}${node.feature.isMain ? '' : ' deletable'}`,
     };
   }
 
@@ -591,10 +570,7 @@ export class FeaturesTree implements vscode.TreeDataProvider<Node> {
         const look = this.featureLook(node);
         this.drawn.set(node.feature.dir, lookKey(look));
         item.description = look.description;
-        // The checks hint, often cut off at the row's end, in full.
-        const checks = this.checks?.hint(node.feature.dir);
-        const ticket = this.tickets?.(node.feature.dir);
-        item.tooltip = [node.feature.dir, checks ? `Pull request: ${checks}` : '', ticket ? `Ticket: ${ticket.hover}` : ''].filter(Boolean).join('\n');
+        item.tooltip = node.feature.dir;
         item.contextValue = look.contextValue;
         item.iconPath = new vscode.ThemeIcon(node.feature.isMain ? 'home' : 'git-branch');
         return item;

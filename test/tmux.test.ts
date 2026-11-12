@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { promptArg, shellQuote } from '../src/core/shell';
-import { fitsTmuxCommandLine, scriptedCommand, attachArgs, CLAUDE_CHILD_ENV_KEYS, launchTags, claudeShellCommand, defaultTmuxInstallCommand, forkArgs, tmuxInstalled, tmuxOptions, isSessionId, DEFAULT_SERVER, isPaneId, isServerName, serverArgs, LIST_FORMAT, listPanes, listSessions, isNumberedSession, nextSessionName, parsePanes, sessionLabel, sessionName, sessionsOf } from '../src/core/tmux';
+import { fitsTmuxCommandLine, scriptedCommand, attachArgs, claudeShellCommand, defaultTmuxInstallCommand, forkArgs, tmuxInstalled, tmuxOptions, isSessionId, DEFAULT_SERVER, isPaneId, isServerName, serverArgs, LIST_FORMAT, listPanes, listSessions, isNumberedSession, nextSessionName, parsePanes, sessionLabel, sessionName, sessionsOf } from '../src/core/tmux';
 
 const wt = (name: string) => ({ name, dir: `/w/worktrees/${name}`, isMain: false });
 
@@ -118,26 +118,17 @@ describe('scriptedCommand', () => {
 });
 
 describe('attachArgs', () => {
-  // Every start first clears Claude's child-session variables from the server's global environment.
-  const UNSET = ['start-server', ';', ...CLAUDE_CHILD_ENV_KEYS.flatMap((k) => ['set-environment', '-g', '-u', k, ';'])];
   it('creates or attaches to a named session in the feature directory', () => {
-    expect(attachArgs('cc-a', '/w', 'claude')).toEqual([...UNSET, 'new-session', '-A', '-s', 'cc-a', '-c', '/w', 'claude']);
-    expect(attachArgs('cc-a', '/w', 'claude', {}, [], true)).toEqual([...UNSET, 'new-session', '-d', '-s', 'cc-a', '-c', '/w', 'claude']);
+    expect(attachArgs('cc-a', '/w', 'claude')).toEqual(['new-session', '-A', '-s', 'cc-a', '-c', '/w', 'claude']);
+    expect(attachArgs('cc-a', '/w', 'claude', {}, [], true)).toEqual(['new-session', '-d', '-s', 'cc-a', '-c', '/w', 'claude']);
   });
-  it("adds environment variables to a new session's environment, with DevDesk's tags", () => {
-    expect(attachArgs('cc-a', '/w', 'claude', { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1', ...launchTags('cc-a', 'devdesk') })).toEqual([
-      ...UNSET,
-      'new-session', '-A', '-s', 'cc-a', '-c', '/w', '-e', 'CLAUDE_CODE_DISABLE_AGENT_VIEW=1',
-      '-e', 'DEVDESK_TMUX_SESSION=cc-a', '-e', 'DEVDESK_TMUX_SERVER=devdesk', 'claude',
+  it("adds environment variables to a new session's environment", () => {
+    expect(attachArgs('cc-a', '/w', 'claude', { CLAUDE_CODE_DISABLE_AGENT_VIEW: '1' })).toEqual([
+      'new-session', '-A', '-s', 'cc-a', '-c', '/w', '-e', 'CLAUDE_CODE_DISABLE_AGENT_VIEW=1', 'claude',
     ]);
-  });
-  it('clears what makes a Claude started inside another Claude its child, and keeps its settings', () => {
-    expect(CLAUDE_CHILD_ENV_KEYS).toEqual(expect.arrayContaining(['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION']));
-    expect(CLAUDE_CHILD_ENV_KEYS).not.toContain('CLAUDE_CODE_USE_BEDROCK');
   });
   it('sets each option on the session after creating or attaching to it', () => {
     expect(attachArgs('cc-a', '/w', 'claude', { DEVDESK_TMUX: '/opt/tmux' }, [['mouse', 'on'], ['history-limit', '5000']])).toEqual([
-      ...UNSET,
       'new-session', '-A', '-s', 'cc-a', '-c', '/w', '-e', 'DEVDESK_TMUX=/opt/tmux', 'claude',
       ';', 'set-option', '-t', '=cc-a:', 'mouse', 'on',
       ';', 'set-option', '-t', '=cc-a:', 'history-limit', '5000',

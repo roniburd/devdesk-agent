@@ -139,7 +139,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
   /** What the Claude view goes by: its read marks (seen.json, from the extension) and the idle and stuck limits. */
   const view = async (cards: readonly SessionCard[]): Promise<WebView> => {
     const seen = parseWebSeen(await readFile(webSeenPath(config.webDir), 'utf8').catch(() => ''));
-    return { now: Date.now(), stuckMs: config.stuckMs, idleMs: config.idleMs, unread: webUnread(seen, cards), ...config.sort };
+    return { now: Date.now(), stuckMs: config.stuckMs, idleMs: config.idleMs, unread: webUnread(seen, cards) };
   };
   const cardsResponse = async (cards: readonly SessionCard[]): Promise<CardsResponse> => {
     const v = await view(cards);

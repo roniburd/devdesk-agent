@@ -11,8 +11,7 @@ import {
   type WorktreeTask,
   worktreeSlug,
 } from '../src/core/worktreeTasks';
-import { prefillArg, promptArg, shellQuote } from '../src/core/shell';
-import { claudeShellCommand } from '../src/core/tmux';
+import { promptArg, shellQuote } from '../src/core/shell';
 
 describe('worktreeSlug', () => {
   it('lowercases and turns runs of other characters into single dashes', () => {
@@ -89,18 +88,6 @@ describe('promptArg', () => {
   it('drops NUL characters, which no shell word can hold, so the rest of the prompt reaches Claude', () => {
     const out = execFileSync('/bin/sh', ['-c', `printf '%s' ${promptArg('a\u0000b nul').slice(3)}`], { encoding: 'utf8' });
     expect(out).toBe('ab nul');
-  });
-});
-
-describe('prefillArg', () => {
-  it('passes the draft quoted to --prefill, an option (not behind --)', () => {
-    expect(prefillArg("fix the bug\nin 'auth'")).toBe(`--prefill 'fix the bug\nin '\\''auth'\\'''`);
-    const out = execFileSync('/bin/sh', ['-c', `printf '%s' ${prefillArg('$HOME `x` "q"').slice('--prefill '.length)}`], { encoding: 'utf8' });
-    expect(out).toBe('$HOME `x` "q"');
-  });
-
-  it('stays among the options of a full command, before its prompt and after its binary', () => {
-    expect(claudeShellCommand({ command: 'claude --x; exec $SHELL -l' }, `--model opus ${prefillArg('draft')}`)).toBe("claude --model opus --prefill 'draft' --x; exec $SHELL -l");
   });
 });
 

@@ -19,7 +19,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
    * What the box keeps for this project folder: the extension saves it (`keep` messages, in its `workspaceState`) and
    * posts it back when the webview loads (`restore`), so it outlasts the tab, a reload and the webview. Until then (and
    * for what this project has not saved), the defaults: the posted default mode, the first model row, Default effort.
-   * @type {{ filter: string, query: string, mode?: string, model?: string, effort?: string, ultracode: boolean, account?: string, history: string[], draft: string }}
+   * @type {{ filter: string, query: string, mode?: string, model?: string, effort?: string, ultracode: boolean, history: string[], draft: string }}
    */
   const state = {
     filter: '',
@@ -28,8 +28,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     model: undefined,
     effort: undefined,
     ultracode: false,
-    /** The Claude account picked in the account pill (devdesk.claude.accounts), else the default one. */
-    account: undefined,
     history: [],
     /** The text typed in the box and not sent yet, so the box opened again (a reload, the tab closed) shows it again. */
     draft: '',
@@ -145,15 +143,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     });
     b.dataset.key = `${type}:${id}`;
     b.disabled = !!disabled;
-    return b;
-  }
-
-  /** An icon `action` with `name` for screen readers and a tooltip saying what it does. */
-  function iconAction(icon, name, what, type, id, disabled) {
-    const b = action(icon, type, id, false, disabled);
-    b.classList.add('icon');
-    b.title = `${name}: ${what}`;
-    b.setAttribute('aria-label', name);
     return b;
   }
 
@@ -286,10 +275,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     // One line under the title (devdesk.board.cardLine, the ☰ button): what Claude asks in Needs you, what it is doing in Working.
     const ask = showLine ? s.ask : '';
     if (showLine && s.doing) card.append(el('div', 'doing', s.doing));
-    // The note Claude set on its card (`devdesk note`).
-    if (s.note) card.append(el('div', 'note', `\u{1F4CC} ${s.note}`));
-    // Coordinator and worker sessions (`devdesk worker`): whose worker it is, or how its workers stand.
-    if (s.team) card.append(el('div', 'team', `\u{1F465} ${s.team}`));
     // Needs you: what Claude asks, in one line, under what kind of ask it is.
     if (ask) {
       const box = el('div', 'ask');
@@ -302,21 +287,8 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const wt = el('span', 'wt');
     wt.append(icon(ICONS.branch), document.createTextNode(s.worktree));
     meta.append(wt);
-    // The ticket linked to the session or its worktree: a click opens it in the browser.
-    if (s.ticket) {
-      const chip = button('ticket', `\u{1F3AB} ${s.ticket.text}`, (ev) => {
-        ev.stopPropagation();
-        send('openTicket', { id: s.id });
-      });
-      chip.title = `${s.ticket.hover}\n\nClick to open it.`;
-      chip.setAttribute('aria-label', `Ticket ${s.ticket.text}: open it`);
-      chip.dataset.key = `ticket:${s.id}`;
-      meta.append(chip);
-    }
     // The model the board started it with (not Default).
     if (s.model) meta.append(el('span', 'model', s.model));
-    // The Claude account it runs in (devdesk.claude.accounts), when not the default one.
-    if (s.account) meta.append(el('span', 'account', s.account));
     const right = el('span', ask ? `when ${color}` : 'when');
     if (!ask) {
       // The lane says the state; the glyph tells apart the looks a lane shares (done, error, crashed, parked…).
@@ -329,12 +301,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     card.append(meta);
     const acts = el('div', 'acts');
     if (s.canFork) acts.append(action('Fork', 'fork', s.id));
-    // Its worktree's pull request has failing checks or open comments: Ask Claude to fix them.
-    if (s.checks) {
-      const fix = action('Fix checks', 'fixChecks', s.id);
-      fix.title = `Ask Claude to fix: ${s.checks}`;
-      acts.append(fix);
-    }
     if (s.canEnd) acts.append(action(s.parked ? 'Remove' : 'End', 'end', s.id));
     if (acts.childElementCount) card.append(acts);
     // Opening (double-click, Enter) is handled on the lanes (below), so a card updated in place keeps working.
@@ -523,25 +489,16 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const meta = el('div', 'meta');
     for (const c of t.chips) meta.append(el('span', 'wt', c));
     meta.append(el('span', 'ago', t.starting ? 'starting…' : `added ${t.ago === 'just now' ? 'just now' : `${t.ago} ago`}`));
-    const off = t.starting;
-    // Edit and Delete: icons at the end of the meta line, so the run buttons below fit on one line of a lane.
-    const tools = el('span', 'tools');
-    tools.append(
-      iconAction('✎', 'Edit', 'Put it back in the prompt box to edit it', 'edit', t.id, off),
-      iconAction('✕', 'Delete', 'Delete it (asks first)', 'delete', t.id, off),
-    );
-    meta.append(tools);
     card.append(meta);
     const acts = el('div', 'acts');
+    const off = t.starting;
     const start = action('▶ Start', 'start', t.id, true, off);
     start.title = 'Start it as saved';
     const plan = action('Plan', 'plan', t.id, false, off);
     plan.title = 'Start it in plan mode: Claude explores and presents a plan before changing anything';
     const spec = action('Spec', 'spec', t.id, false, off);
     spec.title = 'Start it with a design spec first (devdesk.board.specPrompt)';
-    const draft = action('Draft', 'draft', t.id, false, off);
-    draft.title = 'Start a session with it typed at Claude\'s prompt, not sent: edit it there, then press Enter';
-    acts.append(start, plan, spec, draft);
+    acts.append(start, plan, spec, action('Edit', 'edit', t.id, false, off), action('Delete', 'delete', t.id, false, off));
     card.append(acts);
     return card;
   }
@@ -953,7 +910,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
   const whereBtn = $('where');
   const nameInput = /** @type {HTMLInputElement} */ ($('wtname'));
   const modelBtn = $('model');
-  const accountBtn = $('account');
   const modeBtn = $('mode');
   const laterBtn = /** @type {HTMLButtonElement} */ ($('later'));
   const sendBtn = /** @type {HTMLButtonElement} */ ($('send'));
@@ -1015,10 +971,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     const effort = () => /** @type {string} */ (efforts().includes(/** @type {string} */ (state.effort)) ? state.effort : DEFAULT);
     const modelLabel = (r) => (r.value === DEFAULT ? 'Default model' : r.label);
     const worktree = () => info.worktrees.find((w) => w.dir === where);
-    /** The Claude accounts (devdesk.claude.accounts), the default first; the pill shows only with more than one. */
-    const accounts = () => info.accounts || [];
-    /** The account picked (an unlisted one, removed from the setting, is the default). */
-    const account = () => ((accounts().find((a) => a.name === state.account) || { name: info.defaultAccount }).name);
 
     /** Ends the `/` or `@` completion in progress and closes its menu. */
     function stopCompleting() {
@@ -1122,9 +1074,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       if (effort() !== DEFAULT) parts.push(effort());
       if (state.ultracode) parts.push('Ultracode');
       modelBtn.replaceChildren(el('span', 'label', parts.join(' · ')), icon(ICONS.chevron));
-      accountBtn.hidden = accounts().length < 2;
-      accountBtn.replaceChildren(el('span', 'label', account() || 'default'), icon(ICONS.chevron));
-      accountBtn.title = `Runs in Claude account ${account()}. Click to change.`;
       const off = busy || !prompt.value.trim() || !!info.notReady;
       sendBtn.disabled = off;
       laterBtn.disabled = off;
@@ -1201,7 +1150,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         model: model(),
         effort: effort(),
         ultracode: state.ultracode,
-        account: account(),
         later: asLater,
         replaces: editing,
       });
@@ -1233,7 +1181,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     function restore(kept) {
       const choices = beforeEdit || state;
       const choice = kept.choice || pick(legacy, ['mode', 'model', 'effort', 'ultracode']);
-      if (choice.account !== undefined) choices.account = choice.account;
       if (choice.mode !== undefined) choices.mode = choice.mode;
       if (choice.model !== undefined) choices.model = choice.model;
       if (choice.effort !== undefined) choices.effort = choice.effort;
@@ -1340,17 +1287,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         });
       }
       popup.open({ anchor: modelBtn, header: 'Model', items, close: () => prompt.focus(), active: at });
-    }
-
-    /** The Claude accounts, the default one marked; picking one is remembered for this project folder, as the model is. */
-    function accountMenu() {
-      const items = accounts().map((a) => ({
-        label: a.name,
-        description: `${a.name === info.defaultAccount ? '(default) ' : ''}${a.description}`,
-        checked: a.name === account(),
-        pick: () => pickChoice({ account: a.name }),
-      }));
-      popup.open({ anchor: accountBtn, header: 'Claude account', items, close: () => prompt.focus() });
     }
 
     /** Opens the model list (`effort`: with the effort row highlighted, when the model has one). */
@@ -1662,7 +1598,6 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     $('slash').addEventListener('click', () => insertTrigger('/'));
     whereBtn.addEventListener('click', toggle(whereBtn, whereMenu));
     modelBtn.addEventListener('click', toggle(modelBtn, modelMenu));
-    accountBtn.addEventListener('click', toggle(accountBtn, accountMenu));
     modeBtn.addEventListener('click', toggle(modeBtn, modeMenu));
     sendBtn.addEventListener('click', () => submit(later));
     laterBtn.addEventListener('click', () => {
@@ -1699,11 +1634,10 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         editing = id;
         if (choice) {
           // Its choices apply while editing only: the remembered ones come back afterwards.
-          beforeEdit ??= { mode: state.mode, model: state.model, effort: state.effort, ultracode: state.ultracode, account: state.account };
+          beforeEdit ??= { mode: state.mode, model: state.model, effort: state.effort, ultracode: state.ultracode };
           if (choice.mode) state.mode = choice.mode;
           if (choice.model) state.model = choice.model;
           if (choice.effort) state.effort = choice.effort;
-          if (choice.account) state.account = choice.account;
           state.ultracode = !!choice.ultracode;
           where = choice.where === 'new' ? 'new' : choice.where || 'main';
           nameInput.value = choice.worktreeName || '';
@@ -1837,47 +1771,11 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       parts.push(el('div', 'stats-note', 'It keeps counting when you close this, and what is counted is saved.'));
       waiting.replaceChildren(...parts);
     }
-    /**
-     * Claude's plan limits (for the whole account, so above the project): % of the 5-hour and weekly limits used, with a
-     * bar and when each resets; or, while DevDesk's status line that records them is not installed, the offer to install it.
-     */
-    function limitsPart(l) {
-      if (l && l.view) {
-        const box = el('div', 'stats-limits');
-        box.append(section(`Plan limits${l.view.asOf ? ` (${l.view.asOf})` : ''}`));
-        for (const r of l.view.rows) {
-          const line = el('div', 'stats-limit');
-          const bar = el('meter', 'stats-limit-bar');
-          bar.min = 0;
-          bar.max = 100;
-          bar.low = 70;
-          bar.high = 90;
-          bar.optimum = 0;
-          bar.value = r.percent;
-          bar.setAttribute('aria-label', `${r.label} limit used`);
-          line.append(el('span', 'stats-label', r.label), bar, el('span', 'stats-num', r.percentText), el('span', 'stats-limit-reset', r.resetsText));
-          if (r.resetsAt) line.title = `Resets ${new Date(r.resetsAt).toLocaleString()}`;
-          box.append(line);
-        }
-        return box;
-      }
-      if (l && l.setup) {
-        const line = el('div', 'stats-note stats-limits-setup', "Claude's 5-hour and weekly limits: ");
-        const b = button('link', 'Show…', () => send('setupLimits'));
-        b.title = "Install DevDesk's Claude status line, which records them (Claude.ai Pro and Max)";
-        line.append(b);
-        return line;
-      }
-      return undefined;
-    }
-    function show(u, limits) {
+    function show(u) {
       if (pop.hidden || !u) return;
       const calls = (d) => `${d.requests} calls${d.failed ? `, ${d.failed} failed` : ''}`;
       const all = u.scope.kind === 'all';
-      const parts = [el('div', 'stats-title', TITLE)];
-      const lp = limitsPart(limits);
-      if (lp) parts.push(lp);
-      parts.push(scopeLine(u), head(), section(all ? 'Claude sessions' : 'Claude sessions here'));
+      const parts = [el('div', 'stats-title', TITLE), scopeLine(u), head(), section(all ? 'Claude sessions' : 'Claude sessions here')];
       for (const p of u.periods) parts.push(row(p.label, p.sessions, `${p.sessions.requests} requests`));
       const places = (u.today.places || []).slice(0, 5);
       if (places.length > (all ? 0 : 1)) {
@@ -2174,7 +2072,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     },
     openPicker: (m) => composer.openPicker(m.picker),
     clearBox: (m) => composer.clearBox(m.started),
-    usage: (m) => stats.show(m.usage, m.limits),
+    usage: (m) => stats.show(m.usage),
     usageProgress: (m) => stats.progress(m.progress),
   };
   window.addEventListener('message', (ev) => {

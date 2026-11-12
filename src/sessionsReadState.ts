@@ -236,7 +236,7 @@ export class SessionsReadState implements vscode.Disposable {
   }
 
   /**
-   * Writes what the user has read to `<stateDir>/web-v2/seen.json` when it changed, so the web access daemon (which
+   * Writes what the user has read to `<stateDir>/web/seen.json` when it changed, so the web access daemon (which
    * cannot read VS Code's state) orders and marks sessions as this view does, also after the window closes.
    */
   private shareWithWeb(seen: ReadonlyMap<string, string>): void {

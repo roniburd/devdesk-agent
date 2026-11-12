@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
-import { claudePromptIsEmpty, paneScreenArgs, parsePaneScreen } from './core/claudePrompt';
-import { programStatusBlocksArrow, readCardProgramStatus } from './core/programStatus';
-import { processAlive } from './core/sessions';
+import { claudePromptIsEmpty } from './core/claudePrompt';
 import { skipShellUpdate } from './core/skipShell';
-import { FIELD_SEP } from './core/tmux';
 import { claudeTerminalOfTab, claudeTerminalSession, isClaudeTerminal } from './claudeSessions';
-import { programStatusDir, sessionsLeftArrowOpensSidebar, sessionsTmux } from './config';
+import { sessionsLeftArrowOpensSidebar, sessionsTmux } from './config';
 import { log, registerTimedCommand } from './log';
 import type { SessionsTree } from './sessionsTree';
 
@@ -29,31 +26,23 @@ function terminalInFront(): vscode.Terminal | undefined {
 }
 
 /**
- * ← in a DevDesk Claude terminal: on an empty prompt, focuses the Claude view (on the session's row) where Claude would
+ * ← in a DevDesk for Claude Code terminal: on an empty prompt, focuses the Claude view (on the session's row) where Claude would
  * open its agent view; otherwise passes ← on to Claude.
  */
 async function leftArrow(tree: SessionsTree): Promise<void> {
   const terminal = terminalInFront();
   if (!terminal) return;
   const target = claudeTerminalSession(terminal);
-  const card = tree.state.focusedCard(terminal);
   let empty = false;
   if (target) {
     try {
-      // Claude's own report (Program Status relay) shows an open dialog without reading the screen; only the screen
-      // shows whether text is typed. A running turn keeps ← for DevDesk, as without the relay.
-      const status = card?.tmuxSession === target.session ? await readCardProgramStatus(programStatusDir(), card, processAlive) : undefined;
-      // The session's current pane is the one its attached client shows; its flags (copy mode, the cursor) come with
-      // the capture.
-      if (!programStatusBlocksArrow(status)) {
-        const { capture, flags } = parsePaneScreen(await sessionsTmux(target.server)(paneScreenArgs(`=${target.session}:`, FIELD_SEP)), FIELD_SEP);
-        empty = claudePromptIsEmpty(capture, flags);
-      }
+      // The session's current pane is the one its attached client shows.
+      empty = claudePromptIsEmpty(await sessionsTmux(target.server)(['capture-pane', '-p', '-e', '-t', `=${target.session}:`]));
     } catch (err) {
       log.debug(`cannot read the prompt of ${target.session}: ${(err as Error).message}`);
     }
   }
-  if (empty) await tree.focus(card);
+  if (empty) await tree.focus(tree.state.focusedCard(terminal));
   else terminal.sendText(LEFT, false);
 }
 

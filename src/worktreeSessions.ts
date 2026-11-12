@@ -1,9 +1,6 @@
-import { pickClaudeAccount } from './claudeAccounts';
-import type { ClaudeAccount } from './core/accounts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { autoTrustWorktree, trustsWorktreeOnly } from './claudeTrust';
 import { joinArgs, type LaunchMode } from './core/modes';
 import { runCommand } from './core/shellRun';
 import { sessionName } from './core/tmux';
@@ -19,8 +16,8 @@ import {
   withWorktreeTask,
   worktreeSlug,
 } from './core/worktreeTasks';
-import { prefillArg, promptArg } from './core/shell';
-import { discoverFeatures, discoverPackages, isGitWorkspace, isPlainFolder, type PackageRepo } from './core/worktrees';
+import { promptArg } from './core/shell';
+import { discoverFeatures, isGitWorkspace, isPlainFolder, type PackageRepo } from './core/worktrees';
 import { workspaceProvider } from './core/workspaceProvider';
 import { sessionsClaudeCommand, sessionsWorktreeCreateCommand, sessionsWorktreeKind, sessionsWorktreeStartPrompt, workspaceRoot } from './config';
 import { log } from './log';
@@ -65,7 +62,7 @@ export class WorktreeTaskStore implements vscode.Disposable {
 }
 
 /** Runs `devdesk.worktrees.createCommand` for `worktree` in `root`; true when `<root>/worktrees/<worktree>` exists afterwards. */
-async function createWorkspaceWorktree(root: string, worktree: string, dir: string, failed?: (message: string) => void): Promise<boolean> {
+async function createWorkspaceWorktree(root: string, worktree: string, dir: string): Promise<boolean> {
   const command = sessionsWorktreeCreateCommand();
   log.info(`creating worktree ${worktree}: ${command}`);
   const result = await vscode.window.withProgress(
@@ -74,33 +71,14 @@ async function createWorkspaceWorktree(root: string, worktree: string, dir: stri
   );
   if (result.output.trim()) log.info(`worktree ${worktree}: ${result.output.trim()}`);
   if (!result.ok) {
-    const message = `Could not create worktree ${worktree}: ${failureSummary(result.output) || 'the command failed'}`;
-    failed?.(message);
-    void vscode.window.showErrorMessage(`${message} (full output in the DevDesk log)`);
+    void vscode.window.showErrorMessage(`Could not create worktree ${worktree}: ${failureSummary(result.output) || 'the command failed'} (full output in the DevDesk log)`);
     return false;
   }
   if (!existsSync(dir)) {
-    const message = `The worktree command finished, but ${dir} does not exist. Check devdesk.worktrees.createCommand.`;
-    failed?.(message);
-    void vscode.window.showErrorMessage(message);
+    void vscode.window.showErrorMessage(`The worktree command finished, but ${dir} does not exist. Check devdesk.worktrees.createCommand.`);
     return false;
   }
   return true;
-}
-
-/**
- * Makes the Claude Code worktree `<repo>/.claude/worktrees/<worktree>` on a new branch `worktree-<worktree>` (as
- * `claude --worktree` names it) from `base`, for a worktree that must start from a given commit. True when made.
- */
-async function createGitWorktree(repo: string, worktree: string, dir: string, base: string, failed?: (message: string) => void): Promise<boolean> {
-  log.info(`creating worktree ${worktree} from ${base} in ${repo}`);
-  const result = await runCommand('git', ['worktree', 'add', '-b', `worktree-${worktree}`, dir, base], { cwd: repo, timeoutMs: CREATE_TIMEOUT_MS });
-  if (result.output.trim()) log.info(`worktree ${worktree}: ${result.output.trim()}`);
-  if (result.ok && existsSync(dir)) return true;
-  const message = `Could not create worktree ${worktree} from ${base}: ${failureSummary(result.output) || 'git worktree add failed'}`;
-  failed?.(message);
-  void vscode.window.showErrorMessage(message);
-  return false;
 }
 
 /** The package a Claude Code worktree is made in: the only one, or the one picked. */
@@ -123,7 +101,7 @@ export function noWorktreesReason(root: string | undefined): string {
 }
 
 /** The kind of worktree New Worktree Session makes in `root`: a git repository's are Claude Code worktrees of it. */
-export function newWorktreeKind(root: string): WorktreeKind {
+function newWorktreeKind(root: string): WorktreeKind {
   return isGitWorkspace(root) ? 'claude' : sessionsWorktreeKind();
 }
 
@@ -142,36 +120,19 @@ export interface WorktreeLaunch {
   name?: string;
   /** Claude's first prompt as is, instead of `devdesk.worktrees.startPrompt` filled in with the task. */
   prompt?: string;
-  /** The prompt is typed at Claude's prompt, not sent (`--prefill`), as a draft to edit there. */
-  draft?: boolean;
   /** The launch mode, instead of the default one. */
   mode?: LaunchMode;
   /** More Claude arguments (`--model`, `--effort`), in shell syntax. */
   extraArgs?: string;
   /** Open its terminal (the default), or only start it in the background. */
   open?: boolean;
-  /** The Claude account it runs in, instead of asking (when there are several, `devdesk.claude.accounts`). */
-  account?: ClaudeAccount;
   /** Told the tmux session's name just before Claude starts in it. */
   started?: (session: string) => void;
   /**
    * Asked with the folder Claude starts in (a package for a Claude Code worktree) just before it starts: true when
    * Claude will ask to trust it, so the terminal opens whatever `open` says.
    */
-  untrusted?: (launchDir: string, account: ClaudeAccount) => Promise<boolean>;
-  /** The package a Claude Code worktree is made in, when the workspace has several (instead of asking). */
-  packageDir?: string;
-  /** The commit the worktree starts from (Claude Code worktrees only; `claude --worktree` picks its own otherwise). */
-  base?: string;
-  /** Told where the worktree is, once made. */
-  created?: (worktree: { name: string; dir: string }) => void;
-  /** Told why the worktree or session could not be started (a notification says it too). */
-  failed?: (message: string) => void;
-  /**
-   * Instead of a first prompt: makes Claude's arguments once the worktree exists (a fork resumes a conversation copied
-   * there); undefined stops before Claude starts, leaving the worktree (it has said why).
-   */
-  resume?: (dir: string) => Promise<string | undefined>;
+  untrusted?: (launchDir: string) => Promise<boolean>;
 }
 
 /**
@@ -206,65 +167,35 @@ export async function newWorktreeSession(
         });
   const task = typed?.trim();
   if (!task) return false;
-  const account = launch.account ?? (await pickClaudeAccount('New Worktree Session'));
-  if (!account) return false;
   const kind = newWorktreeKind(root);
   // Both kinds of worktree, so a new name never matches an existing worktree of either kind.
   const features = await discoverFeatures(root, { claudeWorktrees: true });
-  const packages = features[0].packages;
-  const given = launch.packageDir ? packages.find((p) => p.dir === launch.packageDir) : undefined;
-  const pkg = kind === 'claude' ? (given ?? (await pickPackage(packages))) : undefined;
-  if (kind === 'claude' && !pkg) {
-    launch.failed?.('no package to make a Claude Code worktree in');
-    return false;
-  }
-  if (launch.base && kind !== 'claude') {
-    const message = `a base commit (${launch.base}) works only for git worktrees, not for ${workspaceProvider?.label ?? 'workspace'} worktrees`;
-    launch.failed?.(message);
-    void vscode.window.showErrorMessage(`Could not start the worktree session: ${message}.`);
-    return false;
-  }
+  const pkg = kind === 'claude' ? await pickPackage(features[0].packages) : undefined;
+  if (kind === 'claude' && !pkg) return false;
   const worktree = worktreeSlug(launch.name?.trim() || task, [...features.map((f) => f.name), ...Object.values(store.all()).map((t) => t.worktree)]);
 
   let dir: string;
   let launchDir: string;
   let extraArgs = '';
-  // `claude --worktree` refuses to start in a repository Claude has not trusted. When DevDesk may trust the worktree
-  // (devdesk.worktrees.autoTrust: Claude trusts the workspace root), it makes the worktree itself and starts Claude in it.
-  const base = launch.base ?? (pkg && (await trustsWorktreeOnly(root, pkg.dir, account)) ? 'HEAD' : undefined);
-  if (pkg && base) {
-    dir = join(pkg.dir, '.claude', 'worktrees', worktree);
-    launchDir = dir;
-    if (!(await createGitWorktree(pkg.dir, worktree, dir, base, launch.failed))) return false;
-  } else if (pkg) {
+  if (pkg) {
     dir = join(pkg.dir, '.claude', 'worktrees', worktree);
     launchDir = pkg.dir;
     extraArgs = `--worktree ${worktree}`;
   } else {
     dir = join(root, 'worktrees', worktree);
     launchDir = dir;
-    if (!(await createWorkspaceWorktree(root, worktree, dir, launch.failed))) return false;
+    if (!(await createWorkspaceWorktree(root, worktree, dir))) return false;
   }
-  // So Claude does not ask to trust the folders DevDesk just made (for a workspace worktree, its packages too).
-  if (launchDir === dir) await autoTrustWorktree(root, [dir, ...(pkg ? [] : (await discoverPackages(dir)).map((p) => p.dir))], account);
-  launch.created?.({ name: worktree, dir });
   try {
     await store.save({ task, worktree, kind, dir, createdAt: Date.now() });
   } catch (err) {
     log.warn(`cannot record the task of worktree ${worktree}: ${(err as Error).message}`);
   }
   model.rediscover();
-  let args: string;
-  if (launch.resume) {
-    const resume = await launch.resume(dir);
-    if (resume === undefined) return false;
-    args = joinArgs(extraArgs, launch.extraArgs, resume);
-  } else {
-    const prompt = launch.prompt ?? renderStartPrompt(sessionsWorktreeStartPrompt(), { task, worktree, dir });
-    args = joinArgs(extraArgs, launch.extraArgs, launch.draft ? prefillArg(prompt) : promptArg(prompt));
-  }
-  const open = (await launch.untrusted?.(launchDir, account)) || (launch.open ?? true);
-  await startNumbered(model, tree, sessionName({ name: worktree, dir, isMain: false }), launchDir, sessionsClaudeCommand(args, launch.mode, account), open, launch.started);
+  const prompt = launch.prompt ?? renderStartPrompt(sessionsWorktreeStartPrompt(), { task, worktree, dir });
+  const args = joinArgs(extraArgs, launch.extraArgs, promptArg(prompt));
+  const open = (await launch.untrusted?.(launchDir)) || (launch.open ?? true);
+  await startNumbered(model, tree, sessionName({ name: worktree, dir, isMain: false }), launchDir, sessionsClaudeCommand(args, launch.mode), open, launch.started);
   return true;
 }
 
@@ -273,7 +204,5 @@ export async function newSessionInWorktree(model: SessionsModel, tree: SessionsT
   const node = tree.clickedOrSelected(arg);
   const group: WorktreeGroup | undefined = node?.kind === 'worktree' ? node.group : undefined;
   if (!group?.dir) return;
-  const account = await pickClaudeAccount('New Claude Session');
-  if (!account) return;
-  await startNumbered(model, tree, sessionName({ name: group.name, dir: group.dir, isMain: group.isMain }), group.dir, sessionsClaudeCommand('', undefined, account));
+  await startNumbered(model, tree, sessionName({ name: group.name, dir: group.dir, isMain: group.isMain }), group.dir);
 }

@@ -43,8 +43,7 @@ export interface HistoryIndexerOptions {
   /** At most this many transcripts, the most recently changed, are indexed. */
   maxSessions?: () => number;
   root: () => string | undefined;
-  /** Where Claude keeps its transcripts: one directory, or one per Claude account. */
-  projectsDir: () => string | readonly string[];
+  projectsDir: () => string;
   stateDir: () => string;
   now?: () => number;
   minIntervalMs?: number;
@@ -73,7 +72,7 @@ interface RunSettings {
   days: number;
   maxSessions: number;
   root: string | undefined;
-  projectsDirs: readonly string[];
+  projectsDir: string;
   stateDir: string;
 }
 
@@ -186,7 +185,7 @@ export class HistoryIndexer {
 
   private settings(): RunSettings {
     const o = this.o;
-    return { enabled: o.enabled(), scope: o.scope(), days: o.days(), maxSessions: o.maxSessions?.() ?? Infinity, root: o.root(), projectsDirs: [o.projectsDir()].flat(), stateDir: o.stateDir() };
+    return { enabled: o.enabled(), scope: o.scope(), days: o.days(), maxSessions: o.maxSessions?.() ?? Infinity, root: o.root(), projectsDir: o.projectsDir(), stateDir: o.stateDir() };
   }
 
   /** Runs, and again while the settings changed during the run (a scope, root or days change would wait a minute otherwise). */
@@ -405,18 +404,11 @@ export class HistoryIndexer {
 
   /** The transcripts to index (changed within `days`, the newest `maxSessions`), and how many were left out. */
   private async list(now: number, s: RunSettings): Promise<{ listed: Listed[]; older: number; overCap: number }> {
+    const names = (await readdir(s.projectsDir, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory()).map((d) => d.name);
     const since = now - s.days * DAY;
-    // Every Claude account's projects, in the order of `projectsDirs`.
-    const dirs = (
-      await Promise.all(
-        s.projectsDirs.map(async (projects) => {
-          const names = (await readdir(projects, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory()).map((d) => d.name);
-          return projectDirsInScope(names, s.root, s.scope, this.realRoot).map((name) => join(projects, name));
-        }),
-      )
-    ).flat();
-    const listings = await mapLimit(dirs, STAT_CONCURRENCY, (dir) => readdir(dir, { withFileTypes: true }).catch(() => []));
-    const paths = dirs.flatMap((dir, k) => listings[k].filter((f) => f.isFile() && f.name.endsWith('.jsonl')).map((f) => join(dir, f.name)));
+    const dirs = projectDirsInScope(names, s.root, s.scope, this.realRoot);
+    const listings = await mapLimit(dirs, STAT_CONCURRENCY, (name) => readdir(join(s.projectsDir, name), { withFileTypes: true }).catch(() => []));
+    const paths = dirs.flatMap((name, k) => listings[k].filter((f) => f.isFile() && f.name.endsWith('.jsonl')).map((f) => join(s.projectsDir, name, f.name)));
     const infos = await mapLimit(paths, STAT_CONCURRENCY, (path) => stat(path).catch(() => undefined));
     const recent = paths.flatMap((path, k) => {
       const info = infos[k];

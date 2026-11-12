@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { toWebCard, webCards, webFolders, webGroup } from '../../src/core/web/cards';
 import type { SessionCard } from '../../src/core/sessions';
 import { attentionOrder } from '../../src/core/sessionsView';
-import { sortSessions } from '../../src/core/urgency';
 import type { Feature } from '../../src/core/worktrees';
 
 const NOW = 1_000_000_000;
-const SORT = { mode: 'attention' as const, recentMs: 15 * 60_000, unreadFirst: false };
-const o = { now: NOW, stuckMs: 600_000, idleMs: 30 * 60_000, unread: new Set<string>(), ...SORT };
+const o = { now: NOW, stuckMs: 600_000, idleMs: 30 * 60_000, unread: new Set<string>() };
 const IDLE = 30 * 60_000;
-const view = (unread: string[] = []) => ({ now: NOW, stuckMs: 600_000, idleMs: IDLE, unread: new Set(unread), ...SORT });
+const view = (unread: string[] = []) => ({ now: NOW, stuckMs: 600_000, idleMs: IDLE, unread: new Set(unread) });
 const card = (id: string, over: Partial<SessionCard> = {}): SessionCard => ({
   id,
   sessionId: id,
@@ -133,13 +131,6 @@ describe('webCards', () => {
 
   it('orders sessions exactly as the Claude view does (attentionOrder)', () => {
     expect(webCards(cards, v).map((c) => c.id)).toEqual(attentionOrder(cards, v).map((c) => c.id));
-  });
-
-  it('follows devdesk.sessions.sort: urgency order, with its recently finished window', () => {
-    const u = { ...v, mode: 'urgency' as const, recentMs: 60_000, unreadFirst: true };
-    const ids = webCards(cards, u).map((c) => c.id);
-    expect(ids).toEqual(sortSessions(cards, u).map((c) => c.id));
-    expect(ids).not.toEqual(webCards(cards, v).map((c) => c.id));
   });
 
   it('puts unread done above working, and read done below it', () => {

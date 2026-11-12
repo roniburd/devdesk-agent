@@ -20,7 +20,7 @@ function sessionRowMenu(): string[] {
 }
 
 describe("a session's right-click menu", () => {
-  it('goes Open, End; Mark as Read/Unread, Tag; See Diff, Changes; then the Fork and Ticket submenus', () => {
+  it('goes Open, End; Mark as Read/Unread, Tag; See Diff; then the Fork submenu', () => {
     expect([...new Set(sessionRowMenu())]).toEqual([
       'devdesk.sessions.openCard',
       'devdesk.sessions.kill',
@@ -29,25 +29,21 @@ describe("a session's right-click menu", () => {
       'devdesk.sessions.markUnread',
       'devdesk.sessions.color',
       'devdesk.sessions.seeDiff',
-      'devdesk.sessions.changesMenu',
       'devdesk.sessions.forkMenu',
-      'devdesk.tickets.menu',
     ]);
   });
 
-  it('keeps every fork, ticket and turn-changes command in its submenu, not at the top level', () => {
+  it('keeps every fork command in its submenu, not at the top level', () => {
     const topLevel = menus['view/item/context'].concat(menus['webview/context'])
       .filter((i) => !i.group?.startsWith('inline'))
       .map((i) => i.command);
-    for (const c of ['devdesk.sessions.fork', 'devdesk.sessions.forkWithMode', 'devdesk.sessions.forkFromTurn', 'devdesk.sessions.lastTurnChanges', 'devdesk.sessions.turnChanges', 'devdesk.tickets.link', 'devdesk.tickets.open', 'devdesk.tickets.unlink']) {
+    for (const c of ['devdesk.sessions.fork', 'devdesk.sessions.forkWithMode']) {
       expect(topLevel, c).not.toContain(c);
     }
     expect(menus['devdesk.sessions.forkMenu'].map((i) => i.command)).toEqual([
       'devdesk.sessions.fork',
       'devdesk.sessions.forkWithMode',
-      'devdesk.sessions.forkFromTurn',
     ]);
-    expect(menus['devdesk.tickets.menu'].map((i) => i.command)).toEqual(['devdesk.tickets.link', 'devdesk.tickets.open', 'devdesk.tickets.unlink']);
   });
 
   it('labels the Color submenu Tag, with the label emoji after the word', () => {

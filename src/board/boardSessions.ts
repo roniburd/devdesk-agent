@@ -1,12 +1,9 @@
-import { tmpdir } from 'node:os';
 import * as vscode from 'vscode';
 import { readPromptScreen, typeIntoPane } from '../core/paneScreen';
-import { readCardProgramStatus, screenWithProgramStatus } from '../core/programStatus';
-import { processAlive } from '../core/sessions';
 import type { SessionCard } from '../core/sessions';
 import { currentCard, NEW_SESSION, type PromptScreen, runningSessions, sessionEnded, sessionPicks } from '../core/sessionSend';
 import { paneTarget } from '../core/tmux';
-import { boardPasteSettleMs, programStatusDir, sessionsTmux, sessionsTmuxServer } from '../config';
+import { sessionsTmux, sessionsTmuxServer } from '../config';
 import { cardServer } from '../claudeSessions';
 import type { SessionsModel } from '../sessionsModel';
 import { openSessionCard, type SessionRowSelector } from '../sessionsCommands';
@@ -69,27 +66,19 @@ export class BoardSessions {
   /**
    * What the session's pane shows: Claude's prompt empty (no question or dialog open), Claude in a turn, the pane in a
    * tmux mode (copy mode), Claude exited (its old prompt box can stay above the shell prompt). Claude is looked for
-   * after the capture, so a capture taken while it still ran is not taken for its prompt once gone. Claude's own
-   * report (OSC 7501, for sessions under the Program Status relay) says whether it works or a dialog is open, where
-   * there is one; the capture says the rest, and all of it without one.
+   * after the capture, so a capture taken while it still ran is not taken for its prompt once gone.
    */
   async promptScreen(card: SessionCard): Promise<PromptScreen> {
     const pane = paneOf(card);
     if (!pane) return { empty: false, working: false };
-    const screen = await readPromptScreen(pane.tmux, pane.target);
-    return screenWithProgramStatus(screen, await readCardProgramStatus(programStatusDir(), card, processAlive));
+    return readPromptScreen(pane.tmux, pane.target);
   }
 
-  /**
-   * Enters `text` (as one command line: `commandLine`) at Claude's prompt in the session's pane: the `/name ` before an
-   * argument typed, the rest as one bracketed paste through a tmux paste buffer of its own (`commandParts`), then Enter
-   * once Claude has taken it in (`devdesk.board.pasteSettleMs`). With `multiline`, text that is not a `/command` keeps
-   * its line breaks (a bracketed paste of several lines is one prompt; only a `/command` must be one line).
-   */
-  async typeInto(card: SessionCard, text: string, opts: { multiline?: boolean } = {}): Promise<void> {
+  /** Types `text` (as one line) into the session's pane and presses Enter, as if typed in its terminal. */
+  async typeInto(card: SessionCard, text: string): Promise<void> {
     const pane = paneOf(card);
     if (!pane) throw new Error('it does not run in tmux');
-    await typeIntoPane(pane.tmux, pane.target, text, { tmpDir: tmpdir(), settleMs: boardPasteSettleMs(), multiline: opts.multiline });
+    await typeIntoPane(pane.tmux, pane.target, text);
   }
 
   /** Whether the session has ended (stopped, or its tmux session gone), as the sessions are just refreshed. */
