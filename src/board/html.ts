@@ -3,9 +3,13 @@ import { webviewPage } from '../webviewPage';
 
 export const BOARD_TITLE = 'Claude Board';
 
-/** The board's page: its markup (`BODY`), `media/board.css` and `media/board.js`. */
-export function boardHtml(webview: vscode.Webview, extensionUri: vscode.Uri, placement: string): string {
-  return webviewPage(webview, extensionUri, { css: 'board.css', js: 'board.js', title: BOARD_TITLE, bodyAttrs: ` data-placement="${placement}"`, body: BODY });
+/**
+ * The board's page: its markup (`BODY`), `media/board.css` and `media/board.js`. `compact`: the prompt box alone, for
+ * the New Session view above the Claude view (`data-view="compact"` hides the bar, lanes and hint; the box is on top).
+ */
+export function boardHtml(webview: vscode.Webview, extensionUri: vscode.Uri, placement: string, compact = false): string {
+  const bodyAttrs = compact ? ' data-placement="top" data-view="compact"' : ` data-placement="${placement}"`;
+  return webviewPage(webview, extensionUri, { css: 'board.css', js: 'board.js', title: compact ? 'New Claude Session' : BOARD_TITLE, bodyAttrs, body: BODY });
 }
 
 /** The page's markup (the tests load it from here, see `test/webviewBody.ts`). */

@@ -548,3 +548,20 @@ button.link:hover { background: none; text-decoration: underline; }
 .card .excerpt { color: var(--vscode-descriptionForeground); margin-top: 2px; overflow-wrap: anywhere; }
 .card .excerpt mark { background: var(--vscode-editor-findMatchHighlightBackground); color: inherit; border-radius: 2px; }
 .lane.history .indexing { color: var(--vscode-descriptionForeground); font-style: italic; padding: 4px 0; }
+
+/*
+ * The New Session view (`data-view="compact"`, src/board/html.ts): the prompt box alone, in the sidebar above the
+ * Claude view. No bar, lanes or hint; the box fills the view's width on the sidebar's background, the footer's pills
+ * wrap in a narrow sidebar, and the popups open downward (as with the box on top).
+ */
+body[data-view='compact'] { background: var(--vscode-sideBar-background, var(--vscode-editor-background)); height: auto; min-height: 100%; }
+body[data-view='compact'] .bar,
+body[data-view='compact'] .search-banner,
+body[data-view='compact'] #lanes,
+body[data-view='compact'] .hint { display: none; }
+body[data-view='compact'] .pane { min-height: 0; max-height: none; padding: 6px 8px 8px; border: none; }
+body[data-view='compact'] .square { padding: 0; border: none; background: none; justify-content: flex-start; }
+body[data-view='compact'] .pane .composer { max-width: none; }
+body[data-view='compact'] .composer textarea { min-height: calc(3em + 16px); max-height: 50vh; padding: 8px 10px; }
+body[data-view='compact'] .composer .footer { flex-wrap: wrap; row-gap: 2px; }
+body[data-view='compact'] .composer .later kbd { display: none; }

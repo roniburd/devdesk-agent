@@ -934,6 +934,19 @@ The box is three lines tall. A long prompt grows it into the board, up to 60% of
 
 A line under the box says which keys do what.
 
+### The New Session box in the sidebar
+
+The **New Session** view, at the top of the Agent Sessions panel above the Claude view, is the same prompt box without
+the board around it. It has the same choices (where it runs, model and effort, permission mode, Later), `/` commands
+and skills, `@` files and pasted images, and it remembers the same choices and earlier prompts. Its draft is its own.
+
+- **Enter** starts the session, **⌥⏎** saves it for later (to the board's *Prompts for later*).
+- **←**, or **↓** in an empty box, goes to the Claude view under it.
+- The board button in its title bar opens the Claude Board; the gear opens the board's settings.
+- Drag its lower edge to make it taller (its popups open downward, into the view).
+
+To hide it, turn off `devdesk.board.sidebarPrompt`. It goes away (and comes back) at once.
+
 ## 10. Slash commands in the prompt box
 
 ![The / menu with Claude Code's commands and skills](images/manual-slash-menu.png)
@@ -1659,6 +1672,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.board.openWithSidebar` | `true` (open the Claude Board the first time you open the Agent Sessions sidebar in a window) |
 | `devdesk.board.editorTitleButton` | `true` (a colored board button at the top right of each editor group opens the Claude Board) |
 | `devdesk.board.promptPlacement` | `bottom` (the prompt box in its own square under the lanes; `top` the same square above them) |
+| `devdesk.board.sidebarPrompt` | `true` (the New Session view: the board's prompt box at the top of the Agent Sessions panel, above the Claude view) |
 | `devdesk.board.afterStart` | `board` (stay on the board after starting a session; `session` opens its terminal) |
 | `devdesk.board.sessionsBeside` | `auto` (a session opened from the board shows its terminal beside it when the editor area is wide enough; `always`, `never`) |
 | `devdesk.board.cardTitle` | `objective` (a prototype: the card's title is what the whole session sets out to do, with the latest step under it); `latest`: the title is what the latest prompt is about |

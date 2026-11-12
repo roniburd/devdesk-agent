@@ -67,6 +67,9 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
   const send = (type, fields) => vscode.postMessage({ type, ...fields });
   /** The prompt box sits above the lanes (devdesk.board.promptPlacement). */
   const placedOnTop = () => document.body.dataset.placement === 'top';
+  /** The prompt box alone, in the New Session view above the Claude view (src/board/html.ts): no bar, lanes or search. */
+  const compact = document.body.dataset.view === 'compact';
+  if (compact) $('prompt').setAttribute('placeholder', `New session: ask Claude anything (/ commands, @ files, ${ALT_ENTER} for later)`);
   /** A key pressed without modifiers. */
   const plain = (ev) => !(ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey);
 
@@ -545,6 +548,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
 
   function render() {
     if (!last) return;
+    if (compact) return composer.hints();
     const { board, loaded } = last;
     // Rebuilding replaces every element: put the focus back on the one that had it (same data-key).
     const active = /** @type {HTMLElement | null} */ (document.activeElement);
@@ -663,7 +667,8 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
      * that had the focus last, else the first session (else prompt for later). False when the key stays in the box.
      */
     function leavePrompt(key) {
-      if (key === 'ArrowLeft') {
+      // In the New Session view, the Claude view is under the box: ↓ goes there too.
+      if (key === 'ArrowLeft' || (compact && key === 'ArrowDown')) {
         send('sidebar');
         return true;
       }
@@ -1029,7 +1034,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       if (relist) ask({ ...completing, relist: true });
       if ((where !== 'main' && where !== 'new' && !worktree()) || (where === 'new' && info.noWorktrees)) where = 'main';
       // devdesk.board.promptPlacement changes take effect at once (the box keeps its text and focus).
-      if (info.placement && document.body.dataset.placement !== info.placement) {
+      if (!compact && info.placement && document.body.dataset.placement !== info.placement) {
         popup.close();
         document.body.dataset.placement = info.placement;
       }
@@ -2150,7 +2155,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       if (m.query === undefined && query) keep({ query });
       state.filter = filter;
       composer.restore(m);
-      search.restore(query);
+      if (!compact) search.restore(query);
       // Taken: versions before's webview state is not needed any more.
       if (Object.keys(legacy).length) vscode.setState({});
       for (const k of Object.keys(legacy)) delete legacy[k];
@@ -2178,11 +2183,11 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     if (handle) handle(m);
   });
   send('ready');
-  search.start();
+  if (!compact) search.start();
   // The board's width (CSS px): with the editor area to itself, the extension decides from it whether a session opens
   // beside the board.
   let sizeTimer;
-  const sendSize = () => send('size', { width: window.innerWidth });
+  const sendSize = () => !compact && send('size', { width: window.innerWidth });
   sendSize();
   window.addEventListener('resize', () => {
     clearTimeout(sizeTimer);

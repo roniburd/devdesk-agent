@@ -31,6 +31,7 @@ import {
   sessionsStateDir,
   sessionsTmux,
   sessionsTmuxServer,
+  openSettings,
   workspaceRoot,
 } from './config';
 import { BacklogStore } from './backlogStore';
@@ -187,6 +188,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       }
     }),
     vscode.commands.registerCommand('devdesk.board.open', () => board.open()),
+    vscode.commands.registerCommand('devdesk.board.openSettings', () => openSettings('devdesk.board')),
     vscode.commands.registerCommand('devdesk.board.openFromEditorTitle', () => board.open()),
     registerTimedCommand('devdesk.board.focusPrompt', () => board.focusPrompt()),
     // The → command before devdesk.board.focusPrompt, for keybindings that still name it.

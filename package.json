@@ -3,7 +3,7 @@
   "displayName": "DevDesk Claude (v2)",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.0-prototype.27",
+  "version": "2.1.0-prototype.28",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -53,6 +53,14 @@
     },
     "views": {
       "devdesk": [
+        {
+          "type": "webview",
+          "id": "devdesk.sessions.prompt",
+          "name": "New Session",
+          "icon": "media/claude.svg",
+          "initialSize": 160,
+          "when": "devdesk.inWorkspace && config.devdesk.board.sidebarPrompt"
+        },
         {
           "id": "devdesk.sessions",
           "name": "Claude (v2)",
@@ -581,6 +589,12 @@
         "title": "Open Web Access Log",
         "category": "DevDesk",
         "icon": "$(output)"
+      },
+      {
+        "command": "devdesk.board.openSettings",
+        "title": "Claude Board Settings",
+        "category": "DevDesk for Claude Code",
+        "icon": "$(gear)"
       }
     ],
     "menus": {
@@ -674,6 +688,16 @@
           "command": "devdesk.worktrees.cleanUp",
           "when": "view == devdesk.features",
           "group": "1_worktrees@1"
+        },
+        {
+          "command": "devdesk.board.open",
+          "when": "view == devdesk.sessions.prompt",
+          "group": "navigation@0"
+        },
+        {
+          "command": "devdesk.board.openSettings",
+          "when": "view == devdesk.sessions.prompt",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -1783,6 +1807,12 @@
             "markdownDescription": "Where the Claude Board's prompt box sits.",
             "order": 4
           },
+          "devdesk.board.sidebarPrompt": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the **New Session** view above the Claude view: the Claude Board's prompt box (the same choices, `/` commands, `@` files and pasted images), to start a session without opening the board.",
+            "order": 5
+          },
           "devdesk.board.afterStart": {
             "type": "string",
             "enum": [
@@ -1795,7 +1825,7 @@
             ],
             "default": "board",
             "markdownDescription": "What happens after the Claude Board's prompt box starts a session (Enter, or **Start** / **Plan** / **Spec** on a prompt for later).",
-            "order": 5
+            "order": 6
           },
           "devdesk.board.sessionsBeside": {
             "type": "string",
@@ -1811,13 +1841,13 @@
             ],
             "default": "auto",
             "markdownDescription": "Where a session opened from the Claude Board shows its terminal when the board has the editor area to itself: beside it, the board keeping room for every lane (`#devdesk.board.laneWidth#`) and the terminal taking the rest, or over it. Once a Claude terminal is open in an editor group, the next ones open there.",
-            "order": 6
+            "order": 7
           },
           "devdesk.board.cardLine": {
             "type": "boolean",
             "default": true,
             "markdownDescription": "Show one line under the title of Working cards (what Claude is doing now) and Needs you cards (what Claude asks or wants approved). The ☰ button in the board header turns it on or off. The card's hover always shows both.",
-            "order": 7
+            "order": 8
           },
           "devdesk.board.cardTitle": {
             "type": "string",
@@ -1831,14 +1861,14 @@
             ],
             "default": "objective",
             "markdownDescription": "What the title of a session's card on the Claude Board says. `objective` (a prototype) needs `#devdesk.insights.enabled#`; until a session's objective is known its card shows the latest prompt's title. A name given with /rename always wins.",
-            "order": 8
+            "order": 9
           },
           "devdesk.board.laneWidth": {
             "type": "number",
             "default": 220,
             "minimum": 180,
             "markdownDescription": "How wide (px) each of the Claude Board's lanes is when a session opens beside the board (`#devdesk.board.sessionsBeside#`): wider shows more of each card's summary, and the terminal gets less.",
-            "order": 9
+            "order": 10
           },
           "devdesk.board.models": {
             "type": "array",
@@ -1847,35 +1877,35 @@
             },
             "default": [],
             "markdownDescription": "Models the Claude Board's prompt box offers, first one preselected: aliases (`opus`, `sonnet`, `haiku`, `fable`) or full model names, passed as `--model` to the next session it starts. `Default` adds no `--model` (your Claude settings' model). Empty: the Claude CLI's own model list, else `Default`, `opus`, `sonnet`, `haiku`, `fable`, `opus[1m]`, `sonnet[1m]`, `fable[1m]` when the CLI does not answer.",
-            "order": 10
+            "order": 11
           },
           "devdesk.board.specPrompt": {
             "type": "string",
             "default": "",
             "editPresentation": "multilineText",
             "markdownDescription": "What **Spec** on a prompt for later puts before the prompt: a skill or command (`/name`, on the same line) or an instruction (on its own lines). Empty: `/superpowers:brainstorming` when that skill is installed and enabled, else *Before changing any code, write a design spec for the following and wait for my review of it.*",
-            "order": 11
+            "order": 12
           },
           "devdesk.board.pastedImagesDir": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Folder where images pasted into the Claude Board's prompt box are saved (the prompt mentions each with `@`, so Claude reads it). Pasted images older than 30 days are deleted from it. Empty: `~/.claude/devdesk/pasted-images`.",
-            "order": 12
+            "order": 13
           },
           "devdesk.board.claudeConfigFile": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Claude Code's global config file, read before the Claude Board starts a session, to warn when Claude has not trusted the folder yet (the session then opens so you can answer Claude's trust question). Written only by `#devdesk.worktrees.autoTrust#`, to trust a new worktree. Empty: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.",
-            "order": 13
+            "order": 14
           },
           "devdesk.board.pasteSettleMs": {
             "type": "number",
             "default": 500,
             "minimum": 0,
             "markdownDescription": "How long (ms) the Claude Board waits after pasting a command into a running session before it presses Enter, so Claude has taken the paste in (1 ms more per 4 KB pasted). Raise it if a sent command stays typed at the session's prompt instead of running.",
-            "order": 14
+            "order": 15
           }
         }
       },

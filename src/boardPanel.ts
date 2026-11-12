@@ -49,6 +49,8 @@ import type { WorktreeTaskStore } from './worktreeSessions';
 import { webviewOptions } from './webviewPage';
 
 const BOARD_VIEW_TYPE = 'devdesk.board';
+/** The New Session view above the Claude view: the board's prompt box alone (`boardHtml`'s compact page). */
+export const SIDE_VIEW_ID = 'devdesk.sessions.prompt';
 /** Model, tree and backlog changes often come together: post the board once for them. */
 const POST_DELAY_MS = 50;
 
@@ -61,7 +63,32 @@ const UNATTENDED: ReadonlySet<BoardMessage['type']> = new Set(['ready', 'open', 
 /** A tab showing the board's webview. */
 const isBoardTab = (t: vscode.Tab) => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith(BOARD_VIEW_TYPE);
 
-/** Context key: the board's tab is open (→ in the Claude view goes back to it). */
+/**
+ * A webview showing the board's prompt box: the board's tab, or the New Session view (`side`). Each has its own notice
+ * and box (`ui`), and gets the answers to what it sent; both get the composer's choices.
+ */
+class Surface {
+  webview: vscode.Webview | undefined;
+  visible = false;
+  /** The last board message posted to it, so an unchanged one is not posted (and re-rendered) again. */
+  lastPosted: string | undefined;
+  /** A composed prompt is being started or saved: a second Enter waits for it. */
+  composing = false;
+  /** The prompt box as the composer's handlers change it. */
+  readonly ui: PanelUi;
+
+  constructor(readonly side: boolean, beforeChoice: () => void) {
+    // A setChoice may name a row the composer just added (`/model <id>`): the board with it goes first, not after the delay.
+    this.ui = new PanelUi((m) => {
+      if (m.type === 'setChoice') beforeChoice();
+      this.post(m);
+    });
+  }
+
+  post(m: PanelMessage): void {
+    void this.webview?.postMessage(m);
+  }
+}
 
 /**
  * The Claude Board: a composer that starts new Claude sessions, prompts saved for
@@ -70,7 +97,7 @@ const isBoardTab = (t: vscode.Tab) => t.input instanceof vscode.TabInputWebview 
  * (`devdesk.board.openWhenEmpty`) whenever the editor area is left empty.
  */
 
-export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSerializer {
+export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSerializer, vscode.WebviewViewProvider {
   private panel: vscode.WebviewPanel | undefined;
   private panelSubscriptions: vscode.Disposable[] = [];
   private postTimer: NodeJS.Timeout | undefined;
@@ -84,26 +111,27 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
   private postedAt = 0;
   /** Prompts for later being started, so a double click does not start two sessions (and their cards say so). */
   private starting = new Set<string>();
-  /** A composed prompt is being started or saved: a second Enter waits for it. */
-  private composing = false;
   /** What to put in the composer once the webview is ready (`devdesk.board.addTask` before the board was open). */
   private pendingFocus: { text?: string; later?: boolean } | undefined;
   /** `focusPrompt` opened the board: its webview, once ready, puts the keyboard in the prompt box. */
   private pendingEnter = false;
   /** The webview's redraws, summed up in the log once a minute. */
   private readonly redraws = new RedrawLog(Date.now());
-  /** The last board message posted, so an unchanged board is not posted (and re-rendered) again. */
-  private lastPosted: string | undefined;
   /** The webview's last reported width (CSS px). */
   private width = 0;
   private readonly composer: BoardComposer;
   /** What the prompt box keeps for this project folder (choices, draft, earlier prompts, filter and search). */
   private readonly kept: BoardProjectState;
-  /** The prompt box as the composer's handlers change it. */
-  private readonly ui: PanelUi;
+  /** The board's tab, and the New Session view above the Claude view. */
+  private readonly boardSurface = new Surface(false, () => this.post());
+  private readonly sideSurface = new Surface(true, () => this.post());
+  /** The board's prompt box as the composer's handlers change it. */
+  private readonly ui = this.boardSurface.ui;
   private readonly subscriptions: vscode.Disposable[];
   /** The Claude view has been shown in this window (`sidebarShown`). */
   private sidebarSeen = false;
+  /** The New Session view, once VS Code has shown it. */
+  private sideView: vscode.WebviewView | undefined;
   /** Past sessions (Claude's transcripts): the search box's history results, the ✨ search, Resume and Fork. */
   private readonly history: BoardHistory;
   /** How many times a webview loaded the board (said `ready`), for tests. */
@@ -129,7 +157,6 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     // A session the box starts with its terminal open, or one a command opens (D), opens beside the board.
     this.composer.beforeOpen = () => this.roomFor(undefined);
     this.composer.sessions.beforeOpen = (card) => this.roomFor(card);
-    this.ui = new PanelUi((m) => this.postHost(m));
     this.history = new BoardHistory({
       model,
       tree,
@@ -144,6 +171,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       // The CLI listed its models (or a model was typed): the pill offers them.
       this.composer.onDidChange(() => this.schedulePost()),
       vscode.window.registerWebviewPanelSerializer(BOARD_VIEW_TYPE, this),
+      // Kept while hidden (the Claude view collapsed or another container shown), so what is typed stays as it is.
+      vscode.window.registerWebviewViewProvider(SIDE_VIEW_ID, this, { webviewOptions: { retainContextWhenHidden: true } }),
       model.onDidChange(() => this.schedulePost()),
       tree.onDidChangeTreeData(() => this.schedulePost()),
       backlog.onDidChange(() => this.schedulePost()),
@@ -250,14 +279,18 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     panel.title = BOARD_TITLE;
     panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'board.svg');
     panel.webview.html = boardHtml(panel.webview, this.extensionUri, boardPromptPlacement());
+    this.boardSurface.webview = panel.webview;
+    this.boardSurface.lastPosted = undefined;
     this.panelSubscriptions = [
       this.history.opened(() => !!this.panel?.visible),
-      panel.webview.onDidReceiveMessage((m) => void this.handle(m)),
+      panel.webview.onDidReceiveMessage((m) => void this.handle(m, this.boardSurface)),
       panel.onDidChangeViewState(() => this.syncAcquire()),
       panel.onDidDispose(() => {
         for (const d of this.panelSubscriptions) d.dispose();
         this.panelSubscriptions = [];
         this.panel = undefined;
+        this.boardSurface.webview = undefined;
+        this.boardSurface.composing = false;
         this.history.release();
         // A board opened again starts with an empty box.
         this.ui.dismissed();
@@ -267,15 +300,40 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.syncAcquire();
   }
 
-  /** The sessions model polls while the board is visible. */
+  /** Shows the New Session view: the board's prompt box alone, above the Claude view. */
+  resolveWebviewView(view: vscode.WebviewView): void {
+    const side = this.sideSurface;
+    view.webview.options = webviewOptions(this.extensionUri);
+    view.webview.html = boardHtml(view.webview, this.extensionUri, 'top', true);
+    side.webview = view.webview;
+    side.lastPosted = undefined;
+    const subscriptions = [
+      view.webview.onDidReceiveMessage((m) => void this.handle(m, side)),
+      view.onDidChangeVisibility(() => this.syncAcquire()),
+    ];
+    view.onDidDispose(() => {
+      for (const d of subscriptions) d.dispose();
+      side.webview = undefined;
+      side.composing = false;
+      side.ui.dismissed();
+      this.sideView = undefined;
+      this.syncAcquire();
+    });
+    this.sideView = view;
+    this.syncAcquire();
+  }
+
+  /** The sessions model polls while the board or the New Session view is visible. */
   private syncAcquire(): void {
-    const want = !!this.panel?.visible;
+    this.boardSurface.visible = !!this.panel?.visible;
+    this.sideSurface.visible = !!this.sideView?.visible;
+    const want = this.boardSurface.visible || this.sideSurface.visible;
     this.hold.set(want);
     if (want) this.schedulePost();
   }
 
   private schedulePost(): void {
-    if (!this.panel?.visible || this.postTimer) return;
+    if (!(this.panel?.visible || this.sideView?.visible) || this.postTimer) return;
     this.postTimer = setTimeout(() => {
       this.postTimer = undefined;
       this.post();
@@ -355,7 +413,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         await this.model.loadFeatures();
         return this.composer.info();
       },
-      boardMessage: (m: unknown) => this.handle(m),
+      boardMessage: (m: unknown) => this.handle(m, this.boardSurface),
+      /** Whether the New Session view has its webview, a message as if it sent it, and what it was posted since the last call. */
+      sidePromptShown: () => !!this.sideSurface.webview,
+      sidePromptMessage: (m: unknown) => this.handle(m, this.sideSurface),
+      sidePromptUi: (): { messages: HostMessage[]; actions: { id: string; label: string }[] } => ({ messages: this.sideSurface.ui.takeRecorded(), actions: this.sideSurface.ui.actionIds }),
       /** What the board's prompt box keeps for this project folder (as posted to a webview that loads), and the file of its prompts for later. */
       boardKept: () => this.kept.restore(),
       boardBacklogFile: () => this.backlog.file,
@@ -381,28 +443,34 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     };
   }
 
+  /** Posts to the board's tab. */
   private postToWebview(m: PanelMessage): void {
-    void this.panel?.webview.postMessage(m);
+    this.boardSurface.post(m);
   }
 
-  private postHost(m: HostMessage): void {
-    // A setChoice may name a row the composer just added (`/model <id>`): the board with it goes first, not after the delay.
-    if (m.type === 'setChoice') this.post();
-    this.postToWebview(m);
-  }
-
-  /** Posts the board and the composer's choices when they changed since the last post (every model poll asks). */
+  /** Posts the board and the composer's choices to each webview they changed for since its last post (every model poll asks). */
   private post(): void {
+    const readStyle = { dimRead: sessionsDimRead(), badge: sessionsUnreadBadge() };
+    const composer = this.panel || this.sideSurface.webview ? this.composer.info() : undefined;
+    if (!composer) return;
+    if (this.sideSurface.webview) {
+      // The prompt box alone: no lanes to show.
+      const message: BoardPost = { type: 'board', loaded: this.model.isLoaded, board: { lanes: [], needYou: 0, working: 0, worktrees: [] }, composer, readStyle, cardLine: false };
+      const text = JSON.stringify(message);
+      if (text !== this.sideSurface.lastPosted) {
+        this.sideSurface.lastPosted = text;
+        this.sideSurface.post(message);
+      }
+    }
     if (!this.panel) return;
     // A session resumed or forked from the history is on the board now: it leaves the history results.
     this.history.boardChanged();
     const start = Date.now();
-    const readStyle = { dimRead: sessionsDimRead(), badge: sessionsUnreadBadge() };
     const focused = this.viewState.frontCard()?.id;
-    const message: BoardPost = { type: 'board', loaded: this.model.isLoaded, board: this.data(focused), composer: this.composer.info(), readStyle, cardLine: boardCardLine() };
+    const message: BoardPost = { type: 'board', loaded: this.model.isLoaded, board: this.data(focused), composer, readStyle, cardLine: boardCardLine() };
     const text = JSON.stringify(message);
-    if (text === this.lastPosted) return;
-    this.lastPosted = text;
+    if (text === this.boardSurface.lastPosted) return;
+    this.boardSurface.lastPosted = text;
     this.postedFocused = focused;
     this.postedAt = Date.now();
     log.debug(`board: built in ${this.postedAt - start}ms, ${Math.round(text.length / 1024)}KB`);
@@ -419,10 +487,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     this.postToWebview({ type: 'focus', ...focus });
   }
 
-  private async handle(raw: unknown): Promise<void> {
+  private async handle(raw: unknown, from: Surface): Promise<void> {
     const m = parseBoardMessage(raw);
     if (!m) return;
     if (m.type === 'rendered') {
+      if (from.side) return;
       // `postedAt` is this host's clock, sent back as is: the delay is the message's trip plus the webview's render.
       const trip = m.postedAt === this.postedAt ? Date.now() - m.postedAt : undefined;
       noteLatency('board webview render', m.ms);
@@ -434,9 +503,9 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     }
     const start = Date.now();
     try {
-      await this.dispatch(m);
+      await (from.side ? this.dispatchSide(m, from) : this.dispatch(m));
     } finally {
-      if (m.type !== 'size' && m.type !== 'keep') log.debug(`board message ${m.type}: ${Date.now() - start}ms`);
+      if (m.type !== 'size' && m.type !== 'keep') log.debug(`${from.side ? 'new session view' : 'board'} message ${m.type}: ${Date.now() - start}ms`);
       if (UNATTENDED.has(m.type)) noteLatency(`board message ${m.type}`, Date.now() - start);
     }
   }
@@ -447,7 +516,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         case 'ready':
           this.webviewLoads++;
           // A new (or reloaded) webview has nothing yet: what the box keeps for this project folder first.
-          this.lastPosted = undefined;
+          this.boardSurface.lastPosted = undefined;
           this.postToWebview({ type: 'restore', ...this.kept.restore() });
           // Without worktrees the board still shows (the composer offers main until the model finds them).
           await this.model.loadFeatures().catch((err: Error) => log.warn(`cannot list worktrees for the board: ${err.message}`));
@@ -516,7 +585,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         case 'delete':
           return await this.withPrompt(m.id, (item) => this.remove(item.id, item.prompt));
         case 'compose':
-          return await this.compose(m.raw, m.replaces);
+          return await this.compose(m.raw, m.replaces, this.boardSurface);
         case 'complete': {
           // Where the session runs (an existing worktree, or a new one's package) comes from the worktrees.
           await this.model.loadFeatures();
@@ -560,6 +629,62 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
     }
   }
 
+  /**
+   * What the New Session view's box sends: the prompt box's own messages (it has no lanes, search or 📊), answered in
+   * that view.
+   */
+  private async dispatchSide(m: BoardMessage, side: Surface): Promise<void> {
+    try {
+      switch (m.type) {
+        case 'ready':
+          side.lastPosted = undefined;
+          side.post({ type: 'restore', ...this.kept.restore(true) });
+          await this.model.loadFeatures().catch((err: Error) => log.warn(`cannot list worktrees for the New Session view: ${err.message}`));
+          this.post();
+          void this.composer.commands('main');
+          side.ui.replay();
+          return;
+        case 'keep': {
+          const { type: _type, ...patch } = m;
+          return await this.kept.keep(patch, true);
+        }
+        case 'settings':
+          return void (await openSettings('devdesk.board'));
+        case 'sidebar':
+          return void (await this.tree.focus(m.id ? this.model.find(m.id) : undefined));
+        case 'compose':
+          return await this.compose(m.raw, undefined, side);
+        case 'complete': {
+          await this.model.loadFeatures();
+          const items = await this.composer.complete(m.kind, m.query, m.where, { stacked: m.stacked });
+          return side.post({ type: 'completions', kind: m.kind, seq: m.seq, items });
+        }
+        case 'attach': {
+          await this.model.loadFeatures();
+          const text = await this.composer.attach(m.where);
+          if (text) side.post({ type: 'insert', text });
+          return;
+        }
+        case 'pasteImage':
+          return side.post({ type: 'insert', text: await savePastedImage(m.mime, m.data) });
+        case 'noticeAction':
+          return await side.ui.runAction(m.id);
+        case 'noticeDismissed':
+          return side.ui.dismissed();
+        case 'removeAddDir':
+          return this.composer.removeLaunchDir(m.dir);
+        case 'forgetTypedModels':
+          return this.composer.forgetCustomModels();
+        default:
+          // The board's lanes, search and 📊 are not in this view.
+          return;
+      }
+    } catch (err) {
+      log.warn(`New Session view action ${m.type} failed: ${(err as Error).message}`);
+      void vscode.window.showErrorMessage(`New Claude Session: ${(err as Error).message}`);
+    }
+  }
+
   /** Runs `fn` on the board's card `id`, if it is still there. */
   private async withCard(id: string, fn: (card: SessionCard) => Promise<unknown>): Promise<void> {
     const card = this.model.find(id);
@@ -576,10 +701,11 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * Runs the composed text (`BoardComposer.submit`: a session, or what its command does), or saves it for later; tells
    * the webview whether to clear the box.
    */
-  private async compose(raw: unknown, replaces?: string): Promise<void> {
+  private async compose(raw: unknown, replaces: string | undefined, from: Surface): Promise<void> {
     // The webview sends one at a time (it waits for `composed`); another one meanwhile is dropped.
-    if (this.composing) return;
-    this.composing = true;
+    if (from.composing) return;
+    from.composing = true;
+    const ui = from.ui;
     let outcome: SubmitOutcome = { clear: true };
     let error: string | undefined;
     try {
@@ -600,8 +726,8 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
         if (later && edited) await this.backlog.update(edited.id, prompt, choice);
         else if (later) await this.backlog.add(prompt, choice);
         else {
-          this.ui.clearNotice();
-          outcome = await this.composer.submit(prompt, choice, edited ? this.backlogUi(edited.id, { fromBox: true }) : this.ui);
+          ui.clearNotice();
+          outcome = await this.composer.submit(prompt, choice, edited ? this.backlogUi(edited.id, { fromBox: true }, ui) : ui);
           if (edited && ranOutcome(outcome)) await this.backlog.remove(edited.id);
         }
       }
@@ -609,9 +735,9 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
       error = (err as Error).message;
       log.warn(`board compose failed: ${error}`);
     } finally {
-      this.composing = false;
+      from.composing = false;
     }
-    this.ui.composed(error ? { clear: false, error } : outcome);
+    ui.composed(error ? { clear: false, error } : outcome);
   }
 
   /**
@@ -660,8 +786,7 @@ export class BoardPanel implements vscode.Disposable, vscode.WebviewPanelSeriali
    * takes the prompt out of the lane once it ran (`ranOutcome`), and empties the box only when the box held the prompt
    * (`fromBox`; a card's Start leaves what is typed in the box alone).
    */
-  private backlogUi(id: string, how: { fromBox: boolean }): BoardUi {
-    const ui = this.ui;
+  private backlogUi(id: string, how: { fromBox: boolean }, ui = this.ui): BoardUi {
     return {
       notice: (notice) =>
         ui.notice({
