@@ -97,12 +97,12 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
 
   function render(): void {
     if (!info) return;
-    // A pill says what it is only on Claude's default ("Default model"); a choice speaks for itself.
-    fill(mode.select, info.modes.map((m) => ({ value: m.name, label: m.name === DEFAULT_CHOICE ? 'Default mode' : m.name, title: m.description })), choice.mode);
+    // A pill says what it is only on Claude's default ("Model"); a choice speaks for itself.
+    fill(mode.select, info.modes.map((m) => ({ value: m.name, label: m.name === DEFAULT_CHOICE ? 'Mode' : m.name, title: m.description })), choice.mode);
     const models = info.models.some((m) => m.value === choice.model) ? info.models : [...info.models, { value: choice.model, label: choice.model, description: '', efforts: [] }];
-    fill(model.select, models.map((m) => ({ value: m.value, label: m.value === DEFAULT_CHOICE ? 'Default model' : m.label, title: m.description })), choice.model);
+    fill(model.select, models.map((m) => ({ value: m.value, label: m.value === DEFAULT_CHOICE ? 'Model' : m.label, title: m.description })), choice.model);
     const efforts = modelRow()?.efforts ?? [];
-    fill(effort.select, [DEFAULT_CHOICE, ...efforts].map((e) => ({ value: e, label: e === DEFAULT_CHOICE ? 'Default effort' : `Effort ${e}` })), choice.effort);
+    fill(effort.select, [DEFAULT_CHOICE, ...efforts].map((e) => ({ value: e, label: e === DEFAULT_CHOICE ? 'Effort' : `Effort ${e}` })), choice.effort);
     effort.wrap.hidden = efforts.length === 0;
     mode.wrap.hidden = info.modes.length < 2;
     mode.wrap.classList.toggle('changed', choice.mode !== info.defaultMode);

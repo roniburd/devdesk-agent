@@ -194,7 +194,8 @@ describe('modelChoices', () => {
     expect(find('CLAUDE-OPUS-5')).toBe('claude-opus-5');
     expect(find('default')).toBe('Default');
     expect(find('Default')).toBe('Default');
-    // The name the model pill shows for Default.
+    // The name the model pill shows for Default, and the one it used to show.
+    expect(find('Model')).toBe('Default');
     expect(find('Default model')).toBe('Default');
     expect(find('default  MODEL')).toBe('Default');
     expect(find('opus')).toBe('claude-opus-5-5');

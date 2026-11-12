@@ -5,7 +5,7 @@ import type { Handler } from '../types';
 /**
  * `/model` opens the model pill's list; `/model <x>` sets the model for the next session the board starts (never saved,
  * never sent to a session). `<x>` is a row's value or name (any case, `opus 1m` for `Opus (1M context)`), `default` or
- * `Default model` (a warning when `devdesk.board.models` lists no Default), a Claude alias, or any other model id, which
+ * `Model` (Default; a warning when `devdesk.board.models` lists no Default), a Claude alias, or any other model id, which
  * is offered from then on (as Claude accepts ids it has no row for). A name several rows start with (`auto`) is a
  * warning listing them. A model id has no whitespace: `/model sonnet explain the bug` or a second line is a warning,
  * keeping the text, rather than `--model 'sonnet explain the bug'`.

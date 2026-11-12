@@ -580,7 +580,7 @@ describe('prompt box tools', () => {
 
   it('posts the mode, model and effort picked in the pills, and keeps them for the next visit', async () => {
     const p = await page(answers);
-    expect([...(p.$('select[aria-label="Model"]') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Default model', 'Opus', 'Router']);
+    expect([...(p.$('select[aria-label="Model"]') as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(['Model', 'Opus', 'Router']);
     pick(p, 'Mode', 'Plan');
     pick(p, 'Model', 'global.opus');
     expect([...(p.$('select[aria-label="Effort"]') as HTMLSelectElement).options].map((o) => o.value)).toEqual(['Default', 'low', 'high', 'max']);

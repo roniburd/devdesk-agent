@@ -133,7 +133,7 @@ describe('board webview: a remembered model the CLI has not listed yet', () => {
 
   it('falls back to Default once the CLI answered without it', async () => {
     const b = await board({ saved: { model: 'claude-opus-4-7', effort: 'xhigh' }, composer: { models: ALIAS_ROWS, modelsListing: false } });
-    expect(b.pill()).toContain('Default model');
+    expect(b.pill()).toContain('Model');
     expect((await b.send('hello')).model).toBe('Default');
   });
 
@@ -963,7 +963,7 @@ describe('board webview: what the box keeps for the project folder', () => {
     expect(sent).toMatchObject({ model: 'claude-opus-4-7', effort: 'xhigh', ultracode: true, mode: 'Plan' });
     // Another project folder has its own: none saved, so the defaults.
     const other = await board({ composer: { models, modes, defaultMode: 'Default' } });
-    expect(other.pill()).toContain('Default model');
+    expect(other.pill()).toContain('Model');
     expect(await other.send('hello')).toMatchObject({ model: 'Default', effort: 'Default', ultracode: false, mode: 'Default' });
   });
 
@@ -1007,7 +1007,7 @@ describe('board webview: what the box keeps for the project folder', () => {
   it("prefers what the folder saved to the webview's own state", async () => {
     const b = await board({ saved: { model: 'Default', draft: 'kept draft' }, legacy: { model: 'claude-opus-4-7', draft: 'old draft' }, composer: { models } });
     expect(b.prompt.value).toBe('kept draft');
-    expect(b.pill()).toContain('Default model');
+    expect(b.pill()).toContain('Model');
   });
 });
 

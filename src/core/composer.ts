@@ -88,10 +88,10 @@ export function aliasChoices(setting: readonly string[], rows: readonly ModelCho
 /** A name without case, spaces or punctuation (`Opus (1M context)` → `opus1mcontext`), to match what `/model` was given. */
 const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Whether `/model <want>` names Default: `default`, or `Default model` (what the model pill shows for it), in any case. */
+/** Whether `/model <want>` names Default: `default`, `Model` (what the model pill shows for it) or `Default model` (what it used to show), in any case. */
 export function isDefaultModelName(want: string): boolean {
   const w = want.trim().toLowerCase().replace(/\s+/g, ' ');
-  return w === 'default' || w === 'default model';
+  return w === 'default' || w === 'model' || w === 'default model';
 }
 
 /**
@@ -107,7 +107,7 @@ export function modelsStartingWith(rows: readonly ModelChoice[], want: string): 
 
 /**
  * The model pill's row `/model <want>` means: the row whose value is `want` (exactly, then in any case), Default for
- * `default` or `Default model`, the row whose name is `want` (in any case, then ignoring spaces and punctuation), the
+ * `default`, `Model` or `Default model`, the row whose name is `want` (in any case, then ignoring spaces and punctuation), the
  * 1M-context row of a `[1m]` alias's model (`opus[1m]` → `Opus (1M context)`), else the only row in `modelsStartingWith`; undefined when none or several do.
  */
 export function findModel(rows: readonly ModelChoice[], want: string): ModelChoice | undefined {

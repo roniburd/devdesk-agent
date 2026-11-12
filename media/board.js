@@ -1013,7 +1013,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
     /** The chosen model's effort choices: Default, then its levels (none for a model without effort). */
     const efforts = () => [DEFAULT, ...(modelRow().efforts || [])];
     const effort = () => /** @type {string} */ (efforts().includes(/** @type {string} */ (state.effort)) ? state.effort : DEFAULT);
-    const modelLabel = (r) => (r.value === DEFAULT ? 'Default model' : r.label);
+    const modelLabel = (r) => (r.value === DEFAULT ? 'Model' : r.label);
     const worktree = () => info.worktrees.find((w) => w.dir === where);
     /** The Claude accounts (devdesk.claude.accounts), the default first; the pill shows only with more than one. */
     const accounts = () => info.accounts || [];

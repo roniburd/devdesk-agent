@@ -907,7 +907,7 @@ More details:
 | You type | What happens | Example |
 |---|---|---|
 | `/model` | Opens the model list. | |
-| `/model` + a model's id or name | Picks that model. | `/model opus 1m` picks Opus (1M context). `/model default` or `/model Default model` picks Default. |
+| `/model` + a model's id or name | Picks that model. | `/model opus 1m` picks Opus (1M context). `/model default` or `/model Model` (what the pill shows for it) picks Default. |
 | `/model` + the start of several names | Lists the models that match. | `/model auto` |
 | `/model` + a `[1m]` alias | Picks its model's 1M-context row. | `/model opus[1m]` |
 | `/model` + another Claude alias, or a model Claude doesn't list | Uses it as typed. | `/model opusplan` |
