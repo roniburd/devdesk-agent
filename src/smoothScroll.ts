@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { sessionsSmoothScroll, sessionsSmoothScrollLines, sessionsTmux } from './config';
+import { sessionsSmoothScroll, sessionsSmoothScrollAcceleration, sessionsSmoothScrollLines, sessionsTmux } from './config';
 import { BOUND_KEYS, joinCommands, savedBindings, savedOption, smoothBindings } from './core/smoothScroll';
 import { log } from './log';
 
@@ -31,7 +31,7 @@ async function apply(): Promise<void> {
         const listed = await Promise.all(BOUND_KEYS.map(({ table, key }) => tmux(['list-keys', '-T', table, key]).catch(() => undefined)));
         await tmux(joinCommands(savedBindings(listed).map((line, i) => ['set-option', '-s', savedOption(i), line])));
       }
-      await tmux(joinCommands(smoothBindings(sessionsSmoothScrollLines())));
+      await tmux(joinCommands(smoothBindings(sessionsSmoothScrollLines(), sessionsSmoothScrollAcceleration())));
     } else if (isSaved) {
       await restore(saved.filter(Boolean).join('\n'));
       await tmux(joinCommands(BOUND_KEYS.map((_, i) => ['set-option', '-su', savedOption(i)])));
@@ -70,7 +70,7 @@ export function registerSmoothScroll(): vscode.Disposable[] {
   void applySmoothScroll();
   return [
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('devdesk.sessions.smoothScroll') || e.affectsConfiguration('devdesk.sessions.smoothScrollLines')) void applySmoothScroll();
+      if (['smoothScroll', 'smoothScrollLines', 'smoothScrollAcceleration'].some((k) => e.affectsConfiguration(`devdesk.sessions.${k}`))) void applySmoothScroll();
     }),
   ];
 }

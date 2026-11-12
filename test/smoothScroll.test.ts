@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { BOUND_KEYS, joinCommands, savedBindings, scrollLines, smoothBindings, steps } from '../src/core/smoothScroll';
+import { BOUND_KEYS, EVENTS_OPTION, joinCommands, savedBindings, scroll, scrollLines, smoothBindings, steps } from '../src/core/smoothScroll';
 
 const tmuxAvailable = spawnSync('tmux', ['-V']).status === 0;
 
@@ -18,6 +18,21 @@ describe('steps', () => {
   it('scrolls one line at a time with a pause between lines', () => {
     expect(steps('up', 1)).toBe('send-keys -X scroll-up');
     expect(steps('down', 3)).toBe('send-keys -X scroll-down ; run-shell -d 0.004 ; send-keys -X scroll-down ; run-shell -d 0.004 ; send-keys -X scroll-down');
+  });
+});
+
+describe('scroll', () => {
+  it('is the one-line steps without acceleration', () => {
+    expect(scroll('up', 2, false)).toBe(steps('up', 2));
+  });
+
+  it('counts the event for a moment, then jumps further the more events came in, fastest first', () => {
+    const s = scroll('down', 2, true);
+    expect(s.startsWith(`set -pF ${EVENTS_OPTION} "#{e|+:`)).toBe(true);
+    expect(s).toContain(`run-shell -b -d 0.15 -C "set -pF -t #{pane_id} ${EVENTS_OPTION} '##{e|-:##{${EVENTS_OPTION}},1}'"`);
+    const jumps = [...s.matchAll(/>=:#\{@devdesk-wheel-events\},(\d+)\}" \{ send-keys -X -N (\d+) scroll-down/g)].map((m) => [+m[1], +m[2]]);
+    expect(jumps).toEqual([[12, 12], [8, 8], [4, 4]]);
+    expect(s.endsWith(`{ ${steps('down', 2)} } } }`)).toBe(true);
   });
 });
 
@@ -72,6 +87,32 @@ describe.skipIf(!tmuxAvailable)('with a real tmux server', () => {
       writeFileSync(file, `${saved.join('\n')}\n`);
       tmux(['source-file', file]);
       expect(list()).toEqual(before);
+    } finally {
+      spawnSync('tmux', ['-L', server, 'kill-server']);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('with acceleration, quick wheel events scroll further, and an event after a pause one line', async () => {
+    const server = `devdesk-test-accel-${process.pid}`;
+    const tmux = (args: string[]) => execFileSync('tmux', ['-L', server, '-f', '/dev/null', ...args], { encoding: 'utf8' });
+    const dir = mkdtempSync(join(tmpdir(), 'devdesk-accel-test-'));
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      tmux(['new-session', '-d', '-s', 't', '-x', '80', '-y', '20', 'seq 1 3000; sleep 30']);
+      for (let i = 0; i < 100 && Number(tmux(['display-message', '-p', '-t', 't', '#{history_size}']).trim()) < 1900; i++) await sleep(50);
+      const event = join(dir, 'event.conf');
+      writeFileSync(event, `${scroll('up', 1, true, 1.5)}\n`); // events count for 1.5 s: the burst below fits on a slow machine
+      const wheel = () => tmux(['source-file', '-t', 't', event]);
+      const position = () => Number(tmux(['display-message', '-p', '-t', 't', '#{scroll_position}']).trim());
+      tmux(['copy-mode', '-t', 't']);
+      tmux(joinCommands(Array.from({ length: 8 }, () => ['source-file', '-t', 't', event]))); // 8 events at once
+      expect(position()).toBe(3 * 1 + 4 * 2 + 4); // events 1-3: 1 line each, 4-7: 2 each, 8: 4
+      await sleep(1800); // the events no longer count
+      expect(tmux(['show-options', '-pv', '-t', 't', EVENTS_OPTION]).trim()).toBe('0');
+      const before = position();
+      wheel();
+      expect(position() - before).toBe(1);
     } finally {
       spawnSync('tmux', ['-L', server, 'kill-server']);
       rmSync(dir, { recursive: true, force: true });

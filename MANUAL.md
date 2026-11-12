@@ -1300,6 +1300,8 @@ When DevDesk starts, it also unsets the hooks of a DevDesk server that is alread
 
 With tmux's `mouse` on, tmux scrolls a Claude terminal itself, and each wheel event jumps 5 lines. Turn on `devdesk.sessions.smoothScroll` to have each wheel event scroll `devdesk.sessions.smoothScrollLines` lines (3 by default) one line at a time instead, which is closer to VS Code's own terminal. It still scrolls in whole lines.
 
+Scrolling slowly with smooth scrolling on is precise, but a long way back takes many wheel turns. `devdesk.sessions.smoothScrollAcceleration` (on by default) makes fast scrolling go further: DevDesk counts the wheel events of the last 0.15 seconds, and from 4, 8 or 12 of them each further event jumps 2, 4 or 6 times `devdesk.sessions.smoothScrollLines` lines at once. A slow scroll stays one line at a time.
+
 The setting changes the wheel bindings of DevDesk's tmux server, so it applies to all its sessions, in every window, as soon as you change it. DevDesk first saves the wheel bindings it replaces (tmux's defaults, or your own from a tmux config file), and turning the setting off loads them back.
 
 ### Install tmux
@@ -1744,6 +1746,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.tmuxOptions` | `{}` (for example `{ "mouse": true, "history-limit": 50000 }`, set on each session) |
 | `devdesk.sessions.smoothScroll` | `false` (experimental: the wheel scrolls one line at a time) |
 | `devdesk.sessions.smoothScrollLines` | `3` (lines per wheel event with smooth scrolling on, 1 to 10) |
+| `devdesk.sessions.smoothScrollAcceleration` | `true` (with smooth scrolling on, fast scrolling goes further) |
 | `devdesk.sessions.tmuxInstallCommand` | `sudo yum install -y tmux` (`brew install tmux` on macOS) |
 
 ### Web access

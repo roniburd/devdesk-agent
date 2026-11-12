@@ -127,9 +127,15 @@ describe('the window record and the skill', () => {
 
 const pythonRuns = spawnSync('python3', ['-I', '-c', 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)']).status === 0;
 
-describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
+// Each run starts python3 (a few hundred ms here, seconds when the whole suite loads the machine), so these tests get
+// more than the default 20 s.
+describe.skipIf(!pythonRuns)('the devdesk command (python3)', { timeout: 60_000 }, () => {
   let home = '';
+  /** Runs still going (a test that timed out): stopped before their directory goes. */
+  const running = new Set<() => void>();
   afterEach(() => {
+    for (const stop of running) stop();
+    running.clear();
     if (home) rmSync(home, { recursive: true, force: true });
     home = '';
   });
@@ -166,6 +172,7 @@ describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
       child.stderr.on('data', (d: Buffer) => (err += d.toString()));
       const timer = setInterval(() => {
         const root = join(paths.ipc, 'requests');
+        if (!existsSync(root)) return;
         for (const w of readdirSync(root)) {
           for (const name of readdirSync(join(root, w)).filter((n) => /^[0-9a-f]+\.json$/.test(n))) {
             const file = join(root, w, name);
@@ -175,8 +182,14 @@ describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
           }
         }
       }, 20);
+      const stop = () => {
+        clearInterval(timer);
+        child.kill();
+      };
+      running.add(stop);
       child.on('close', (code) => {
         clearInterval(timer);
+        running.delete(stop);
         resolve({ code, out, err, request });
       });
     });
@@ -241,11 +254,23 @@ describe.skipIf(!pythonRuns)('the devdesk command (python3)', () => {
     expect((await run(paths, work, ['worker', 'ask', '--task', 'w-0a1b2c', 'which', 'branch?'], tmux)).request?.body).toMatchObject({ verb: 'ask', text: 'which branch?' });
     expect((await run(paths, work, ['worker', 'reply', '--task', 'w-0a1b2c', 'main'], tmux)).request?.body).toMatchObject({ verb: 'reply', text: 'main' });
     expect((await run(paths, work, ['worker', 'check'], tmux)).request?.body).toMatchObject({ verb: 'check' });
-    expect((await run(paths, work, ['worker', 'start', '--task', 'x'], tmux)).code).toBe(2);
-    expect((await run(paths, work, ['worker', 'done', '--outcome', 'maybe', '--summary', 'x'], tmux)).code).toBe(2);
-    expect((await run(paths, work, ['worker', 'start', '--name', 'n', '--task', '@missing.md'], tmux)).err).toMatch(/cannot read missing\.md/);
-    expect((await run(paths, work, ['worker', 'bogus'], tmux)).code).toBe(2);
-    expect((await run(paths, work, ['worker', '--help'])).out).toMatch(/^usage: devdesk worker/);
+  });
+
+  it('refuses devdesk worker requests it cannot send, and prints its help', async () => {
+    const { paths, work } = setUp((home) => [{ roots: [home], panes: ['devdesk:%7'] }]);
+    const tmux = { TMUX: '/tmp/tmux-1/devdesk,123,0', TMUX_PANE: '%7' };
+    // None of these reaches a window, so they can run at once.
+    const [noName, badOutcome, missing, bogus, help] = await Promise.all([
+      run(paths, work, ['worker', 'start', '--task', 'x'], tmux),
+      run(paths, work, ['worker', 'done', '--outcome', 'maybe', '--summary', 'x'], tmux),
+      run(paths, work, ['worker', 'start', '--name', 'n', '--task', '@missing.md'], tmux),
+      run(paths, work, ['worker', 'bogus'], tmux),
+      run(paths, work, ['worker', '--help']),
+    ]);
+    expect([noName, badOutcome, bogus].map((r) => [r.code, r.request])).toEqual([[2, undefined], [2, undefined], [2, undefined]]);
+    expect(missing).toMatchObject({ request: undefined });
+    expect(missing.err).toMatch(/cannot read missing\.md/);
+    expect(help.out).toMatch(/^usage: devdesk worker/);
   });
 
   it('exits 1 with what the window says when it refuses', async () => {

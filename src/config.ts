@@ -349,6 +349,11 @@ export function sessionsSmoothScrollLines(): number {
   return scrollLines(cfg().get('sessions.smoothScrollLines'));
 }
 
+/** With smooth scrolling on, fast wheel scrolling goes further (setting `devdesk.sessions.smoothScrollAcceleration`): on by default. */
+export function sessionsSmoothScrollAcceleration(): boolean {
+  return bool('sessions.smoothScrollAcceleration', true);
+}
+
 /** tmux options DevDesk sets on each of its Claude sessions (setting `devdesk.sessions.tmuxOptions`), as name/value pairs. */
 export function sessionsTmuxOptions(): [string, string][] {
   return tmuxOptions(cfg().get('sessions.tmuxOptions'));

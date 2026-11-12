@@ -114,7 +114,7 @@ async function board({
     win.postMessage(m, '*');
     await settle();
   };
-  return { prompt, popup, posted, type, press, release, composed, send, pill, host, folder, stored: () => folder.flat(), webviewState: () => webviewState };
+  return { prompt, popup, posted, settle, type, press, release, composed, send, pill, host, folder, stored: () => folder.flat(), webviewState: () => webviewState };
 }
 
 /** The pill's rows before the CLI listed its models: Default and Claude's aliases. */
@@ -328,7 +328,7 @@ describe('board webview: notice actions', () => {
     await b.type('/foo bar baz');
     await b.press('Enter');
     doc.defaultView!.postMessage({ type: 'notice', text: '/foo is not a command.', tone: 'warning', actions: [{ id: 1, label: 'Send as text anyway' }] }, '*');
-    await new Promise((r) => setTimeout(r, 20));
+    await b.settle();
     const action = doc.querySelector<HTMLButtonElement>('#notice button')!;
     // A click focuses the button first, as the browser does.
     action.focus();
@@ -349,10 +349,10 @@ describe('board webview: notice actions', () => {
     /** Clicks the row labelled `label` of the popup `pill` opens. */
     const pick = async (pill: 'where' | 'model', label: string) => {
       doc.getElementById(pill)!.click();
-      await new Promise((r) => setTimeout(r, 20));
+      await b.settle();
       const row = [...b.popup.querySelectorAll<HTMLElement>('.pop-row')].find((r) => r.querySelector('.pop-label')?.textContent === label)!;
       row.click();
-      await new Promise((r) => setTimeout(r, 20));
+      await b.settle();
     };
     return { b, noticeEl, pick };
   }
@@ -386,7 +386,7 @@ describe('board webview: notice actions', () => {
     b.prompt.focus();
     b.prompt.setSelectionRange(4, 4);
     b.prompt.click();
-    await new Promise((r) => setTimeout(r, 20));
+    await b.settle();
     expect(noticeEl.hidden).toBe(false);
     expect(b.posted.some((m) => m.type === 'noticeDismissed')).toBe(false);
     // The / menu still opens for the word clicked into.
@@ -400,7 +400,7 @@ describe('board webview: notice actions', () => {
     await b.press('Enter');
     await b.composed({ ok: true });
     doc.defaultView!.postMessage({ type: 'notice', text: 'Claude Board help.', tone: 'info' }, '*');
-    await new Promise((r) => setTimeout(r, 20));
+    await b.settle();
     const noticeEl = doc.getElementById('notice')!;
     expect(noticeEl.hidden).toBe(false);
     const down = await b.press('Escape');
@@ -413,7 +413,7 @@ describe('board webview: notice actions', () => {
 describe('board webview: the / footer button', () => {
   async function clickSlash(b: Awaited<ReturnType<typeof board>>) {
     b.prompt.ownerDocument.getElementById('slash')!.click();
-    await new Promise((r) => setTimeout(r, 20));
+    await b.settle();
   }
 
   it('on text that already starts with a command, the picked command replaces that word (no "/auto-mode-setup simplify fix it")', async () => {
@@ -492,7 +492,7 @@ describe('board webview: / typed in front of plain text', () => {
     await b.press('Escape');
     b.prompt.setSelectionRange(4, 4);
     b.prompt.dispatchEvent(new b.prompt.ownerDocument.defaultView!.MouseEvent('click'));
-    await new Promise((r) => setTimeout(r, 20));
+    await b.settle();
     await b.press('ArrowDown');
     await b.press('Tab');
     expect(b.prompt.value).toBe('/model fix it');
