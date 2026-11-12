@@ -411,3 +411,21 @@ export function pasteArgs(target: string, buffer: string, file: string): { load:
     submit: ['send-keys', '-t', target, 'Enter'],
   };
 }
+
+/**
+ * What a terminal reattaching to tmux session `session` says while tmux attaches: which session, and that Claude kept
+ * running there. Dimmed; tmux's screen replaces it once attached. Control characters in `title` are dropped.
+ */
+export function attachMessage(session: string, title?: string): string {
+  const shown = title?.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim();
+  const which = shown ? `"${shown}" (tmux session ${session})` : `tmux session ${session}`;
+  return `\x1b[2mReattaching to ${which}…\r\nClaude kept running there; this terminal reconnects to it.\x1b[0m\r\n`;
+}
+
+/**
+ * A terminal's shell that prints `message` at once and then runs `bin args` in its place (`exec`), so the terminal
+ * shows something while `bin` starts. `/bin/sh` gets the message and the command as arguments, never as script text.
+ */
+export function shellPrinting(message: string, bin: string, args: string[]): { shellPath: string; shellArgs: string[] } {
+  return { shellPath: '/bin/sh', shellArgs: ['-c', 'printf "%s" "$1"; shift; exec "$@"', 'sh', message, bin, ...args] };
+}

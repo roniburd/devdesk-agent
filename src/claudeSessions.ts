@@ -7,7 +7,7 @@ import { parkedIn } from './core/park';
 import { RestoreHold } from './core/restoreHold';
 import { processAlive, readHookRecords } from './core/sessions';
 import { readRegistries } from './core/sessionInfo';
-import { attachArgs, DEFAULT_SERVER, isPaneId, killSessionArgs, launchTags, listSessions, resumeArgs, serverArgs, sessionName, tmuxInstalled } from './core/tmux';
+import { attachArgs, attachMessage, DEFAULT_SERVER, isPaneId, killSessionArgs, launchTags, listSessions, resumeArgs, serverArgs, sessionName, shellPrinting, tmuxInstalled } from './core/tmux';
 import { tmuxStartCommand } from './core/sessionStart';
 import type { Feature } from './core/worktrees';
 import { log } from './log';
@@ -317,8 +317,8 @@ export async function attachSession(name: string, pane?: string, server = sessio
   const { bin = 'tmux', configFile } = sessionsTmuxSetup(server);
   const terminal = vscode.window.createTerminal({
     name: nameFor(name, server),
-    shellPath: bin,
-    shellArgs: serverArgs(server, ['attach-session', '-t', `=${name}`], configFile),
+    // Says at once what it is doing: tmux can take a moment to attach and draw the session.
+    ...shellPrinting(attachMessage(name, titles?.title(name, server)), bin, serverArgs(server, ['attach-session', '-t', `=${name}`], configFile)),
     iconPath: new vscode.ThemeIcon('hubot'),
     location,
     isTransient: true,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { promptArg, shellQuote } from '../src/core/shell';
-import { fitsTmuxCommandLine, scriptedCommand, attachArgs, CLAUDE_CHILD_ENV_KEYS, launchTags, claudeShellCommand, defaultTmuxInstallCommand, forkArgs, tmuxInstalled, tmuxOptions, isSessionId, DEFAULT_SERVER, isPaneId, isServerName, serverArgs, LIST_FORMAT, listPanes, listSessions, isNumberedSession, nextSessionName, parsePanes, sessionLabel, sessionName, sessionsOf } from '../src/core/tmux';
+import { fitsTmuxCommandLine, scriptedCommand, attachArgs, attachMessage, shellPrinting, CLAUDE_CHILD_ENV_KEYS, launchTags, claudeShellCommand, defaultTmuxInstallCommand, forkArgs, tmuxInstalled, tmuxOptions, isSessionId, DEFAULT_SERVER, isPaneId, isServerName, serverArgs, LIST_FORMAT, listPanes, listSessions, isNumberedSession, nextSessionName, parsePanes, sessionLabel, sessionName, sessionsOf } from '../src/core/tmux';
 
 const wt = (name: string) => ({ name, dir: `/w/worktrees/${name}`, isMain: false });
 
@@ -219,5 +219,18 @@ describe('sessionLabel', () => {
     expect(sessionLabel({ name: 'cc-a', attached: false, command: 'bash' })).toBe('○ shell');
     expect(sessionLabel({ name: 'cc-a', attached: false, command: '-zsh' })).toBe('○ shell');
     expect(sessionLabel({ name: 'cc-a', attached: true, command: 'claude' })).toBe('● claude');
+  });
+});
+
+describe('the reattach message', () => {
+  it('names the session and its title, without control characters', () => {
+    expect(attachMessage('cc-main', 'Fix \x1b[31mlogin')).toContain('Reattaching to "Fix [31mlogin" (tmux session cc-main)…');
+    expect(attachMessage('cc-main')).toContain('Reattaching to tmux session cc-main…');
+    expect(attachMessage('cc-main', '  ')).toContain('Reattaching to tmux session cc-main…');
+  });
+  it('prints the message, then runs the command with its arguments as given', () => {
+    const { shellPath, shellArgs } = shellPrinting('hi $(x) "q"\n', 'printf', ['[%s]', 'a b', "it's", '$HOME']);
+    expect(shellPath).toBe('/bin/sh');
+    expect(execFileSync(shellPath, shellArgs, { encoding: 'utf8' })).toBe('hi $(x) "q"\n[a b][it\'s][$HOME]');
   });
 });
