@@ -46,8 +46,29 @@ describe('webPanelRows', () => {
       ['access', 'Access: alice', 'x-forwarded-user'],
       ['log', 'Log', 'daemon.log'],
     ]);
-    expect(rows.find((r) => r.id === 'url')).toMatchObject({ action: 'copyUrl', contextValue: 'webUrl' });
-    expect(rows.find((r) => r.id === 'tunnel')).toMatchObject({ action: 'restartTunnel', contextValue: 'webTunnel' });
+    expect(rows.find((r) => r.id === 'url')).toMatchObject({ action: 'copyUrl', contextValue: 'webUrl copyable' });
+    expect(rows.find((r) => r.id === 'tunnel')).toMatchObject({ action: 'restartTunnel', contextValue: 'webTunnel copyable' });
+  });
+
+  it('gives each row worth copying a Copy button with what it copies', () => {
+    const old = SCRIPT.replace('1.6.3', '1.6.0');
+    const on = { kind: 'on' as const, state: state({ tunnel: 'up', url: 'https://t.example/', tunnelPid: 43 }) };
+    const copies = (o: Partial<WebPanelInput>) => Object.fromEntries(webPanelRows(input(o)).map((r) => [r.id, r.copy]));
+    expect(copies({ status: on, settings: { ...settings, allowedUsers: ['alice', 'bob'] }, running: { script: old }, logPath: '/s/web/daemon.log' })).toEqual({
+      status: '42',
+      outdated: old,
+      url: 'https://t.example/',
+      tunnel: '43',
+      local: 'http://127.0.0.1:7690/',
+      access: 'alice, bob',
+      log: '/s/web/daemon.log',
+    });
+    for (const r of webPanelRows(input({ status: on, settings }))) expect(r.contextValue?.split(' ').includes('copyable') ?? false).toBe(r.copy !== undefined);
+    // A tunnel that is down copies its error; nothing to copy: no button.
+    expect(copies({ status: { kind: 'tunnel-down', state: state({ tunnel: 'down', tunnelError: 'no URL within 60 s' }) } }).tunnel).toBe('no URL within 60 s');
+    expect(copies({ status: on, settings: { ...settings, allowedUsers: [] } })).toMatchObject({ access: undefined, log: undefined });
+    expect(copies({ status: on, settings: { ...settings, auth: 'loopback' } }).access).toBeUndefined();
+    expect(copies({}).status).toBeUndefined();
   });
 
   it('warns about a tunnel that is down, with its error', () => {

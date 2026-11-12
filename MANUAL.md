@@ -1424,12 +1424,12 @@ Run **DevDesk: Start Web Access**. The status bar shows **Web: on**, or **Web: t
 - **Stop Web Access**: stops the daemon and its tunnel. **DevDesk: Stop Web Access** does the same.
 - **Settings**.
 
-The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off. Its title bar has **Start** (or **Restart**), **Stop**, **Choose Web Access Tunnel** and the settings gear. Its rows:
+The **Web Access** view, under Worktrees in the DevDesk sidebar (collapsed at first), shows the same at a glance, also while web access is off. Its title bar has **Start** (or **Restart**), **Stop**, **Choose Web Access Tunnel** and the settings gear. Hover a row with something worth copying (a URL, a process id, the tunnel's error, the allowed users, the log's path) for its copy button, also in its right-click menu. Its rows:
 
 - **Running**: since when, and its process. **Started by version 1.6.0** means a daemon an older version started is still running: an update doesn't restart it, so the phone still gets the old page. Click the row to restart it.
 - **Phone URL**: click to copy; its buttons open it or show its QR code.
 - **Tunnel**: click to restart it.
-- **Loopback URL**: for `ssh -L`.
+- **Loopback URL**: for `ssh -L`; click to copy.
 - **Access**: who may open the page (`devdesk.web.allowedUsers` and how it is checked: Tailscale, ngrok sign-in, Cloudflare Access or the header), *the tunnel owner* with Dev Tunnels, or *no identity check* with `loopback`.
 - **Log**: `daemon.log`.
 

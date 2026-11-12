@@ -305,13 +305,13 @@ export class WebAccess implements vscode.Disposable {
   /** Copies the tunnel URL. */
   async copyUrl(): Promise<void> {
     const status = await this.refresh();
-    if (status.kind !== 'off' && status.state.url) await vscode.env.clipboard.writeText(status.state.url);
+    if (status.kind !== 'off' && status.state.url) await copied(status.state.url);
   }
 
   /** Copies the loopback URL. */
   async copyLocal(): Promise<void> {
     const status = await this.refresh();
-    if (status.kind !== 'off') await vscode.env.clipboard.writeText(`http://${status.state.host}:${status.state.port}/`);
+    if (status.kind !== 'off') await copied(`http://${status.state.host}:${status.state.port}/`);
   }
 
   /** Opens the tunnel URL in the browser. */
@@ -512,4 +512,10 @@ export function registerWebAccess(ctx: vscode.ExtensionContext): WebAccess {
   );
   web.panel = registerWebAccessView(ctx, web);
   return web;
+}
+
+/** Copies `text` and says so in the status bar. */
+async function copied(text: string): Promise<void> {
+  await vscode.env.clipboard.writeText(text);
+  vscode.window.setStatusBarMessage(`$(copy) Copied ${text}`, 3000);
 }

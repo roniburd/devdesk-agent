@@ -62,7 +62,7 @@ export function registerWebAccessView(ctx: vscode.ExtensionContext, web: WebAcce
     drawing = drawing
       .then(async () => {
         const details = await web.details(status);
-        tree.set(webPanelRows({ status, ...details, script: web.script, now: Date.now() }));
+        tree.set(webPanelRows({ status, ...details, script: web.script, logPath: web.logPath(), now: Date.now() }));
         view.description = status.kind === 'off' ? 'off' : status.kind === 'tunnel-down' ? 'tunnel down' : 'on';
       })
       .catch((err) => log.warn(`web access view: ${(err as Error).message}`));
@@ -70,6 +70,13 @@ export function registerWebAccessView(ctx: vscode.ExtensionContext, web: WebAcce
   ctx.subscriptions.push(
     tree,
     view,
+    // A row's Copy button (on hover, and in its right-click menu): copies its URL, pid, path or error.
+    vscode.commands.registerCommand('devdesk.web.copyRow', async (row?: WebPanelRow) => {
+      const copy = (row ?? view.selection[0])?.copy;
+      if (!copy) return;
+      await vscode.env.clipboard.writeText(copy);
+      vscode.window.setStatusBarMessage(`$(copy) Copied ${copy}`, 3000);
+    }),
     web.onDidRefresh(draw),
     view.onDidChangeVisibility(() => view.visible && void web.refresh()),
   );
