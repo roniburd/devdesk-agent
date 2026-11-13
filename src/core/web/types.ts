@@ -85,6 +85,8 @@ export interface SessionDetail {
   prompt: ScreenState;
   /** The pane is gone or Claude exited: the page says "session ended" and goes back. */
   ended: boolean;
+  /** The folder the session works in (featureDir), for its reply box's `/` menu (`api/composer?dir=`). */
+  dir?: string;
 }
 
 export interface WebFolder {

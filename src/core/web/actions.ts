@@ -65,7 +65,7 @@ export async function detailTurns(path: string): Promise<Turn[]> {
 
 export async function sessionDetail(card: SessionCard, o: WebView & { server: string }, d: ActionDeps): Promise<ActionResult<SessionDetail>> {
   const turns: Turn[] = card.transcriptPath ? await detailTurns(card.transcriptPath) : [];
-  const detail: SessionDetail = { card: toWebCard(card, o), turns, screen: [], prompt: NO_SCREEN, ended: claudeGone(card) };
+  const detail: SessionDetail = { card: toWebCard(card, o), turns, screen: [], prompt: NO_SCREEN, ended: claudeGone(card), ...(card.featureDir ? { dir: card.featureDir } : {}) };
   const target = paneTarget(card);
   if (!target) return { status: 200, body: { ...detail, ended: true } };
   try {

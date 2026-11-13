@@ -1,8 +1,9 @@
 // The web access page: the session list with a prompt box on top that starts a session, and a session's transcript and
-// screen with a reply box or dialog keys. On a phone the list and a session take turns; from 900 px wide (app.css) they
-// sit side by side, the list on the left. Hash routes `#/`, `#/s/<id>`, `#/settings` (and `#/new`, which focuses the
-// prompt box). A session opens as its transcript or, when this browser (or devdesk.web.sessionView) chose so, as the
-// experimental terminal (termView.ts). It talks only to the daemon's JSON API (core/web/types.ts), with relative URLs.
+// screen with a reply box (with a `/` menu) or dialog keys. On a phone the list and a session take turns; from 900 px
+// wide (app.css) they sit side by side, the list on the left. Hash routes `#/`, `#/s/<id>`, `#/settings` (and `#/new`,
+// which focuses the prompt box). When this browser (or devdesk.web.sessionView) chose the experimental terminal, the
+// Screen tab is a Terminal tab instead: the live terminal (termView.ts). It talks only to the daemon's JSON API
+// (core/web/types.ts), with relative URLs.
 // All data goes in as text (dom.ts, screen.ts, markdown.ts), never as markup; no inline script or style (CSP `default-src 'self'`).
 import type {
   CardsResponse,
@@ -25,10 +26,10 @@ import { api } from './api';
 import { h, sentenceCase, sessionHref } from './dom';
 import { turnEls } from './turns';
 import { renderScreen } from './screen';
-import { termView } from './termView';
+import { termPanel } from './termView';
 import { isSessionView } from '../../core/web/types';
 import { DEFAULT_CHOICE } from '../../core/composer';
-import { boxAction } from '../../core/web/promptBox';
+import { boxAction, replyAction, replyMenu } from '../../core/web/promptBox';
 import { promptTools } from './promptTools';
 
 /** Stream errors in a row before the list falls back to polling `api/sessions`. */
@@ -39,6 +40,9 @@ const STREAM_RETRY_MS = 30_000;
 const DETAIL_POLL_MS = 2000;
 const ENDED_BACK_MS = 2000;
 const NEW_SESSION_WAIT_MS = 30_000;
+/** While the Claude CLI is still listing a folder's commands and models, a prompt box asks again this often, this many times. */
+const COMPOSER_RETRY_MS = 3000;
+const COMPOSER_RETRIES = 10;
 
 // ---- The card feed: one event stream for every screen, or polling when the stream keeps failing. ----
 
@@ -269,7 +273,7 @@ function listView(): ListView {
 
 type Tab = 'transcript' | 'screen';
 
-const TYPED_NOTE = "Text is already typed at Claude's prompt (see Screen): clear it in the session's terminal, then send.";
+const typedNote = (where: string) => `Text is already typed at Claude's prompt (see ${where}): clear it in the session's terminal, then send.`;
 
 const KEYS: ReadonlyArray<{ key: WebKey; text: string; label: string; wide?: boolean }> = [
   { key: '1', text: '1', label: 'Option 1' },
@@ -282,9 +286,16 @@ const KEYS: ReadonlyArray<{ key: WebKey; text: string; label: string; wide?: boo
 ];
 
 
+/**
+ * A session: the Transcript tab and the Screen tab (a snapshot of the pane), or, in the experimental terminal view, a
+ * Terminal tab (the live terminal, connected only while it shows). The dock under them has the reply box (with the `/`
+ * menu of what runs in a session) or the dialog keys, and the terminal's key bar on the Terminal tab.
+ */
 function sessionView(id: string): View {
   let card: WebCard | undefined = feed.cards?.find((c) => c.id === id);
   let tab: Tab = 'transcript';
+  let dir: string | undefined;
+  let infoTimer: number | undefined;
   let dialog = false;
   let ended = false;
   let lost = false;
@@ -294,12 +305,15 @@ function sessionView(id: string): View {
   let timer: number | undefined;
   let turnsKey = '';
   let screenKey = '';
+  const terminal = viewNow() === 'terminal-experimental' ? termPanel(id, { follow: () => follow() }) : undefined;
+  const screenName = terminal ? 'Terminal' : 'Screen';
+  const TYPED_NOTE = typedNote(screenName);
 
   const title = h('h1', { class: 'heading title', text: card?.title ?? 'Session' });
   const state = h('span', { class: 'state' });
   const tabButtons = {
     transcript: h('button', { class: 'tab', text: 'Transcript', attrs: { type: 'button', role: 'tab' }, on: { click: () => pick('transcript') } }),
-    screen: h('button', { class: 'tab', text: 'Screen', attrs: { type: 'button', role: 'tab' }, on: { click: () => pick('screen') } }),
+    screen: h('button', { class: 'tab', text: screenName, attrs: { type: 'button', role: 'tab' }, on: { click: () => pick('screen') } }),
   };
   const turns = h('ol', { class: 'turns' });
   // Under the last turn while Claude works, so a quiet transcript still shows the session is busy.
@@ -308,16 +322,31 @@ function sessionView(id: string): View {
   const screen = h('div', { class: 'term', attrs: { role: 'img', 'aria-label': 'Terminal screen' } });
   const panels = {
     transcript: h('section', { class: 'panel transcript', attrs: { role: 'tabpanel' } }, turns, working),
-    screen: h('section', { class: 'panel screen', attrs: { role: 'tabpanel' } }, screen),
+    screen: terminal?.panel ?? h('section', { class: 'panel screen', attrs: { role: 'tabpanel' } }, screen),
   };
   const notice = h('p', { class: 'notice', attrs: { 'aria-live': 'polite' }, text: '' });
   notice.hidden = true;
 
   const text = h('textarea', {
     class: 'reply-text',
-    attrs: { rows: '2', placeholder: 'Reply to Claude', 'aria-label': 'Reply', autocomplete: 'off', autocapitalize: 'sentences' },
+    attrs: {
+      rows: '2',
+      placeholder: 'Reply to Claude, / for commands',
+      'aria-label': 'Reply',
+      autocomplete: 'off',
+      autocapitalize: 'sentences',
+      role: 'combobox',
+      'aria-expanded': 'false',
+    },
     on: {
+      input: () => tools.update(),
+      click: () => tools.update(),
+      keyup: (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') tools.update();
+      },
+      blur: () => tools.close(),
       keydown: (e) => {
+        if (tools.key(e)) return;
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           void send();
@@ -325,6 +354,7 @@ function sessionView(id: string): View {
       },
     },
   });
+  const tools = promptTools(text, { run: () => void send(), changed: () => {}, rows: replyMenu, pills: false, id: 'reply-slash' });
   const sendButton = h('button', { class: 'button primary send', text: 'Send', attrs: { type: 'submit' } });
   const interrupt = h(
     'button',
@@ -344,7 +374,8 @@ function sessionView(id: string): View {
       },
     },
     text,
-    h('div', { class: 'reply-actions' }, interrupt, sendButton),
+    tools.menu,
+    h('div', { class: 'reply-actions' }, tools.bar, interrupt, sendButton),
   );
   const keys = h(
     'div',
@@ -360,7 +391,8 @@ function sessionView(id: string): View {
   );
   const endedBox = h('div', { class: 'ended', attrs: { role: 'status' } });
   endedBox.hidden = true;
-  const dock = h('footer', { class: 'dock' }, notice, reply, keys, endedBox);
+  const talk = h('div', { class: 'dock-talk' }, notice, reply, keys);
+  const dock = h('footer', { class: 'dock' }, talk, terminal?.keys ?? null, endedBox);
   keys.hidden = true;
 
   const el = h(
@@ -390,7 +422,26 @@ function sessionView(id: string): View {
       panels[k].hidden = k !== t;
       tabButtons[k].setAttribute('aria-selected', String(k === t));
     }
-    if (t === 'screen') scrollToEnd(panels.screen);
+    if (terminal) {
+      // The Terminal tab types into the terminal: its key bar replaces the reply box.
+      const live = t === 'screen' && !ended;
+      talk.hidden = live;
+      terminal.keys.hidden = !live;
+      dock.classList.toggle('term-dock', live);
+      if (live) terminal.show();
+      else terminal.hide();
+    } else if (t === 'screen') scrollToEnd(panels.screen);
+  }
+
+  /** What the reply box's `/` menu offers: the commands of the session's folder, asked for again while the CLI lists them. */
+  async function loadInfo(tries = 0): Promise<void> {
+    window.clearTimeout(infoTimer);
+    if (!dir || disposed) return;
+    const asked = dir;
+    const r = await api<ComposerResponse>('GET', `api/composer?dir=${encodeURIComponent(asked)}`);
+    if (disposed || dir !== asked || !r.data) return;
+    tools.setInfo(r.data);
+    if (r.data.listing && tries < COMPOSER_RETRIES) infoTimer = window.setTimeout(() => void loadInfo(tries + 1), COMPOSER_RETRY_MS);
   }
 
   function showCard(c: WebCard): void {
@@ -409,6 +460,10 @@ function sessionView(id: string): View {
 
   function showDetail(d: SessionDetail): void {
     showCard(d.card);
+    if (d.dir && d.dir !== dir) {
+      dir = d.dir;
+      void loadInfo();
+    }
     // The hooks know when a turn ends; the spinner on screen is only a fallback for sessions without hooks.
     const isWorking = d.card.state === 'working' || (d.card.state === 'unknown' && d.prompt.working);
     const tk = JSON.stringify(d.turns);
@@ -420,7 +475,7 @@ function sessionView(id: string): View {
       if (stick) scrollToEnd(panels.transcript);
     }
     const sk = JSON.stringify(d.screen);
-    if (sk !== screenKey) {
+    if (!terminal && sk !== screenKey) {
       const stick = screenKey === '' || nearEnd(panels.screen);
       screenKey = sk;
       if (d.screen.length) renderScreen(screen, d.screen);
@@ -428,10 +483,12 @@ function sessionView(id: string): View {
       if (stick) scrollToEnd(panels.screen);
     }
     const open = d.prompt.dialog;
-    if (open && !dialog) pick('screen');
+    // The Screen tab shows the dialog; the Terminal tab is not opened for it, as it would size the desktop's window.
+    if (open && !dialog && !terminal) pick('screen');
     dialog = open;
     reply.hidden = open;
     keys.hidden = !open;
+    if (open) tools.close();
     interrupt.hidden = !isWorking;
     text.disabled = !d.card.canSend;
     sendButton.disabled = busy || !d.card.canSend;
@@ -450,6 +507,12 @@ function sessionView(id: string): View {
     window.clearTimeout(timer);
     reply.hidden = true;
     keys.hidden = true;
+    if (terminal) {
+      terminal.hide();
+      terminal.keys.hidden = true;
+      talk.hidden = false;
+      dock.classList.remove('term-dock');
+    }
     say(undefined);
     endedBox.replaceChildren(h('strong', { text: message }), h('span', { text: 'Going back to your sessions…' }));
     endedBox.hidden = false;
@@ -518,7 +581,10 @@ function sessionView(id: string): View {
   async function send(): Promise<void> {
     const value = text.value;
     if (busy || !value.trim()) return;
-    const body: SendRequest = { text: value };
+    tools.close();
+    const action = replyAction(value, tools.info()?.commands ?? []);
+    if (action.kind === 'notice') return say(action.text, false);
+    const body: SendRequest = { text: action.text };
     if (await post<OkResponse>('send', body)) {
       // Only clear what was sent: anything typed while it went stays.
       if (text.value === value) text.value = '';
@@ -545,38 +611,9 @@ function sessionView(id: string): View {
     dispose: () => {
       disposed = true;
       window.clearTimeout(timer);
+      window.clearTimeout(infoTimer);
       feed.listeners.delete(onCards);
-    },
-  };
-}
-
-/** A session in the experimental terminal: termView, with the card's title and state kept up to date here. */
-function terminalSessionView(id: string): View {
-  let card = feed.cards?.find((c) => c.id === id);
-  const title = h('h1', { class: 'heading title', text: card?.title ?? 'Session' });
-  const state = h('span', { class: 'state' });
-  const show = () => {
-    card = feed.cards?.find((c) => c.id === id) ?? card;
-    if (!card) return;
-    title.textContent = card.title;
-    state.className = `state tone-${card.tone}`;
-    state.replaceChildren(stateGlyph(card), sentenceCase(card.label));
-  };
-  const follow = () => {
-    const pane = card?.pane ?? paneOf.get(id);
-    const next = pane ? feed.cards?.find((c) => c.pane === pane && c.id !== id) : undefined;
-    if (!next) return false;
-    location.replace(sessionHref(next.id));
-    return true;
-  };
-  feed.listeners.add(show);
-  show();
-  const v = termView(id, { title, state, gear: gear(), follow });
-  return {
-    el: v.el,
-    dispose: () => {
-      feed.listeners.delete(show);
-      v.dispose();
+      terminal?.dispose();
     },
   };
 }
@@ -615,7 +652,7 @@ function settingsView(): View {
           option(
             'terminal-experimental',
             VIEW_NAMES['terminal-experimental'],
-            "The session's live terminal with a key bar. While you type here, the session's window takes this screen's size; your desktop takes it back when you type there.",
+            "The conversation and a reply box, and a Terminal tab with the session's live terminal and a key bar. While the Terminal tab shows, the session's window takes this screen's size; your desktop takes it back when you type there.",
           ),
         ),
       ),
@@ -638,10 +675,6 @@ function loadFolders(): Promise<{ folders?: WebFolder[]; error?: string }> {
 
 /** Rows the prompt box shows: one line until it is used, then up to 8 as you type. */
 const PROMPT_ROWS = { idle: 1, open: 3, max: 8 };
-
-/** While the Claude CLI is still listing a folder's commands and models, the box asks again this often, this many times. */
-const COMPOSER_RETRY_MS = 3000;
-const COMPOSER_RETRIES = 10;
 
 /**
  * The prompt box at the top of the list: type (with a `/` menu of skills and commands), pick the mode, model and effort
@@ -893,7 +926,7 @@ function route(): void {
   const wasSession = shell.el.classList.contains('has-session');
   if (open && !wasSession) listScroll = window.scrollY ?? 0;
   detail?.dispose();
-  detail = id ? (viewNow() === 'terminal-experimental' ? terminalSessionView(id) : sessionView(id)) : settings ? settingsView() : placeholder();
+  detail = id ? sessionView(id) : settings ? settingsView() : placeholder();
   shell.detail.replaceChildren(detail.el);
   shell.el.classList.toggle('has-session', open);
   list!.select(id);

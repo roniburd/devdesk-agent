@@ -5,7 +5,7 @@ import type { SlashCommand } from '../../src/core/slashCommands';
 import { claudeInvocationOf, composerResponse, launchArgs, webModels } from '../../src/core/web/composer';
 import { ComposerCache, LISTING_TTL_MS, RETRY_MS } from '../../src/core/web/composerCache';
 import type { DaemonConfig } from '../../src/core/web/config';
-import { boxAction, slashMenu } from '../../src/core/web/promptBox';
+import { boxAction, replyAction, replyMenu, slashMenu } from '../../src/core/web/promptBox';
 import type { ComposerResponse } from '../../src/core/web/types';
 
 const claude: DaemonConfig['claude'] = { path: 'claude', modeArgs: '--permission-mode auto', env: {}, modes: [...DEFAULT_MODES], defaultMode: 'Auto', models: [], configDir: '/h/.claude' };
@@ -155,6 +155,28 @@ describe('the prompt box', () => {
     const names = slashMenu('/', info.commands)!.rows.map((r) => r.label);
     expect(names).toEqual(expect.arrayContaining(['/model', '/effort', '/plan', '/permissions', '/review']));
     for (const n of ['/compact', '/exit', '/resume', '/add-dir']) expect(names).not.toContain(n);
+  });
+
+  it("a session's reply menu offers what runs in a session, as Claude names it, without the board's own", () => {
+    const names = replyMenu('/', info.commands)!.rows.map((r) => r.label);
+    expect(names).toEqual(expect.arrayContaining(['/compact', '/permissions', '/model', '/effort', '/clear', '/review']));
+    for (const n of ['/plan', '/add-dir', '/help', '/resume', '/exit']) expect(names).not.toContain(n);
+    const model = replyMenu('/mod', info.commands)!.rows[0];
+    expect(model).toMatchObject({ label: '/model', description: "Set this session's model", run: true });
+    expect(model.category).toBeUndefined();
+    expect(model.badge).toBeUndefined();
+    // An interactive command runs in the session when picked, as a running-session one does.
+    expect(replyMenu('/permissions', info.commands)!.rows[0]).toMatchObject({ run: true });
+    expect(replyMenu('/btw', info.commands)!.rows[0].run).toBeUndefined();
+    expect(replyMenu('fix it', info.commands)).toBeUndefined();
+  });
+
+  it("sends a session's reply as typed, the command spelled as Claude knows it, but not a blocked command", () => {
+    expect(replyAction('fix the tests', info.commands)).toEqual({ kind: 'send', text: 'fix the tests' });
+    expect(replyAction('/COMPACT keep the plan', info.commands)).toEqual({ kind: 'send', text: '/compact keep the plan' });
+    expect(replyAction('/model opus', info.commands)).toEqual({ kind: 'send', text: '/model opus' });
+    expect(replyAction('/nope', info.commands)).toEqual({ kind: 'send', text: '/nope' });
+    expect(replyAction('/exit', info.commands)).toMatchObject({ kind: 'notice', text: expect.stringContaining('/exit does not run from Web Access') });
   });
 
   it('starts on a prompt, a skill or an interactive command', () => {

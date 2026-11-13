@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -2588,7 +2588,7 @@
             ],
             "enumDescriptions": [
               "The transcript, the screen, and a reply box.",
-              "Experimental: the session's live terminal, as on your desktop. While you type on the phone, the session's window takes the phone's size; it takes your desktop's back when you type there."
+              "Experimental: the transcript and a reply box, with a Terminal tab instead of the screen: the session's live terminal, as on your desktop. While the Terminal tab shows, the session's window takes the phone's size; it takes your desktop's back when you type there."
             ],
             "default": "transcript",
             "markdownDescription": "What the web page shows when you open a session. Each browser can choose its own in the page's settings (the gear); this is what a browser that didn't choose gets.",

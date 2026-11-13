@@ -121,3 +121,47 @@ function launchCommand(sub: Submission, planMode: string | undefined): BoxAction
 function labelOf(models: readonly WebModel[], value: string): string {
   return models.find((m) => m.value === value)?.label ?? value;
 }
+
+// ---- A running session's reply box ----
+
+/**
+ * What a board-native (A) built-in does when typed into a running session: Claude runs it, so the menu says what Claude
+ * does. The others (`/help`, `/resume`) and the launch flags (B) are the board's, and the reply box leaves them out.
+ */
+const IN_SESSION: Readonly<Record<string, string>> = {
+  model: "Set this session's model",
+  effort: "Set this session's effort level",
+  clear: "Clear this session's conversation and start fresh",
+};
+
+const runsInSession = (c: SlashCommand) => c.category !== 'E' && c.category !== 'B' && (c.category !== 'A' || c.name in IN_SESSION);
+
+/**
+ * The `/` menu rows for a running session's reply box, for the text before the caret: what Claude runs in a session
+ * (C, D, skills and prompts, and `/model`, `/effort`, `/clear`), not what is blocked (E) or only the board does. Its rows
+ * have no category or badge (all of them go to the session), and a command that needs no argument runs when picked.
+ */
+export function replyMenu(before: string, commands: readonly WebCommand[], limit = 50): { start: number; rows: CommandRow[] } | undefined {
+  const at = slashTrigger(before, UNSTACKABLE);
+  if (!at) return undefined;
+  const offered = menuCommands(commands as readonly SlashCommand[], at.stacked)
+    .filter(runsInSession)
+    .map((c) => (c.category === 'A' ? { ...c, category: 'C' as const, description: IN_SESSION[c.name] } : c));
+  return {
+    start: at.start,
+    rows: filterCommands(offered, at.query, limit).map((m) => {
+      const { category: _category, badge: _badge, ...row } = commandRow(m);
+      return row;
+    }),
+  };
+}
+
+/** What Send does with a running session's reply: type it in (a command spelled as Claude knows it), or say why not. */
+export type ReplyAction = { kind: 'send'; text: string } | { kind: 'notice'; text: string };
+
+/** A blocked (E) command says why and is not sent; anything else goes to the session as typed, which runs it there. */
+export function replyAction(text: string, commands: readonly WebCommand[]): ReplyAction {
+  const sub = classifySubmission(text, BUILTINS, commands);
+  if (sub.kind === 'E') return { kind: 'notice', text: `${typedCommand(sub)} does not run from Web Access. ${webReason(sub.builtin?.reason)}` };
+  return { kind: 'send', text: spelledText(text, sub) };
+}

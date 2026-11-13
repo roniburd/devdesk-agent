@@ -1,21 +1,29 @@
-// The experimental terminal view (`devdesk.web.sessionView: terminal-experimental`): the session's live tmux pane in
-// xterm.js. Output comes on `api/sessions/<id>/term` (an event stream of base64 bytes, opened at this page's size);
-// what is typed goes to …/term/input and size changes to …/term/resize. A key bar gives the keys a phone keyboard
-// lacks. The stream closes when the page is hidden, so the session's window goes back to the desktop's size.
+// The experimental terminal (`devdesk.web.sessionView: terminal-experimental`), the session view's Terminal tab: the
+// session's live tmux pane in xterm.js. Output comes on `api/sessions/<id>/term` (an event stream of base64 bytes,
+// opened at this page's size); what is typed goes to …/term/input and size changes to …/term/resize. A key bar gives
+// the keys a phone keyboard lacks. The stream is open only while the tab shows and the page is visible, so the
+// session's window goes back to the desktop's size otherwise.
 import type { FitAddon } from '@xterm/addon-fit';
 import type { Terminal } from '@xterm/xterm';
 import type { OkResponse, TermInputRequest, TermResizeRequest } from '../../core/web/types';
 import { api } from './api';
 import { h } from './dom';
 
-export interface TermViewDeps {
-  /** The session's title now, and its state element (kept up to date by the caller). */
-  title: HTMLElement;
-  state: HTMLElement;
-  /** The settings gear. */
-  gear: HTMLElement;
+export interface TermPanelDeps {
   /** A 404: follow the card if its id changed; true when it navigated away. */
   follow(): boolean;
+}
+
+export interface TermPanel {
+  /** The terminal, for the tab's panel. */
+  panel: HTMLElement;
+  /** The key bar, for the dock while the tab shows. */
+  keys: HTMLElement;
+  /** The tab shows: load xterm.js the first time, connect, focus. */
+  show(): void;
+  /** The tab is left: close the stream, which gives the window back to the desktop. */
+  hide(): void;
+  dispose(): void;
 }
 
 const RESIZE_DEBOUNCE_MS = 120;
@@ -111,8 +119,10 @@ export function withCtrl(d: string): string {
   return d;
 }
 
-export function termView(id: string, deps: TermViewDeps): { el: HTMLElement; dispose(): void } {
+export function termPanel(id: string, deps: TermPanelDeps): TermPanel {
   let disposed = false;
+  let shown = false;
+  let started = false;
   let term: Terminal | undefined;
   let fit: FitAddon | undefined;
   let es: EventSource | undefined;
@@ -148,19 +158,7 @@ export function termView(id: string, deps: TermViewDeps): { el: HTMLElement; dis
     }),
   );
 
-  const el = h(
-    'div',
-    { class: 'view view-session view-term' },
-    h(
-      'header',
-      { class: 'bar' },
-      h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }),
-      h('div', { class: 'titles' }, deps.title, deps.state),
-      deps.gear,
-    ),
-    h('div', { class: 'content term-panel' }, host, status),
-    h('footer', { class: 'dock term-dock' }, keyBar),
-  );
+  const panel = h('section', { class: 'panel term-panel', attrs: { role: 'tabpanel' } }, host, status);
 
   function say(message: string | undefined, offerReconnect = false, error = false): void {
     notice.textContent = message ?? '';
@@ -227,7 +225,7 @@ export function termView(id: string, deps: TermViewDeps): { el: HTMLElement; dis
   }
 
   function connect(): void {
-    if (disposed || !term || !fit) return;
+    if (disposed || !shown || !term || !fit) return;
     closeStream();
     say('Connecting…');
     fit.fit();
@@ -274,6 +272,7 @@ export function termView(id: string, deps: TermViewDeps): { el: HTMLElement; dis
   }
 
   const onVisibility = () => {
+    if (!shown) return;
     if (document.visibilityState === 'hidden') {
       // Hidden (phone locked, another app): give the window back to the desktop.
       closeStream();
@@ -281,57 +280,76 @@ export function termView(id: string, deps: TermViewDeps): { el: HTMLElement; dis
     } else if (!es) connect();
   };
 
-  void loadAssets().then(
-    () => {
-      if (disposed) return;
-      const x = window.DevdeskXterm;
-      if (!x) return say('Could not start the terminal.', false, true);
-      const css = getComputedStyle(document.documentElement);
-      const v = (n: string) => css.getPropertyValue(n).trim() || undefined;
-      term = new x.Terminal({
-        fontFamily: v('--mono'),
-        fontSize: 13,
-        cursorBlink: true,
-        scrollback: 2000,
-        theme: {
-          background: v('--screen-bg'),
-          foreground: v('--screen-fg'),
-          black: v('--ansi-0'),
-          red: v('--ansi-1'),
-          green: v('--ansi-2'),
-          yellow: v('--ansi-3'),
-          blue: v('--ansi-4'),
-          magenta: v('--ansi-5'),
-          cyan: v('--ansi-6'),
-          white: v('--ansi-7'),
-          brightBlack: v('--ansi-8'),
-          brightRed: v('--ansi-9'),
-          brightGreen: v('--ansi-10'),
-          brightYellow: v('--ansi-11'),
-          brightBlue: v('--ansi-12'),
-          brightMagenta: v('--ansi-13'),
-          brightCyan: v('--ansi-14'),
-          brightWhite: v('--ansi-15'),
-        },
-      });
-      fit = new x.FitAddon();
-      term.loadAddon(fit);
-      styles = mirrorStyles(host);
-      term.open(host);
-      term.onData(type);
-      resizeObserver?.observe(host);
-      window.visualViewport?.addEventListener('resize', onResize);
-      document.addEventListener('visibilitychange', onVisibility);
-      connect();
-      term.focus();
-    },
-    (err: Error) => {
+  function start(): void {
+    started = true;
+    say('Loading the terminal…');
+    void loadAssets().then(create, (err: Error) => {
+      started = false;
       if (!disposed) say(err.message, false, true);
-    },
-  );
+    });
+  }
+
+  function create(): void {
+    if (disposed) return;
+    const x = window.DevdeskXterm;
+    if (!x) return say('Could not start the terminal.', false, true);
+    const css = getComputedStyle(document.documentElement);
+    const v = (n: string) => css.getPropertyValue(n).trim() || undefined;
+    term = new x.Terminal({
+      fontFamily: v('--mono'),
+      fontSize: 13,
+      cursorBlink: true,
+      scrollback: 2000,
+      theme: {
+        background: v('--screen-bg'),
+        foreground: v('--screen-fg'),
+        black: v('--ansi-0'),
+        red: v('--ansi-1'),
+        green: v('--ansi-2'),
+        yellow: v('--ansi-3'),
+        blue: v('--ansi-4'),
+        magenta: v('--ansi-5'),
+        cyan: v('--ansi-6'),
+        white: v('--ansi-7'),
+        brightBlack: v('--ansi-8'),
+        brightRed: v('--ansi-9'),
+        brightGreen: v('--ansi-10'),
+        brightYellow: v('--ansi-11'),
+        brightBlue: v('--ansi-12'),
+        brightMagenta: v('--ansi-13'),
+        brightCyan: v('--ansi-14'),
+        brightWhite: v('--ansi-15'),
+      },
+    });
+    fit = new x.FitAddon();
+    term.loadAddon(fit);
+    styles = mirrorStyles(host);
+    term.open(host);
+    term.onData(type);
+    resizeObserver?.observe(host);
+    window.visualViewport?.addEventListener('resize', onResize);
+    document.addEventListener('visibilitychange', onVisibility);
+    connect();
+    if (shown) term.focus();
+  }
 
   return {
-    el,
+    panel,
+    keys: keyBar,
+    show: () => {
+      if (disposed || shown) return;
+      shown = true;
+      if (!started) return start();
+      if (!term) return;
+      if (!es) connect();
+      term.focus();
+    },
+    hide: () => {
+      if (!shown) return;
+      shown = false;
+      closeStream();
+      say(undefined);
+    },
     dispose: () => {
       disposed = true;
       window.clearTimeout(resizeTimer);

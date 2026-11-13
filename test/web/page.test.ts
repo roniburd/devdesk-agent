@@ -588,6 +588,60 @@ describe('prompt box tools', () => {
     expect(p.visible(p.$('.slash-menu'))).toBe(false);
   });
 
+  describe("a session's reply box", () => {
+    const inSession = (m: string, url: string) => {
+      if (m === 'GET' && url === 'api/sessions/s1') return { status: 200, body: detail(card(), { dir: '/ws/main' }) };
+      if (m === 'POST' && url === 'api/sessions/s1/send') return { status: 200, body: { ok: true } };
+      return answers(m, url);
+    };
+    const reply = (p: Page) => p.$('textarea.reply-text') as HTMLTextAreaElement;
+    const typeReply = (p: Page, text: string) => {
+      const r = reply(p);
+      r.focus();
+      r.value = text;
+      r.setSelectionRange(text.length, text.length);
+      r.dispatchEvent(new p.win.Event('input', { bubbles: true }));
+    };
+    const sent = (p: Page) => p.calls.filter((c) => c.url === 'api/sessions/s1/send').map((c) => (c.body as { text: string }).text);
+
+    it('offers what runs in a session, from its folder, with no pills', async () => {
+      const p = await page(inSession, '#/s/s1');
+      await p.settle();
+      expect(p.calls.some((c) => c.url === 'api/composer?dir=%2Fws%2Fmain')).toBe(true);
+      typeReply(p, '/');
+      expect(p.visible(p.$('#reply-slash-menu'))).toBe(true);
+      const names = p.$$('#reply-slash-menu .slash-name').map((e) => e.textContent);
+      expect(names).toEqual(expect.arrayContaining(['/compact', '/model', '/clear', '/superpowers:brainstorming']));
+      expect(names).not.toContain('/plan');
+      expect(p.$$('#reply-slash-menu .slash-badge')).toHaveLength(0);
+      expect(p.$('.reply .pill-pick')).toBeNull();
+      expect(p.$('.reply button.slash-button')).not.toBeNull();
+    });
+
+    it('runs a picked command that needs nothing more, and puts one that takes text in the box', async () => {
+      const p = await page(inSession, '#/s/s1');
+      await p.settle();
+      typeReply(p, '/comp');
+      reply(p).dispatchEvent(new p.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await p.settle();
+      expect(sent(p).map((t) => t.trim())).toEqual(['/compact']);
+      typeReply(p, '/brain');
+      reply(p).dispatchEvent(new p.win.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+      expect(reply(p).value).toBe('/superpowers:brainstorming ');
+      expect(sent(p)).toHaveLength(1);
+    });
+
+    it('says why a blocked command is not sent', async () => {
+      const p = await page(inSession, '#/s/s1');
+      await p.settle();
+      typeReply(p, '/exit');
+      (p.$('button.send') as HTMLButtonElement).click();
+      await p.settle();
+      expect(sent(p)).toEqual([]);
+      expect(p.$('.dock .notice')!.textContent).toContain('/exit does not run from Web Access');
+    });
+  });
+
   it('the / button opens the menu (for a phone keyboard)', async () => {
     const p = await page(answers);
     (p.$('button.slash-button') as HTMLButtonElement).click();
@@ -688,19 +742,31 @@ describe('settings and the experimental terminal', () => {
     expect(p.$('.view-settings')).toBeNull();
   });
 
-  it("opens a session as the terminal when the daemon's default says so, and types into it", async () => {
+  it("shows the Terminal tab instead of Screen when the daemon's default says so, connected only while it shows", async () => {
     const writes: string[] = [];
     let onData: ((d: string) => void) | undefined;
     const p = await page(
       (m, url) => {
         if (url === 'api/settings') return { status: 200, body: { sessionView: 'terminal-experimental' } };
+        if (m === 'GET' && url === 'api/sessions/s1') return { status: 200, body: detail(card()) };
         if (m === 'POST' && url === 'api/sessions/s1/term/input') return { status: 200, body: { ok: true } };
         return undefined;
       },
       '#/s/s1',
     );
     await p.settle();
-    expect(p.$('.view-term')).not.toBeNull();
+    // The transcript and its reply box stay; the second tab is the terminal, not loaded until it is opened.
+    expect(p.$$('.tab').map((t) => t.textContent)).toEqual(['Transcript', 'Terminal']);
+    expect(p.visible(p.$('.panel.transcript'))).toBe(true);
+    expect(p.visible(p.$('textarea.reply-text'))).toBe(true);
+    expect(p.$('.panel.screen')).toBeNull();
+    expect(p.$('script[src="term.js"]')).toBeNull();
+    expect(p.visible(p.$('.term-keys'))).toBe(false);
+    p.$$('.tab')[1].click();
+    await p.settle();
+    expect(p.visible(p.$('.term-panel'))).toBe(true);
+    expect(p.visible(p.$('.term-keys'))).toBe(true);
+    expect(p.visible(p.$('textarea.reply-text'))).toBe(false);
     const script = p.$('script[src="term.js"]')!;
     expect(script).not.toBeNull();
     expect(p.$('link[href="term.css"]')).not.toBeNull();
@@ -742,6 +808,63 @@ describe('settings and the experimental terminal', () => {
     await p.settle();
     expect(p.$('.term-notice')!.textContent).toBe('The session ended.');
     expect(term.readyState).toBe(2);
+  });
+
+  it('closes the terminal when the Transcript tab is picked, and opens it again on the Terminal tab', async () => {
+    const p = await page(
+      (m, url) => {
+        if (url === 'api/settings') return { status: 200, body: { sessionView: 'terminal-experimental' } };
+        if (m === 'GET' && url === 'api/sessions/s1') return { status: 200, body: detail(card()) };
+        return undefined;
+      },
+      '#/s/s1',
+    );
+    await p.settle();
+    p.$$('.tab')[1].click();
+    await p.settle();
+    class FakeTerminal {
+      cols = 50;
+      rows = 20;
+      loadAddon() {}
+      open() {}
+      focus() {}
+      dispose() {}
+      write() {}
+      onData() {}
+    }
+    class FakeFit {
+      fit() {}
+    }
+    (p.win as unknown as { DevdeskXterm: unknown }).DevdeskXterm = { Terminal: FakeTerminal, FitAddon: FakeFit };
+    p.$('script[src="term.js"]')!.dispatchEvent(new p.win.Event('load'));
+    await p.settle();
+    const terms = () => p.streams.filter((s) => s.url.startsWith('api/sessions/s1/term'));
+    expect(terms()).toHaveLength(1);
+    p.$$('.tab')[0].click();
+    await p.settle();
+    expect(terms()[0].readyState).toBe(2);
+    expect(p.visible(p.$('textarea.reply-text'))).toBe(true);
+    expect(p.visible(p.$('.term-keys'))).toBe(false);
+    p.$$('.tab')[1].click();
+    await p.settle();
+    expect(terms()).toHaveLength(2);
+    expect(terms()[1].readyState).toBe(0);
+  });
+
+  it('does not open the Terminal tab for a dialog: the dialog keys show under the transcript', async () => {
+    const dialog = detail(card({ state: 'waiting' }), { prompt: { empty: false, dialog: true, working: false, inMode: false, exited: false } });
+    const p = await page(
+      (m, url) => {
+        if (url === 'api/settings') return { status: 200, body: { sessionView: 'terminal-experimental' } };
+        if (m === 'GET' && url === 'api/sessions/s1') return { status: 200, body: dialog };
+        return undefined;
+      },
+      '#/s/s1',
+    );
+    await p.settle();
+    expect(p.$('.tab[aria-selected="true"]')!.textContent).toBe('Transcript');
+    expect(p.visible(p.$('.keys'))).toBe(true);
+    expect(p.$('script[src="term.js"]')).toBeNull();
   });
 });
 

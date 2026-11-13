@@ -1,5 +1,6 @@
 // The prompt box's tools: the `/` menu under the text and the mode, model and effort pills, as the Claude Board's box
-// has them. What the menu lists and what a pick does come from core/web/promptBox.ts; this file is only the DOM.
+// has them; a running session's reply box has the `/` menu only. What the menu lists and what a pick does come from
+// core/web/promptBox.ts; this file is only the DOM.
 import type { CommandRow } from '../../core/commandMenu';
 import { DEFAULT_CHOICE } from '../../core/composer';
 import { type BoxChoice, slashMenu } from '../../core/web/promptBox';
@@ -30,11 +31,23 @@ export interface PromptTools {
   close(): void;
 }
 
-/**
- * `prompt`'s tools. `run(text)` submits a command picked from the menu that runs at once (`/clear`, `/help`, a blocked
- * one, which only says why).
- */
-export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; changed(): void }): PromptTools {
+export interface PromptToolsOptions {
+  /** Submits a command picked from the menu that runs at once (`/clear`, `/help`, a blocked one, which only says why). */
+  run(): void;
+  changed(): void;
+  /** The menu's rows for the text before the caret (default: the new-session box's, `slashMenu`). */
+  rows?(before: string, commands: ComposerResponse['commands']): { start: number; rows: CommandRow[] } | undefined;
+  /** Show the mode, model and effort pills (default true; a reply box has none). */
+  pills?: boolean;
+  /** Prefix of the menu's element ids, unique on the page (default `slash`). */
+  id?: string;
+}
+
+/** `prompt`'s tools. */
+export function promptTools(prompt: HTMLTextAreaElement, o: PromptToolsOptions): PromptTools {
+  const pills = o.pills ?? true;
+  const rowsFor = o.rows ?? slashMenu;
+  const id = o.id ?? 'slash';
   let info: ComposerResponse | undefined;
   let rows: CommandRow[] = [];
   let start = 0;
@@ -43,9 +56,9 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
   const kept = readKept();
   const choice: BoxChoice = { mode: kept.mode ?? '', model: kept.model ?? DEFAULT_CHOICE, effort: kept.effort ?? DEFAULT_CHOICE };
 
-  const menu = h('div', { class: 'slash-menu', attrs: { role: 'listbox', id: 'slash-menu', 'aria-label': 'Commands' } });
+  const menu = h('div', { class: 'slash-menu', attrs: { role: 'listbox', id: `${id}-menu`, 'aria-label': 'Commands' } });
   menu.hidden = true;
-  prompt.setAttribute('aria-controls', 'slash-menu');
+  prompt.setAttribute('aria-controls', `${id}-menu`);
   prompt.setAttribute('aria-autocomplete', 'list');
 
   const pill = (label: string, title: string) => {
@@ -70,7 +83,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
       click: () => openSlash(),
     },
   });
-  const bar = h('div', { class: 'composer-tools' }, slash, mode.wrap, model.wrap, effort.wrap);
+  const bar = pills ? h('div', { class: 'composer-tools' }, slash, mode.wrap, model.wrap, effort.wrap) : h('div', { class: 'composer-tools' }, slash);
 
   mode.select.addEventListener('change', () => set({ mode: mode.select.value }));
   model.select.addEventListener('change', () => set({ model: model.select.value }));
@@ -96,7 +109,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
   }
 
   function render(): void {
-    if (!info) return;
+    if (!info || !pills) return;
     // A pill says what it is only on Claude's default ("Model"); a choice speaks for itself.
     fill(mode.select, info.modes.map((m) => ({ value: m.name, label: m.name === DEFAULT_CHOICE ? 'Mode' : m.name, title: m.description })), choice.mode);
     const models = info.models.some((m) => m.value === choice.model) ? info.models : [...info.models, { value: choice.model, label: choice.model, description: '', efforts: [] }];
@@ -138,7 +151,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
     if (!info) return close();
     const at = prompt.selectionStart ?? prompt.value.length;
     if (prompt.selectionEnd !== at) return close();
-    const found = slashMenu(prompt.value.slice(0, at), info.commands);
+    const found = rowsFor(prompt.value.slice(0, at), info.commands);
     if (!found || !found.rows.length) return close();
     const same = open && found.start === start && found.rows.length === rows.length && found.rows.every((r, i) => r.label === rows[i].label);
     rows = found.rows;
@@ -153,7 +166,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
           'div',
           {
             class: i === active ? 'slash-row active' : 'slash-row',
-            attrs: { role: 'option', id: `slash-${i}`, 'aria-selected': String(i === active) },
+            attrs: { role: 'option', id: `${id}-${i}`, 'aria-selected': String(i === active) },
             on: {
               mousedown: (e) => e.preventDefault(),
               click: () => pick(i),
@@ -164,7 +177,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
         ),
       ),
     );
-    prompt.setAttribute('aria-activedescendant', `slash-${active}`);
+    prompt.setAttribute('aria-activedescendant', `${id}-${active}`);
     menu.children[active]?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -187,7 +200,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
       el.classList.toggle('active', i === active);
       el.setAttribute('aria-selected', String(i === active));
     }
-    prompt.setAttribute('aria-activedescendant', `slash-${active}`);
+    prompt.setAttribute('aria-activedescendant', `${id}-${active}`);
     menu.children[active]?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -213,7 +226,7 @@ export function promptTools(prompt: HTMLTextAreaElement, o: { run(): void; chang
     },
     choice: () => ({ ...choice }),
     set,
-    custom: () => !!info && (choice.mode !== info.defaultMode || choice.model !== DEFAULT_CHOICE || choice.effort !== DEFAULT_CHOICE),
+    custom: () => pills && !!info && (choice.mode !== info.defaultMode || choice.model !== DEFAULT_CHOICE || choice.effort !== DEFAULT_CHOICE),
     key,
     update,
     close,
