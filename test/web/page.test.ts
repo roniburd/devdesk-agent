@@ -290,16 +290,33 @@ describe('session', () => {
     expect(p.visible(p.$('textarea.reply-text'))).toBe(true);
   });
 
+  it('shows a spinner at the end of the transcript while working, after the last turn', async () => {
+    const c = card({ state: 'working', look: 'working', label: 'WORKING', tone: 'blue', spin: true, group: 'working' });
+    const p = await page(answering(detail(c, { prompt: { empty: true, dialog: false, working: true, inMode: false, exited: false } })), '#/s/s1');
+    const working = p.$('.panel.transcript .working')!;
+    expect(p.visible(working)).toBe(true);
+    expect(working.querySelector('.glyph.spin')).not.toBeNull();
+    expect(working.textContent).toBe('Working…');
+    expect(working.previousElementSibling?.matches('ol.turns')).toBe(true);
+  });
+
+  it('hides the transcript spinner when the session is not working', async () => {
+    const p = await page(answering(detail(card({ state: 'done' }))), '#/s/s1');
+    expect(p.visible(p.$('.panel.transcript .working'))).toBe(false);
+  });
+
   it('hides Esc (interrupt) when the hooks say the session is done, even if the screen still shows a spinner', async () => {
     const c = card({ state: 'done' });
     const p = await page(answering(detail(c, { prompt: { empty: true, dialog: false, working: true, inMode: false, exited: false } })), '#/s/s1');
     expect(p.visible(p.$('.reply button[data-key="Escape"]'))).toBe(false);
+    expect(p.visible(p.$('.panel.transcript .working'))).toBe(false);
   });
 
   it('uses the screen for Esc (interrupt) when the session has no hooks', async () => {
     const c = card({ state: 'unknown' });
     const p = await page(answering(detail(c, { prompt: { empty: true, dialog: false, working: true, inMode: false, exited: false } })), '#/s/s1');
     expect(p.visible(p.$('.reply button[data-key="Escape"]'))).toBe(true);
+    expect(p.visible(p.$('.panel.transcript .working'))).toBe(true);
   });
 
   it('keeps the typed text and shows the message on a 409', async () => {

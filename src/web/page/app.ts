@@ -302,9 +302,12 @@ function sessionView(id: string): View {
     screen: h('button', { class: 'tab', text: 'Screen', attrs: { type: 'button', role: 'tab' }, on: { click: () => pick('screen') } }),
   };
   const turns = h('ol', { class: 'turns' });
+  // Under the last turn while Claude works, so a quiet transcript still shows the session is busy.
+  const working = h('div', { class: 'working', attrs: { role: 'status' } }, h('span', { class: 'glyph spin', attrs: { 'aria-hidden': 'true' } }), 'Working…');
+  working.hidden = true;
   const screen = h('div', { class: 'term', attrs: { role: 'img', 'aria-label': 'Terminal screen' } });
   const panels = {
-    transcript: h('section', { class: 'panel transcript', attrs: { role: 'tabpanel' } }, turns),
+    transcript: h('section', { class: 'panel transcript', attrs: { role: 'tabpanel' } }, turns, working),
     screen: h('section', { class: 'panel screen', attrs: { role: 'tabpanel' } }, screen),
   };
   const notice = h('p', { class: 'notice', attrs: { 'aria-live': 'polite' }, text: '' });
@@ -406,11 +409,14 @@ function sessionView(id: string): View {
 
   function showDetail(d: SessionDetail): void {
     showCard(d.card);
+    // The hooks know when a turn ends; the spinner on screen is only a fallback for sessions without hooks.
+    const isWorking = d.card.state === 'working' || (d.card.state === 'unknown' && d.prompt.working);
     const tk = JSON.stringify(d.turns);
-    if (tk !== turnsKey) {
+    if (tk !== turnsKey || working.hidden === isWorking) {
       const stick = turnsKey === '' || nearEnd(panels.transcript);
+      if (tk !== turnsKey) turns.replaceChildren(...(d.turns.length ? turnEls(d.turns) : [h('li', { class: 'turn turn-none', text: 'Nothing said yet.' })]));
       turnsKey = tk;
-      turns.replaceChildren(...(d.turns.length ? turnEls(d.turns) : [h('li', { class: 'turn turn-none', text: 'Nothing said yet.' })]));
+      working.hidden = !isWorking;
       if (stick) scrollToEnd(panels.transcript);
     }
     const sk = JSON.stringify(d.screen);
@@ -426,8 +432,7 @@ function sessionView(id: string): View {
     dialog = open;
     reply.hidden = open;
     keys.hidden = !open;
-    // The hooks know when a turn ends; the spinner on screen is only a fallback for sessions without hooks.
-    interrupt.hidden = !(d.card.state === 'working' || (d.card.state === 'unknown' && d.prompt.working));
+    interrupt.hidden = !isWorking;
     text.disabled = !d.card.canSend;
     sendButton.disabled = busy || !d.card.canSend;
     if (!d.card.canSend) say('This session has no terminal to type into.', false);

@@ -336,6 +336,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .turn-tool summary { cursor: pointer; padding: 4px 0; list-style-position: inside; }
 .tool-calls { margin: 2px 0 4px; padding-left: 14px; border-left: 2px solid var(--line); list-style: none; font: 0.75rem/1.45 var(--mono); }
 .turn-none { display: block; color: var(--muted); }
+/* Under the last turn while Claude works: the ring where a turn's mark sits, then a quiet "Working…". */
+.working { display: flex; align-items: center; gap: 6px; padding: 0 var(--pad) 16px; color: var(--muted); font-size: 0.875rem; --tone: var(--orange); }
+.working[hidden] { display: none; }
+.working .glyph.spin { width: 12px; height: 12px; margin: 0 calc((1.25em - 12px) / 2); flex: none; }
 
 /* A reply's Markdown. Headings stay small: they title a part of one reply, not the page. */
 .turn-body > :first-child { margin-top: 0; }
