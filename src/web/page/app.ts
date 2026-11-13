@@ -13,6 +13,7 @@ import type {
   NewSessionRequest,
   NewSessionResponse,
   OkResponse,
+  ResumeResponse,
   SendRequest,
   SessionDetail,
   SessionView,
@@ -178,6 +179,7 @@ const GROUPS: ReadonlyArray<{ group: WebGroup; title: string }> = [
   { group: 'needs', title: 'Needs you' },
   { group: 'working', title: 'Working' },
   { group: 'rest', title: 'Other' },
+  { group: 'parked', title: 'Not running' },
 ];
 
 const LINK_TEXT: Record<Link, string> = { connecting: 'Connecting', live: 'Live', polling: 'Reconnecting' };
@@ -895,6 +897,49 @@ function composer(): View & { focus(): void } {
 let list: ListView | undefined;
 let detail: View | undefined;
 let listScroll = 0;
+/**
+ * A parked session opened: resumes it (`claude --resume`, as opening one in VS Code does), then shows it as the open
+ * view (`open`) does a running one. A resume that fails says why, with the way back.
+ */
+function resumingView(card: WebCard, open: (id: string) => View): View {
+  let disposed = false;
+  let inner: View | undefined;
+  const status = h('p', { class: 'notice', attrs: { role: 'status', 'aria-live': 'polite' }, text: 'Resuming this Claude session…' });
+  const page = h(
+    'div',
+    { class: 'view view-session view-resuming' },
+    h(
+      'header',
+      { class: 'bar' },
+      h('a', { class: 'back', text: 'Sessions', attrs: { href: '#/', 'aria-label': 'Back to sessions' } }),
+      h('div', { class: 'titles' }, h('h1', { class: 'heading title', text: card.title })),
+      gear(),
+    ),
+    h('div', { class: 'content' }, status),
+  );
+  const el = h('div', { class: 'view-host' }, page);
+  void api<ResumeResponse>('POST', `api/sessions/${encodeURIComponent(card.id)}/resume`, {}).then((r) => {
+    if (disposed) return;
+    if (!r.data) {
+      status.className = 'notice error';
+      status.textContent = r.error ?? 'DevDesk could not resume this session.';
+      return;
+    }
+    // The feed may still list it as parked: drop that, so the list and this view see it running.
+    if (feed.cards) feed.cards = feed.cards.map((c) => (c.id === card.id ? { ...c, resumable: undefined, group: 'working' } : c));
+    if (r.data.id !== card.id) return location.replace(sessionHref(r.data.id));
+    inner = open(r.data.id);
+    el.replaceChildren(inner.el);
+  });
+  return {
+    el,
+    dispose: () => {
+      disposed = true;
+      inner?.dispose();
+    },
+  };
+}
+
 const shell = { el: h('div', { class: 'shell' }), list: h('div', { class: 'pane pane-list' }), detail: h('div', { class: 'pane pane-detail' }) };
 shell.el.append(shell.list, shell.detail);
 
@@ -926,7 +971,8 @@ function route(): void {
   const wasSession = shell.el.classList.contains('has-session');
   if (open && !wasSession) listScroll = window.scrollY ?? 0;
   detail?.dispose();
-  detail = id ? sessionView(id) : settings ? settingsView() : placeholder();
+  const parked = id ? feed.cards?.find((c) => c.id === id && c.resumable) : undefined;
+  detail = parked ? resumingView(parked, sessionView) : id ? sessionView(id) : settings ? settingsView() : placeholder();
   shell.detail.replaceChildren(detail.el);
   shell.el.classList.toggle('has-session', open);
   list!.select(id);

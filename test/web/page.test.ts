@@ -402,6 +402,53 @@ describe('session', () => {
   });
 });
 
+describe('parked sessions', () => {
+  const parked = card({ id: 'p1', title: 'Old task', state: 'parked', look: 'parked' as WebCard['look'], label: 'PARKED', group: 'parked', canSend: false, resumable: true, pane: undefined });
+
+  it('lists them last, under Not running', async () => {
+    const p = await page(() => undefined);
+    p.streams[0].emit('cards', cardsAnswer([parked, card({ id: 'a', group: 'rest' })]));
+    await p.settle();
+    expect(p.$$('section.group').map((s) => [s.dataset.group, s.querySelector('.group-title')!.firstChild!.textContent])).toEqual([
+      ['rest', 'Other'],
+      ['parked', 'Not running'],
+    ]);
+  });
+
+  it('opening one resumes it, then shows it running', async () => {
+    let resumed = 0;
+    const running = card({ id: 'p1', title: 'Old task' });
+    const p = await page((m, url) => {
+      if (m === 'POST' && url === 'api/sessions/p1/resume') {
+        resumed++;
+        return { status: 201, body: { id: 'p1' } };
+      }
+      if (m === 'GET' && url === 'api/sessions/p1') return { status: 200, body: detail(running) };
+      return undefined;
+    });
+    p.streams[0].emit('cards', cardsAnswer([parked]));
+    await p.settle();
+    p.win.location.hash = '#/s/p1';
+    await p.settle();
+    expect(resumed).toBe(1);
+    expect(p.calls.find((c) => c.url === 'api/sessions/p1/resume')).toMatchObject({ method: 'POST', body: {} });
+    expect(p.$$('.turn')).toHaveLength(3);
+    expect(p.visible(p.$('form.reply'))).toBe(true);
+  });
+
+  it('says why when the resume fails, and offers the way back', async () => {
+    const p = await page((m, url) =>
+      m === 'POST' && url === 'api/sessions/p1/resume' ? { status: 409, body: { error: 'Its folder is gone.', code: 'blocked' } } : undefined,
+    );
+    p.streams[0].emit('cards', cardsAnswer([parked]));
+    await p.settle();
+    p.win.location.hash = '#/s/p1';
+    await p.settle();
+    expect(p.$('.view-resuming .notice.error')!.textContent).toBe('Its folder is gone.');
+    expect(p.$('.view-resuming a.back')).not.toBeNull();
+  });
+});
+
 describe('new session', () => {
   const folders: FoldersResponse = {
     folders: [

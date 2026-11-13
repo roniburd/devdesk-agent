@@ -16,9 +16,11 @@ export type Route =
   | { kind: 'detail'; id: string }
   | { kind: 'send'; id: string }
   | { kind: 'key'; id: string }
+  | { kind: 'resume'; id: string }
   | { kind: 'start' };
 
-export const isMutating = (r: Route) => r.kind === 'send' || r.kind === 'key' || r.kind === 'start' || r.kind === 'term-input' || r.kind === 'term-resize';
+export const isMutating = (r: Route) =>
+  r.kind === 'send' || r.kind === 'key' || r.kind === 'resume' || r.kind === 'start' || r.kind === 'term-input' || r.kind === 'term-resize';
 
 /** Request bodies over this many bytes get 413 before parsing. */
 export const MAX_BODY_BYTES = 131072;
@@ -51,7 +53,7 @@ export function parseRoute(method: string, path: string): Route | { status: 404 
   const p = path.split('?')[0];
   const by = (routes: { GET?: Route; POST?: Route }) => (method === 'GET' || method === 'POST' ? routes[method] : undefined) ?? { status: 405 as const };
   if (Object.hasOwn(FIXED, p)) return by(FIXED[p]);
-  const m = /^\/api\/sessions\/([^/]+)(?:\/(send|key|term|term\/input|term\/resize))?$/.exec(p);
+  const m = /^\/api\/sessions\/([^/]+)(?:\/(send|key|resume|term|term\/input|term\/resize))?$/.exec(p);
   if (!m) return { status: 404 };
   const id = decode(m[1]);
   if (!id || id === '.' || id === '..' || id.includes('/')) return { status: 404 };
@@ -59,6 +61,7 @@ export function parseRoute(method: string, path: string): Route | { status: 404 
   if (m[2] === 'term') return by({ GET: { kind: 'term', id } });
   if (m[2] === 'term/input') return by({ POST: { kind: 'term-input', id } });
   if (m[2] === 'term/resize') return by({ POST: { kind: 'term-resize', id } });
+  if (m[2] === 'resume') return by({ POST: { kind: 'resume', id } });
   return by({ POST: m[2] === 'send' ? { kind: 'send', id } : { kind: 'key', id } });
 }
 

@@ -117,6 +117,23 @@ describe('SessionSnapshot', () => {
     expect(cards).toEqual([]);
   });
 
+  it('lists parked sessions, the newest finishedSessions per worktree, and not on other tmux servers', async () => {
+    const ended = join(stateDir, 'ended');
+    await mkdir(ended, { recursive: true });
+    const park = (id: string, endedAt: number, over: Partial<HookRecord> = {}) =>
+      writeFile(join(ended, `${id}.json`), JSON.stringify({ ...record(id, { state: 'done', ...over }), endedAt, endReason: 'parked' }));
+    await park('p1', NOW - 3000);
+    await park('p2', NOW - 2000);
+    await park('p3', NOW - 1000);
+    await park('far', NOW, { tmuxServer: 'other' });
+    const cards = await new SessionSnapshot(config({ finishedSessions: 2 }), deps([]).deps).cards();
+    expect(cards.map((c) => [c.id, c.state])).toEqual([
+      ['p3', 'parked'],
+      ['p2', 'parked'],
+    ]);
+    expect(cards[0]).toMatchObject({ formerTmuxSession: 'cc-main', featureDir: root, cwd: root });
+  });
+
   it('leaves out sessions on other tmux servers unless it shows all', async () => {
     await writeRecord(record('s1', { tmuxServer: null }));
     const d = deps([]);

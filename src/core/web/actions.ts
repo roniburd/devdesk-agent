@@ -1,11 +1,25 @@
+import { accountEnv, accountOfTranscript } from '../accounts';
 import { readPaneScreen, typeIntoPane } from '../paneScreen';
 import { type ProgramStatus, programStatusBlocksArrow, screenWithProgramStatus } from '../programStatus';
 import type { ProcessTable } from '../processes';
-import type { SessionCard } from '../sessions';
+import { runningCopy, type SessionCard } from '../sessions';
+import type { RegistryEntry } from '../sessionInfo';
 import { claudeGone, sendBlocker } from '../sessionSend';
 import { claudeLaunchCommand, tmuxStartCommand } from '../sessionStart';
 import { promptArg } from '../shell';
-import { attachArgs, DEFAULT_PASTE_SETTLE_MS, launchTags, nextSessionName, paneTarget, sessionName, tmuxTargetGone, type TmuxRunner, typedLine } from '../tmux';
+import {
+  attachArgs,
+  DEFAULT_PASTE_SETTLE_MS,
+  isSessionId,
+  launchTags,
+  nextSessionName,
+  paneTarget,
+  resumeArgs,
+  sessionName,
+  tmuxTargetGone,
+  type TmuxRunner,
+  typedLine,
+} from '../tmux';
 import { readTail } from '../transcriptTail';
 import type { Feature } from '../worktrees';
 import { ansiToSpans } from './ansi';
@@ -14,7 +28,19 @@ import type { DaemonConfig } from './config';
 import { keyArgs } from './keys';
 import { DETAIL_MAX_TAIL_BYTES, DETAIL_TAIL_BYTES, DETAIL_TURNS, transcriptTurns } from './transcript';
 import { launchArgs, webModels } from './composer';
-import type { ErrorCode, ErrorResponse, NewSessionRequest, NewSessionResponse, OkResponse, ScreenState, SessionDetail, Turn, WebKey, WebModel } from './types';
+import type {
+  ErrorCode,
+  ErrorResponse,
+  NewSessionRequest,
+  NewSessionResponse,
+  OkResponse,
+  ResumeResponse,
+  ScreenState,
+  SessionDetail,
+  Turn,
+  WebKey,
+  WebModel,
+} from './types';
 
 /** What the web access routes do to a session: read it, type into it, press a key in it, or start a new one. */
 
@@ -152,4 +178,70 @@ export async function startSession(
     return tmuxFailed(err);
   }
   return { status: 201, body: { tmuxSession: name, server: cfg.tmux.server } };
+}
+
+/** What resuming a parked session looks at: the cards as just read, Claude's registries, and the tmux session names. */
+export interface ResumeContext {
+  cards: readonly SessionCard[];
+  registry: readonly RegistryEntry[];
+  /** tmux session names on cfg.tmux.server. */
+  existing: readonly string[];
+  features: readonly Feature[];
+  /** existsSync */
+  exists: (dir: string) => boolean;
+  /** processAlive */
+  alive: (pid: number) => boolean;
+}
+
+/**
+ * Resumes a parked session as the Claude view does when you open one (`resumeSession` in sessionsCommands.ts):
+ * `claude --resume <id>` (same session id) in the Claude account its transcript is in, in its tmux pane when Claude
+ * exited to a shell there, else in the DevDesk tmux session it had when still free, else in a new one named after its
+ * worktree. A session that runs (here, or the conversation in a DevDesk tmux session) gives its id instead; one running
+ * outside DevDesk's tmux sessions, or whose folder is gone, 409; an unknown conversation 400.
+ */
+export async function resumeSession(
+  card: SessionCard,
+  ctx: ResumeContext,
+  cfg: Pick<DaemonConfig, 'tmux' | 'claude'>,
+  d: ActionDeps,
+): Promise<ActionResult<ResumeResponse>> {
+  if (card.state !== 'parked') return { status: 200, body: { id: card.id } };
+  const id = card.sessionId;
+  const cwd = card.cwd;
+  if (!isSessionId(id) || !cwd) return fail(400, 'bad-request', 'DevDesk does not know which conversation this session had, so it cannot resume it.');
+  if (!ctx.exists(cwd)) return fail(409, 'blocked', `Cannot resume this Claude session: its folder ${cwd} is gone.`);
+  const copy = runningCopy(ctx.cards, ctx.registry, id, ctx.alive);
+  if (copy === 'elsewhere') {
+    return fail(409, 'blocked', "This Claude conversation is already running outside DevDesk's tmux sessions, so DevDesk does not resume it again.");
+  }
+  if (copy) return { status: 200, body: { id: copy.id } };
+  // Without the accounts (a config from an older extension, or a daemon started by hand), the default account's env:
+  // telling Claude's own directory apart from another account's needs the ambient one.
+  const ambient = cfg.claude.ambientConfigDir;
+  const account = ambient ? accountOfTranscript(cfg.claude.accounts ?? [], card.transcriptPath, ambient) : undefined;
+  const command = claudeLaunchCommand({ ...cfg.claude, ...(account ? { env: accountEnv(account) } : {}) }, resumeArgs(id));
+  const run = tmuxStartCommand(command, d.tmpDir);
+  if (card.tmuxSession && card.tmuxPane) {
+    try {
+      // The pane runs only the shell Claude exited to: run Claude there again, so a terminal open on it follows.
+      await d.tmux(card.tmuxServer ?? cfg.tmux.server)(['respawn-pane', '-k', '-t', card.tmuxPane, '-c', cwd, run]);
+      return { status: 201, body: { id } };
+    } catch {
+      // Gone meanwhile: a new tmux session below.
+    }
+  }
+  const server = cfg.tmux.server;
+  const former = card.formerTmuxSession;
+  const feature = ctx.features.find((f) => f.dir === card.featureDir);
+  const name =
+    former?.startsWith('cc-') && card.formerTmuxServer === server && !ctx.existing.includes(former)
+      ? former
+      : nextSessionName(feature ? sessionName(feature) : 'cc-resumed', ctx.existing);
+  try {
+    await d.tmux(server)(attachArgs(name, cwd, run, { ...cfg.tmux.env, ...launchTags(name, server) }, cfg.tmux.options, true));
+  } catch (err) {
+    return tmuxFailed(err);
+  }
+  return { status: 201, body: { id } };
 }

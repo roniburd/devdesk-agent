@@ -35,6 +35,7 @@ describe('webGroup', () => {
     expect(webGroup(card('a', { state: 'working' }), v)).toBe('working');
     expect(webGroup(card('a', { state: 'idle' }), v)).toBe('rest');
     expect(webGroup(card('a', { state: 'unknown' }), v)).toBe('rest');
+    expect(webGroup(card('a', { state: 'parked' }), v)).toBe('parked');
   });
 
   it('leaves a done session you have read in the rest, even when it asked a question', () => {

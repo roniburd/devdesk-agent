@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import type { ClaudeAccount } from '../accounts';
 import { WEB_ACCESS } from '../edition';
 import { isFiniteNumber } from '../json';
 import { type LaunchMode, parseModes } from '../modes';
@@ -204,12 +205,30 @@ export interface DaemonConfig extends WebAccessSettings {
    * absent: only the default mode) with defaultMode its name, models (boardModels(): replaces the CLI's list when not
    * empty), configDir (claudeConfigDir(): the skills and commands `/` offers).
    */
-  claude: ClaudeLaunch & { modes?: LaunchMode[]; defaultMode?: string; models?: string[]; configDir?: string };
+  claude: ClaudeLaunch & {
+    modes?: LaunchMode[];
+    defaultMode?: string;
+    models?: string[];
+    configDir?: string;
+    /** claudeAccounts() and ambientClaudeConfigDir(): a parked session resumes in the account its transcript is in. */
+    accounts?: ClaudeAccount[];
+    ambientConfigDir?: string;
+  };
+  /** sessionsFinishedSessions(): how many parked sessions the list shows per worktree, newest first (absent: 10). */
+  finishedSessions?: number;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 const optionalString = (v: unknown) => v === undefined || typeof v === 'string';
+const isAccount = (v: unknown): v is ClaudeAccount =>
+  isObject(v) &&
+  typeof v.name === 'string' &&
+  typeof v.configDir === 'string' &&
+  !!v.configDir &&
+  typeof v.ambient === 'boolean' &&
+  isObject(v.env) &&
+  Object.values(v.env).every((x) => typeof x === 'string');
 
 /** The first problem with a parsed config.json, or undefined when it has every field with the right type. */
 function configProblem(r: Record<string, unknown>): string | undefined {
@@ -280,6 +299,9 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (c.modes !== undefined && (!Array.isArray(c.modes) || parseModes(c.modes).length !== c.modes.length)) return 'claude.modes must be launch modes';
   if (!optionalString(c.defaultMode) || !optionalString(c.configDir)) return 'claude.defaultMode and configDir must be strings';
   if (c.models !== undefined && (!Array.isArray(c.models) || !c.models.every((m) => typeof m === 'string'))) return 'claude.models must be strings';
+  if (c.accounts !== undefined && (!Array.isArray(c.accounts) || !c.accounts.every(isAccount))) return 'claude.accounts must be Claude accounts';
+  if (!optionalString(c.ambientConfigDir)) return 'claude.ambientConfigDir must be a string';
+  if (r.finishedSessions !== undefined && (!isFiniteNumber(r.finishedSessions) || r.finishedSessions < 0)) return 'finishedSessions must be a number, 0 or more';
   return undefined;
 }
 
@@ -328,7 +350,10 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
       ...(claude.defaultMode !== undefined ? { defaultMode: claude.defaultMode } : {}),
       ...(claude.models !== undefined ? { models: [...(claude.models as string[])] } : {}),
       ...(claude.configDir !== undefined ? { configDir: claude.configDir } : {}),
+      ...(claude.accounts !== undefined ? { accounts: claude.accounts.map((a) => ({ name: a.name, configDir: a.configDir, ambient: a.ambient, env: { ...a.env } })) } : {}),
+      ...(claude.ambientConfigDir !== undefined ? { ambientConfigDir: claude.ambientConfigDir } : {}),
     },
+    ...(r.finishedSessions !== undefined ? { finishedSessions: r.finishedSessions } : {}),
   };
   return { config };
 }

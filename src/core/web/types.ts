@@ -7,8 +7,11 @@ import type { StateLook } from '../stateLooks';
  */
 
 export type WebTone = 'yellow' | 'orange' | 'red' | 'blue' | 'green' | 'purple' | 'dim';
-/** needs: waiting, blocked, or a finished turn that asks a question; working; rest. The list's sections, in this order. */
-export type WebGroup = 'needs' | 'working' | 'rest';
+/**
+ * needs: waiting, blocked, or a finished turn that asks a question; working; rest; parked: no longer running (opening
+ * one resumes it). The list's sections, in this order.
+ */
+export type WebGroup = 'needs' | 'working' | 'rest' | 'parked';
 
 export interface WebCard {
   /** SessionCard.id (session id, or tmux:<server>:<pane|session>); URL-encode it in paths. */
@@ -39,6 +42,8 @@ export interface WebCard {
   tmuxSession?: string;
   /** !!paneTarget(card) && !claudeGone(card) */
   canSend: boolean;
+  /** A parked session with a known conversation: opening it resumes it (POST api/sessions/<id>/resume). */
+  resumable?: true;
 }
 
 export interface CardsResponse {
@@ -185,6 +190,10 @@ export type ErrorCode = 'bad-request' | 'forbidden' | 'not-found' | 'blocked' | 
 export interface ErrorResponse {
   error: string;
   code: ErrorCode;
+}
+/** A resume that worked: the session runs again (its id stays the session id). */
+export interface ResumeResponse {
+  id: string;
 }
 export interface OkResponse {
   ok: true;

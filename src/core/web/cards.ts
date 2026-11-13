@@ -3,7 +3,7 @@ import { claudeGone, sessionTitle } from '../sessionSend';
 import { displayState, stateLook, timeAgo, waitsOnBackground } from '../sessionsView';
 import { LOOKS } from '../stateLooks';
 import { oneLine, truncate } from '../text';
-import { paneTarget } from '../tmux';
+import { isSessionId, paneTarget } from '../tmux';
 import type { Feature } from '../worktrees';
 import { type SortMode, sortSessions } from '../urgency';
 import type { WebCard, WebFolder, WebGroup, WebTone } from './types';
@@ -29,9 +29,11 @@ export interface WebView {
 
 /**
  * The group a session shows under, following `attentionOrder`'s ranks: needs (waiting, blocked, or done and unread),
- * working (also done but waiting on background work), the rest (read done, idle: done and not updated for idleMs, no status).
+ * working (also done but waiting on background work), the rest (read done, idle: done and not updated for idleMs, no status),
+ * and parked sessions, which no longer run.
  */
 export function webGroup(card: SessionCard, v: Pick<WebView, 'now' | 'idleMs' | 'unread'>): WebGroup {
+  if (card.state === 'parked') return 'parked';
   const state = displayState(card, v);
   if (waitsOnBackground(card) || state === 'working') return 'working';
   if (state === 'waiting' || state === 'blocked' || (state === 'done' && v.unread.has(card.id))) return 'needs';
@@ -60,6 +62,7 @@ export function toWebCard(card: SessionCard, o: WebView): WebCard {
     ...(card.tmuxPane ? { pane: card.tmuxPane } : {}),
     ...(card.tmuxSession ? { tmuxSession: card.tmuxSession } : {}),
     canSend: !!paneTarget(card) && !claudeGone(card),
+    ...(card.state === 'parked' && isSessionId(card.sessionId) && card.cwd ? { resumable: true as const } : {}),
   };
 }
 

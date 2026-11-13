@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -1385,7 +1385,7 @@
             "type": "number",
             "default": 10,
             "minimum": 0,
-            "markdownDescription": "How many parked (not running) Claude sessions the Claude view lists per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
+            "markdownDescription": "How many parked (not running) Claude sessions the Claude view and the web access page list per worktree, and the Claude Board under the Idle / stopped divider of its Done / idle lane, newest first (unread ones stay above the divider and aren't counted); older ones fold into one `N earlier finished` row. They are listed until you remove them or Claude Code deletes their transcript (its `cleanupPeriodDays`, 30 days by default).",
             "order": 16
           },
           "devdesk.sessions.showChildren": {

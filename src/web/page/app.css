@@ -672,3 +672,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .setting-hint { color: var(--muted); font-size: 0.875rem; }
 .settings-form .notice { margin: 12px 0 0; }
 .settings-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
+
+/* A parked session being resumed: its view takes the place of this host once it runs again. */
+.view-host { display: contents; }
+.group-parked .card { opacity: 0.8; }

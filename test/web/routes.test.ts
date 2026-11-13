@@ -15,6 +15,7 @@ describe('parseRoute', () => {
     ['GET', '/api/sessions/abc-123', { kind: 'detail', id: 'abc-123' }],
     ['POST', '/api/sessions/abc-123/send', { kind: 'send', id: 'abc-123' }],
     ['POST', '/api/sessions/abc-123/key', { kind: 'key', id: 'abc-123' }],
+    ['POST', '/api/sessions/abc-123/resume', { kind: 'resume', id: 'abc-123' }],
   ])('%s %s', (method, path, route) => {
     expect(parseRoute(method, path)).toEqual(route);
   });
@@ -57,6 +58,7 @@ describe('parseRoute', () => {
     ['POST', '/api/folders'],
     ['POST', '/api/sessions/abc'],
     ['GET', '/api/sessions/abc/send'],
+    ['GET', '/api/sessions/abc/resume'],
     ['GET', '/api/sessions/abc/key'],
     ['HEAD', '/'],
     ['OPTIONS', '/api/sessions'],
@@ -66,6 +68,7 @@ describe('parseRoute', () => {
 
   it('marks the mutating routes', () => {
     expect(isMutating({ kind: 'send', id: 'a' })).toBe(true);
+    expect(isMutating({ kind: 'resume', id: 'a' })).toBe(true);
     expect(isMutating({ kind: 'key', id: 'a' })).toBe(true);
     expect(isMutating({ kind: 'start' })).toBe(true);
     expect(isMutating({ kind: 'cards' })).toBe(false);

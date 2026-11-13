@@ -318,6 +318,31 @@ describe('web access daemon (header auth, tunnel)', () => {
     expect(detail.screen.length).toBeGreaterThan(0);
   });
 
+  it('lists a parked session, and resumes it: answers once it runs again', async () => {
+    const ended = join(d.stateDir, 'ended');
+    await mkdir(ended, { recursive: true });
+    const was: HookRecord = { sessionId: 'sess-2', pid: 999999, tmuxSession: 'cc-repo-2', tmuxServer: 'devdesk', cwd: repo, event: 'Stop', state: 'done', detail: 'Finished', updatedAt: Date.now() - 60_000 };
+    await writeFile(join(ended, 'sess-2.json'), JSON.stringify({ ...was, endedAt: Date.now() - 30_000, endReason: 'parked' }));
+    try {
+      const listed = await until('the parked card', async () => {
+        const cards = JSON.parse((await call(d.port, { path: '/api/sessions', headers: as('roni') })).body).cards as { id: string }[];
+        return cards.find((c) => c.id === 'sess-2');
+      });
+      expect(listed).toMatchObject({ state: 'parked', group: 'parked', resumable: true, canSend: false });
+      const resumed = post(d.port, '/api/sessions/sess-2/resume', {});
+      // Claude starts in the tmux session it had, and its hooks report it running.
+      await until('the resume', async () => ((await tmuxCalls()).some((c) => c.includes('new-session -d -s cc-repo-2') && c.includes('--resume sess-2')) ? true : undefined));
+      await writeFile(join(d.stateDir, 'sess-2.json'), JSON.stringify({ ...was, pid: claude.pid, event: 'SessionStart', updatedAt: Date.now() }));
+      const r = await resumed;
+      expect(r.status).toBe(201);
+      expect(JSON.parse(r.body)).toEqual({ id: 'sess-2' });
+      expect((await post(d.port, '/api/sessions/sess-2/resume', {}, { origin: 'https://evil.example' })).status).toBe(403);
+    } finally {
+      await rm(join(ended, 'sess-2.json'), { force: true });
+      await rm(join(d.stateDir, 'sess-2.json'), { force: true });
+    }
+  });
+
   it('lists the folders', async () => {
     const r = await call(d.port, { path: '/api/folders', headers: as('roni') });
     expect(r.status).toBe(200);

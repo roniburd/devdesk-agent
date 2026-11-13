@@ -1490,7 +1490,7 @@ The daemon also refuses requests for any host but `127.0.0.1`, `localhost` and t
 
 ### How the list is ordered
 
-The list follows the Claude view's order (`devdesk.sessions.sort`, see [Order](#order)), and groups the sessions under three headings: *Needs you* (waiting for you, blocked, or done and not read yet), *Working* (also done sessions waiting on background work), and *Other* (done sessions you've read, idle ones: done and not updated for `devdesk.sessions.idleMinutes`). A session counts as read the way the Claude view counts it: once its terminal was in front of you in VS Code. The extension shares that with the daemon in `web-v2/seen.json`. If the daemon finds no `seen.json` (it was started by hand), it counts every session as unread. Then anything done in the last 30 minutes shows under *Needs you*.
+The list follows the Claude view's order (`devdesk.sessions.sort`, see [Order](#order)), and groups the sessions under four headings: *Needs you* (waiting for you, blocked, or done and not read yet), *Working* (also done sessions waiting on background work), *Other* (done sessions you've read, idle ones: done and not updated for `devdesk.sessions.idleMinutes`), and *Not running* (parked sessions, the newest `devdesk.sessions.finishedSessions` per worktree, as in the Claude view). Opening a session under *Not running* resumes it, as opening it in the Claude view does: Claude starts again with `claude --resume` in the tmux pane or session it had (else a new one named after its worktree), and the page opens it once it runs. A session counts as read the way the Claude view counts it: once its terminal was in front of you in VS Code. The extension shares that with the daemon in `web-v2/seen.json`. If the daemon finds no `seen.json` (it was started by hand), it counts every session as unread. Then anything done in the last 30 minutes shows under *Needs you*.
 
 On the session screen, the keys **1**, **2**, **3** and the others replace the reply box only while a dialog or choice replaces Claude's prompt box. If text is already typed at Claude's prompt, the reply box stays and the page asks you to clear that text in the session's terminal first, because DevDesk doesn't type after what's there.
 
@@ -1589,7 +1589,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.sessions.idleMinutes` | *machine*, `30` (a finished session not updated for this long sorts after working and recently finished ones) |
 | `devdesk.sessions.resortWorkingMinutes` | `5` (working sessions keep their order this long before sorting again, newest first; `0`: always sorted) |
 | `devdesk.sessions.readAfterSeconds` | `1.5` (a session's terminal must be in front this long for what happened in it to count as read) |
-| `devdesk.sessions.finishedSessions` | `10` (parked sessions listed per worktree and on the board; older ones fold into one row) |
+| `devdesk.sessions.finishedSessions` | `10` (parked sessions listed per worktree, on the board and on the web access page; older ones fold into one row) |
 | `devdesk.sessions.showChildren` | `false` (`true`: subagents, background shells and workflows under each session) |
 | `devdesk.sessions.finishedChildren` | `10` (finished ones listed per level; older ones fold into one row) |
 | `devdesk.sessions.turnChangesTurns` | `30` (recent turns **Show Changes by Turn…** lists, see [See what a turn changed](#see-what-a-turn-changed)) |

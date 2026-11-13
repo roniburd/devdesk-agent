@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type ActionDeps, detailTurns, pressKey, sendText, sessionDetail, startSession } from '../../src/core/web/actions';
+import { type ActionDeps, detailTurns, pressKey, type ResumeContext, resumeSession, sendText, sessionDetail, startSession } from '../../src/core/web/actions';
 import { DETAIL_MAX_TAIL_BYTES } from '../../src/core/web/transcript';
 import type { DaemonConfig } from '../../src/core/web/config';
 import type { SessionCard } from '../../src/core/sessions';
@@ -308,5 +308,86 @@ describe('sessionDetail', () => {
 
   it('gives 502 for another tmux error', async () => {
     expect(await sessionDetail(card(), o, deps(fakeTmux({ fail: { 'capture-pane': 'boom' } })))).toMatchObject({ status: 502 });
+  });
+});
+
+describe('resumeSession', () => {
+  const ID = '5b64cc7e-8a2f-46ed-8802-5f2e4827ce72';
+  const features: Feature[] = [{ name: 'main', dir: '/w', isMain: true, packages: [] }];
+  const cfg: Pick<DaemonConfig, 'tmux' | 'claude'> = {
+    tmux: { bin: 'tmux', server: 'devdesk', options: [], env: {} },
+    claude: {
+      path: 'claude',
+      modeArgs: '--permission-mode auto',
+      env: {},
+      ambientConfigDir: '/home/me/.claude',
+      accounts: [
+        { name: 'default', configDir: '/home/me/.claude', ambient: true, env: {} },
+        { name: 'work', configDir: '/home/me/.claude-work', ambient: false, env: {} },
+      ],
+    },
+  };
+  const parked = (over: Partial<SessionCard> = {}): SessionCard =>
+    card({ id: ID, sessionId: ID, state: 'parked', tmuxSession: undefined, tmuxPane: undefined, tmuxServer: undefined, ...over });
+  const ctx = (over: Partial<ResumeContext> = {}): ResumeContext => ({
+    cards: [],
+    registry: [],
+    existing: [],
+    features,
+    exists: () => true,
+    alive: () => false,
+    ...over,
+  });
+
+  it('runs claude --resume again in the pane Claude exited to', async () => {
+    const t = fakeTmux();
+    const r = await resumeSession(parked({ tmuxSession: 'cc-main', tmuxPane: '%3', tmuxServer: 'devdesk' }), ctx(), cfg, deps(t));
+    expect(r).toEqual({ status: 201, body: { id: ID } });
+    expect(t.calls).toEqual([['respawn-pane', '-k', '-t', '%3', '-c', '/w', `claude --permission-mode auto --resume ${ID}; exec $SHELL -l`]]);
+  });
+
+  it('goes back to its former tmux session when free, else a new one named after its worktree', async () => {
+    const back = fakeTmux();
+    await resumeSession(parked({ formerTmuxSession: 'cc-main-3', formerTmuxServer: 'devdesk' }), ctx({ existing: ['cc-main'] }), cfg, deps(back));
+    expect(newSession(back).slice(0, 6)).toEqual(['new-session', '-d', '-s', 'cc-main-3', '-c', '/w']);
+    const taken = fakeTmux();
+    await resumeSession(parked({ formerTmuxSession: 'cc-main-3', formerTmuxServer: 'devdesk' }), ctx({ existing: ['cc-main', 'cc-main-3'] }), cfg, deps(taken));
+    expect(newSession(taken).slice(0, 6)).toEqual(['new-session', '-d', '-s', 'cc-main-2', '-c', '/w']);
+  });
+
+  it('resumes in the Claude account its transcript is in', async () => {
+    const t = fakeTmux();
+    await resumeSession(parked({ transcriptPath: `/home/me/.claude-work/projects/-w/${ID}.jsonl` }), ctx(), cfg, deps(t));
+    expect(newSession(t).join(' ')).toContain(`export CLAUDE_CONFIG_DIR='/home/me/.claude-work'; claude --permission-mode auto --resume ${ID}`);
+  });
+
+  it("keeps the default account's environment when the config names no accounts", async () => {
+    const t = fakeTmux();
+    const bare = { ...cfg, claude: { path: 'claude', modeArgs: '--permission-mode auto', env: {} } };
+    await resumeSession(parked({ transcriptPath: `/home/me/.claude/projects/-w/${ID}.jsonl` }), ctx(), bare, deps(t));
+    expect(newSession(t).join(' ')).not.toContain('CLAUDE_CONFIG_DIR');
+  });
+
+  it('sets no CLAUDE_CONFIG_DIR for a session in Claude\'s own directory', async () => {
+    const t = fakeTmux();
+    await resumeSession(parked({ transcriptPath: `/home/me/.claude/projects/-w/${ID}.jsonl` }), ctx(), cfg, deps(t));
+    expect(newSession(t).join(' ')).not.toContain('CLAUDE_CONFIG_DIR');
+  });
+
+  it('opens the running copy instead of resuming twice, and refuses one running outside tmux', async () => {
+    const t = fakeTmux();
+    const running = card({ id: ID, sessionId: ID, state: 'idle', pid: 42 });
+    expect(await resumeSession(parked(), ctx({ cards: [running] }), cfg, deps(t))).toEqual({ status: 200, body: { id: ID } });
+    const elsewhere = await resumeSession(parked(), ctx({ registry: [{ sessionId: ID, pid: 77 } as never], alive: (p) => p === 77 }), cfg, deps(t));
+    expect(elsewhere).toMatchObject({ status: 409 });
+    expect(t.calls).toEqual([]);
+  });
+
+  it('refuses an unknown conversation or a folder that is gone, and gives a running card its own id', async () => {
+    const t = fakeTmux();
+    expect(await resumeSession(parked({ sessionId: undefined }), ctx(), cfg, deps(t))).toMatchObject({ status: 400 });
+    expect(await resumeSession(parked(), ctx({ exists: () => false }), cfg, deps(t))).toMatchObject({ status: 409 });
+    expect(await resumeSession(card(), ctx(), cfg, deps(t))).toEqual({ status: 200, body: { id: 's1' } });
+    expect(t.calls).toEqual([]);
   });
 });

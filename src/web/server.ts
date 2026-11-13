@@ -1,6 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { SessionCard } from '../core/sessions';
-import { type ActionDeps, type ActionResult, featureOf, pressKey, sendText, sessionDetail, startSession } from '../core/web/actions';
+import { existsSync } from 'node:fs';
+import { type ActionDeps, type ActionResult, featureOf, pressKey, resumeSession, sendText, sessionDetail, startSession } from '../core/web/actions';
+import { readClaudeRegistries } from '../core/sessionCards';
+import { STATE_INFO } from '../core/sessionStates';
+import { processAlive } from '../core/sessions';
 import { composerResponse, webModels } from '../core/web/composer';
 import type { ComposerCache } from '../core/web/composerCache';
 import type { AccessKeys } from '../core/web/cfAccess';
@@ -22,7 +26,7 @@ import {
 } from '../core/web/routes';
 import type { SessionSnapshot } from '../core/web/snapshot';
 import { parseWebSeen, webSeenPath, webUnread } from '../core/web/webState';
-import type { CardsResponse, ErrorCode, ErrorResponse } from '../core/web/types';
+import type { CardsResponse, ErrorCode, ErrorResponse, ResumeResponse } from '../core/web/types';
 import type { PageAssets } from './pageAssets';
 import { TerminalHub } from './terminal';
 import { claudeGone } from '../core/sessionSend';
@@ -51,7 +55,15 @@ export interface WebServerOptions {
   composer?: Pick<ComposerCache, 'get' | 'listing'>;
   /** For `cloudflare` auth: the team's keys now, and a refresh for a token signed by a key not fetched yet. */
   accessKeys?: { current: AccessKeys | undefined; refresh(): Promise<void> };
+  /** processAlive, for resuming (whether Claude still runs a conversation elsewhere). */
+  alive?: (pid: number) => boolean;
+  /** How long a resume waits for the session to run again (RESUME_WAIT_MS). */
+  resumeWaitMs?: number;
 }
+
+/** How long a resume waits for its session to run again before it answers anyway. */
+export const RESUME_WAIT_MS = 20_000;
+const RESUME_POLL_MS = 500;
 
 export interface WebServer {
   /** Always on LOOPBACK. Rejects with node's error (`EADDRINUSE`). */
@@ -228,6 +240,33 @@ export function createWebServer(o: WebServerOptions): WebServer {
     return undefined;
   };
 
+  /** Resumes in flight, by card id: a second open (another tab, a double tap) waits on the same one. */
+  const resuming = new Map<string, Promise<ActionResult<ResumeResponse>>>();
+  /**
+   * Resumes the parked card `id` (resumeSession), then waits until the session runs again (its card live, up to
+   * RESUME_WAIT_MS), so the page opens it as a running session and not the parked card it was.
+   */
+  const resume = (card: SessionCard): Promise<ActionResult<ResumeResponse>> => {
+    const pending = resuming.get(card.id);
+    if (pending) return pending;
+    const run = (async (): Promise<ActionResult<ResumeResponse>> => {
+      const [features, existing, registry] = await Promise.all([snapshot.features(), snapshot.sessionNames(), readClaudeRegistries(config.claudeSessionsDirs)]);
+      const cards = await recentCards();
+      const ctx = { cards, registry, existing, features, exists: existsSync, alive: o.alive ?? processAlive };
+      const r = await resumeSession(card, ctx, config, actions);
+      if (r.status !== 201) return r;
+      const id = r.body.id;
+      for (const until = Date.now() + (o.resumeWaitMs ?? RESUME_WAIT_MS); Date.now() < until; ) {
+        const now = (await freshCards()).find((c) => c.id === id);
+        if (now && STATE_INFO[now.state].live) break;
+        await new Promise((done) => setTimeout(done, RESUME_POLL_MS));
+      }
+      return r;
+    })().finally(() => resuming.delete(card.id));
+    resuming.set(card.id, run);
+    return run;
+  };
+
   /**
    * The experimental terminal's stream: `data` events (base64 bytes for xterm.js), then `hello` with the terminal's id
    * once its first frame is out, and `end` with why it closed. Closing the stream closes the terminal.
@@ -327,6 +366,10 @@ export function createWebServer(o: WebServerOptions): WebServer {
       if ('status' in body) return sendError(res, body.status, body.error);
       const card = await cardFor(res, route.id);
       if (card) sendResult(res, await pressKey(card, body.key, serverOf(card), actions));
+    } else if (route.kind === 'resume') {
+      const card = await cardFor(res, route.id);
+      if (card) sendResult(res, await resume(card));
+      cached = undefined;
     } else if (route.kind === 'start') {
       const body = parseNewSessionBody(raw);
       if ('status' in body) return sendError(res, body.status, body.error);
