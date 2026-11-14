@@ -11,7 +11,7 @@ import { WEB_ACCESS } from './core/edition';
 import { FileLockBusy, withFileLock } from './core/fileLock';
 import { processAlive } from './core/sessions';
 import { execText } from './core/shellRun';
-import { type DaemonConfig, parseDaemonConfig, shortHostName, tunnelNameProblem } from './core/web/config';
+import { type DaemonConfig, parseDaemonConfig, shortHostName, tunnelNameIgnored, tunnelNameProblem } from './core/web/config';
 import { isDaemonCommand, launchFailure, statusBarText, type WebMenuId, webMenuChoices } from './core/web/launch';
 import { daemonScript, type WebPanelRow } from './core/web/panel';
 import { qrMatrix, qrSvg } from './core/web/qr';
@@ -197,8 +197,8 @@ export class WebAccess implements vscode.Disposable {
         if (problem) return { message: `Can't use this name: ${problem}.`, severity: vscode.InputBoxValidationSeverity.Error };
         const p = webTunnelPreview(v.trim());
         return {
-          message: p ? `Tunnel: ${p.name}${p.url ? `  ·  ${p.url}` : ''}` : 'The tunnel this window runs has no {host} in its command: this name shows nowhere until it does.',
-          severity: vscode.InputBoxValidationSeverity.Info,
+          message: p ? `Tunnel: ${p.name}${p.url ? `  ·  ${p.url}` : ''}` : 'Not used: the tunnel command (devdesk.web.tunnelCommand) has no {host}, so the tunnel keeps the name in that command.',
+          severity: p ? vscode.InputBoxValidationSeverity.Info : vscode.InputBoxValidationSeverity.Warning,
         };
       },
     });
@@ -395,6 +395,12 @@ export class WebAccess implements vscode.Disposable {
 
   /** Writes the config, starts `dist/web.js` detached on VS Code's Node, and waits for its `web.json`. */
   private async launch(config: DaemonConfig): Promise<void> {
+    if (tunnelNameIgnored(config)) {
+      log.warn(`web access: devdesk.web.tunnelName ${config.tunnelName} is not used: devdesk.web.tunnelCommand has no {host}`);
+      void vscode.window
+        .showWarningMessage(`Web access: the tunnel name "${config.tunnelName}" is not used, because devdesk.web.tunnelCommand has no {host}, so the tunnel keeps the name in that command. Clear the command (it may be in your User settings) or put {host} in it.`, 'Open Settings')
+        .then((pick) => pick && openSettings('devdesk.web'));
+    }
     const configPath = webConfigPath(config.webDir);
     const logPath = webLogPath(config.webDir);
     await writeFileAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`, false, 0o600);

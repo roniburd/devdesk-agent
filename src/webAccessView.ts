@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { type WebPanelAction, type WebPanelRow, webPanelRows } from './core/web/panel';
 import type { WebStatus } from './core/web/webState';
-import { webTunnelPreview } from './config';
+import { webIgnoredTunnelName, webTunnelPreview } from './config';
 import { log } from './log';
 import type { WebAccess } from './webAccess';
 
@@ -64,7 +64,7 @@ export function registerWebAccessView(ctx: vscode.ExtensionContext, web: WebAcce
     drawing = drawing
       .then(async () => {
         const details = await web.details(status);
-        tree.set(webPanelRows({ status, ...details, script: web.script, logPath: web.logPath(), now: Date.now(), tunnelName: webTunnelPreview() }));
+        tree.set(webPanelRows({ status, ...details, script: web.script, logPath: web.logPath(), now: Date.now(), tunnelName: webTunnelPreview(), ignoredTunnelName: webIgnoredTunnelName() }));
         view.description = status.kind === 'off' ? 'off' : status.kind === 'tunnel-down' ? 'tunnel down' : 'on';
       })
       .catch((err) => log.warn(`web access view: ${(err as Error).message}`));

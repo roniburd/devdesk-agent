@@ -17,7 +17,7 @@ import { claudeConfigFilePath } from './core/trust';
 import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type ClaudeAccount, configDirOfTranscript, defaultAccount, parseAccounts, pickAccount } from './core/accounts';
 import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
 import type { TurnReadLimits } from './core/turnChangesRead';
-import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type TunnelPreview, tunnelPreview, type WebSettings } from './core/web/config';
+import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type TunnelPreview, tunnelNameIgnored, tunnelPreview, type WebSettings } from './core/web/config';
 import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -999,6 +999,12 @@ export function webTunnelPreview(tunnelName?: string, root: string | undefined =
     user: config.user,
     ...(own && provider.tunnelUrl ? { urlTemplate: provider.tunnelUrl } : {}),
   });
+}
+
+/** The tunnel name `devdesk.web.tunnelName` sets when this window's tunnel command has no {host} to use it (tunnelNameIgnored()), else undefined. */
+export function webIgnoredTunnelName(root: string | undefined = workspaceRoot()): string | undefined {
+  const config = webAccessConfig(root);
+  return tunnelNameIgnored(config) ? config.tunnelName : undefined;
 }
 
 /** The root as configured and with symlinks resolved (a session's cwd is the real path), as the Claude view scopes it. */

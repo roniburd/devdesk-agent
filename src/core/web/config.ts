@@ -535,6 +535,14 @@ export function tunnelNameIn(command: string, label: string): string | undefined
   return word?.replace(/\{host\}/g, label);
 }
 
+/**
+ * Whether `devdesk.web.tunnelName` is set but goes nowhere: the tunnel command runs, yet has no {host} to put it in
+ * (for example a custom command with the tunnel's name typed in). The tunnel then keeps the command's own name.
+ */
+export function tunnelNameIgnored(o: { tunnelCommand: string; tunnelName?: string }): boolean {
+  return !!tunnelLabel(o.tunnelName ?? '') && !!o.tunnelCommand.trim() && !o.tunnelCommand.includes('{host}');
+}
+
 /** What the tunnel is called with a tunnel name: {host} (`label`), the tunnel's name, and its URL when the workspace kind says it. */
 export interface TunnelPreview {
   label: string;

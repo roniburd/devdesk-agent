@@ -44,8 +44,8 @@ export const WEB_ACCESS = {
   port: 7691,
   /** The daemon's folder in the sessions state directory (v1: `web`). */
   dirName: 'web-v2',
-  /** The name the default tunnel command gives its tunnel (v1: `devdesk`). */
-  tunnelName: 'devdesk-v2',
+  /** The name the default tunnel command gives its tunnel, before `-{host}` (v1: `devdesk-v1`). */
+  tunnelName: 'devdesk',
 } as const;
 
 /** A view v2 contributes; its `.focus` command exists only while VS Code has the view registered. */

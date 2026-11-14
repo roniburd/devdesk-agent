@@ -103,3 +103,15 @@ describe('webPanelRows', () => {
     expect(ids({})).not.toContain('tunnelName');
   });
 });
+
+describe('webPanelRows: a tunnel name the tunnel command ignores', () => {
+  it('warns, while off and while running, and opens the settings', () => {
+    expect(ids({ ignoredTunnelName: 'cloud' })).toContain('ignoredTunnelName');
+    const rows = webPanelRows(input({ status: { kind: 'on', state: state({ tunnel: 'up' }) }, ignoredTunnelName: 'cloud' }));
+    const row = rows.find((r) => r.id === 'ignoredTunnelName');
+    expect(row).toMatchObject({ icon: 'warning', action: 'settings', description: 'cloud: the tunnel command has no {host}' });
+  });
+  it('has no warning row when the name is used', () => {
+    expect(ids({})).not.toContain('ignoredTunnelName');
+  });
+});

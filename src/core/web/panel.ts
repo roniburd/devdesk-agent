@@ -48,6 +48,8 @@ export interface WebPanelInput {
   logPath?: string;
   /** The tunnel the current settings name (webTunnelPreview()), when its command has {host}. */
   tunnelName?: TunnelPreview;
+  /** `devdesk.web.tunnelName` when the tunnel command has no {host} to put it in (webIgnoredTunnelName()). */
+  ignoredTunnelName?: string;
   now: number;
 }
 
@@ -73,6 +75,7 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
         action: 'start',
       },
       ...(o.tunnelName ? [tunnelNameRow(o.tunnelName)] : []),
+      ...(o.ignoredTunnelName ? [ignoredTunnelNameRow(o.ignoredTunnelName)] : []),
       { id: 'settings', label: 'Settings', icon: 'gear', action: 'settings' },
     ];
   }
@@ -121,6 +124,7 @@ export function webPanelRows(o: WebPanelInput): WebPanelRow[] {
     }, s.tunnel === 'down' ? s.tunnelError : s.tunnelPid ? String(s.tunnelPid) : undefined));
   }
   if (o.tunnelName) rows.push(tunnelNameRow(o.tunnelName));
+  if (o.ignoredTunnelName) rows.push(ignoredTunnelNameRow(o.ignoredTunnelName));
   rows.push(copyable({ id: 'local', label: 'Loopback URL', description: local, tooltip: `${local}\n\nFor ssh -L. Click to copy.`, icon: 'link', action: 'copyLocal' }, local));
   if (o.settings) {
     const access = accessRow(o.settings);
@@ -141,6 +145,19 @@ function tunnelNameRow(t: TunnelPreview): WebPanelRow {
     icon: 'tag',
     action: 'tunnelName',
     contextValue: 'webTunnelName',
+  };
+}
+
+/** `devdesk.web.tunnelName` is set, but the tunnel command has no {host}, so the tunnel keeps the command's own name. */
+function ignoredTunnelNameRow(name: string): WebPanelRow {
+  return {
+    id: 'ignoredTunnelName',
+    label: 'Tunnel name not used',
+    description: `${name}: the tunnel command has no {host}`,
+    tooltip: `devdesk.web.tunnelName is ${name}, but devdesk.web.tunnelCommand names its tunnel itself (it has no {host}), so the tunnel and its URL keep that name. Clear devdesk.web.tunnelCommand to use the default tunnel, or put {host} in it. It may be set in your User settings, which a Remote-SSH window uses too. Click to open the settings.`,
+    icon: 'warning',
+    color: 'problemsWarningIcon.foreground',
+    action: 'settings',
   };
 }
 
