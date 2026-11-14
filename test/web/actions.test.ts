@@ -264,6 +264,14 @@ describe('sessionDetail', () => {
     expect(r.body.ended).toBe(false);
   });
 
+  it("gives Claude's spinner as the turn's progress, and no progress at an idle prompt", async () => {
+    const spinner = `✻ Cogitating… (1m 12s · ↓ 3.4k tokens · esc to interrupt)\n\n${EMPTY_SCREEN}`;
+    const r = await sessionDetail(card({ state: 'working' }), o, deps(fakeTmux({ capture: spinner })));
+    expect(r).toMatchObject({ status: 200, body: { progress: { verb: 'Cogitating', seconds: 72, tokens: '↓ 3.4k tokens' } } });
+    const idle = await sessionDetail(card(), o, deps(fakeTmux({ capture: EMPTY_SCREEN })));
+    expect(idle.status === 200 && idle.body.progress).toBeUndefined();
+  });
+
   it("shows the keys when Claude's own report says a dialog is open", async () => {
     const d = deps(fakeTmux({ capture: EMPTY_SCREEN }), { programStatus: async () => ({ state: 'blocked', kind: 'permission', at: Date.now(), pid: 101 }) });
     const r = await sessionDetail(card(), o, d);

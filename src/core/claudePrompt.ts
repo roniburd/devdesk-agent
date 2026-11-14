@@ -209,10 +209,45 @@ export function claudeIsWorking(capture: string): boolean {
   const start = promptLine(lines);
   if (start < 0) return false;
   if (lines.slice(boxEnd(lines, start) + 1).some((cs) => /esc to interrupt/i.test(text(cs)))) return true;
+  return spinnerLine(lines, start) !== undefined;
+}
+
+/** The spinner's line (see `claudeIsWorking`) above the prompt box whose top rule is line `start`, if it shows. */
+function spinnerLine(lines: Cell[][], start: number): string | undefined {
   for (let i = start - 2; i >= Math.max(0, start - 1 - SPINNER_REACH); i--) {
     const t = text(lines[i]);
     if (!t.trim() || /^\s/.test(t)) continue;
-    return SPINNER.test(t);
+    return SPINNER.test(t) ? t : undefined;
   }
-  return false;
+  return undefined;
+}
+
+/** What Claude's spinner says while it works: `✻ Cogitating… (1m 12s · ↓ 3.4k tokens · esc to interrupt)`. */
+export interface ClaudeSpinner {
+  /** `Cogitating` */
+  verb: string;
+  /** How long the turn has run, as the spinner counts it (72). */
+  seconds?: number;
+  /** `↓ 3.4k tokens` */
+  tokens?: string;
+}
+
+/**
+ * The spinner of a `tmux capture-pane -p -e` capture of Claude Code's pane (see `claudeIsWorking`), read: its verb, and
+ * from its parenthesised part the time and the tokens, when it shows them. Claude Code's wording is not an interface:
+ * any part it no longer shows, or shows another way, is left out.
+ */
+export function claudeSpinner(capture: string): ClaudeSpinner | undefined {
+  const lines = capture.split('\n').map(cells);
+  const start = promptLine(lines);
+  const line = start < 0 ? undefined : spinnerLine(lines, start);
+  const m = line && /^\S+\s+(\S+?)…\s*(?:\((.*)\))?/.exec(line);
+  if (!m) return undefined;
+  const spinner: ClaudeSpinner = { verb: m[1] };
+  for (const part of (m[2] ?? '').split('·').map((p) => p.trim())) {
+    const time = /^(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?$/.exec(part);
+    if (part && time && spinner.seconds === undefined) spinner.seconds = Number(time[1] ?? 0) * 3600 + Number(time[2] ?? 0) * 60 + Number(time[3] ?? 0);
+    else if (/\btokens?$/i.test(part) && spinner.tokens === undefined) spinner.tokens = part;
+  }
+  return spinner;
 }

@@ -24,7 +24,9 @@ import type {
   WebGroup,
   WebKey,
   WebProject,
+  WorkProgress,
 } from '../../core/web/types';
+import { progressLine } from '../../core/web/progress';
 import { api } from './api';
 import { h, sentenceCase, sessionHref } from './dom';
 import { turnEls } from './turns';
@@ -390,8 +392,18 @@ function sessionView(id: string): View {
   };
   const turns = h('ol', { class: 'turns' });
   // Under the last turn while Claude works, so a quiet transcript still shows the session is busy.
-  const working = h('div', { class: 'working', attrs: { role: 'status' } }, h('span', { class: 'glyph spin', attrs: { 'aria-hidden': 'true' } }), 'Working…');
+  // Claude's spinner as its terminal shows it (`Cogitating… 1m 12s · ↓ 3.4k tokens`), its time counted on between loads.
+  const workingText = h('span', { text: 'Working…' });
+  const working = h('div', { class: 'working', attrs: { role: 'status' } }, h('span', { class: 'glyph spin', attrs: { 'aria-hidden': 'true' } }), workingText);
   working.hidden = true;
+  let progress: WorkProgress | undefined;
+  let progressAt = 0;
+  const showProgress = () => {
+    workingText.textContent = progressLine(progress, (Date.now() - progressAt) / 1000);
+  };
+  const progressTimer = window.setInterval(() => {
+    if (!working.hidden) showProgress();
+  }, 1000);
   const screen = h('div', { class: 'term', attrs: { role: 'img', 'aria-label': 'Terminal screen' } });
   const panels = {
     transcript: h('section', { class: 'panel transcript', attrs: { role: 'tabpanel' } }, turns, working),
@@ -539,6 +551,9 @@ function sessionView(id: string): View {
     }
     // The hooks know when a turn ends; the spinner on screen is only a fallback for sessions without hooks.
     const isWorking = d.card.state === 'working' || (d.card.state === 'unknown' && d.prompt.working);
+    progress = d.progress;
+    progressAt = Date.now();
+    showProgress();
     const tk = JSON.stringify(d.turns);
     if (tk !== turnsKey || working.hidden === isWorking) {
       const stick = turnsKey === '' || nearEnd(panels.transcript);
@@ -685,6 +700,7 @@ function sessionView(id: string): View {
       disposed = true;
       window.clearTimeout(timer);
       window.clearTimeout(infoTimer);
+      window.clearInterval(progressTimer);
       feed.listeners.delete(onCards);
       terminal?.dispose();
     },

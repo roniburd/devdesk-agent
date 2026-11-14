@@ -1,4 +1,5 @@
 import { accountEnv, accountOfTranscript } from '../accounts';
+import { claudeSpinner } from '../claudePrompt';
 import { readPaneScreen, typeIntoPane } from '../paneScreen';
 import { type ProgramStatus, programStatusBlocksArrow, screenWithProgramStatus } from '../programStatus';
 import type { ProcessTable } from '../processes';
@@ -26,6 +27,7 @@ import { ansiToSpans } from './ansi';
 import { toWebCard, type WebView } from './cards';
 import type { DaemonConfig } from './config';
 import { keyArgs } from './keys';
+import { workProgress } from './progress';
 import { DETAIL_MAX_TAIL_BYTES, DETAIL_TAIL_BYTES, DETAIL_TURNS, transcriptTurns } from './transcript';
 import { launchArgs, webModels } from './composer';
 import type {
@@ -99,6 +101,8 @@ export async function sessionDetail(card: SessionCard, o: WebView & { server: st
     detail.screen = ansiToSpans(capture);
     detail.prompt = { ...screen, dialog: dialogOpen && !screen.exited && !screen.inMode };
     detail.ended ||= screen.exited;
+    const progress = workProgress(card, claudeSpinner(capture), o.now);
+    if (progress) detail.progress = progress;
   } catch (err) {
     if (!tmuxTargetGone((err as Error).message)) return tmuxFailed(err);
     detail.ended = true;

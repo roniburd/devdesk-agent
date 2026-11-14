@@ -94,6 +94,15 @@ export interface SessionDetail {
   ended: boolean;
   /** The folder the session works in (featureDir), for its reply box's `/` menu (`api/composer?dir=`). */
   dir?: string;
+  /** How Claude's turn goes, while its spinner shows or the hooks say it works (see `workProgress`). */
+  progress?: WorkProgress;
+}
+
+/** Claude's spinner as core/claudePrompt.ts's `claudeSpinner` reads it; seconds from the hooks' turn start without one. */
+export interface WorkProgress {
+  verb?: string;
+  seconds?: number;
+  tokens?: string;
 }
 
 export interface WebFolder {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { claudeIsWorking, claudePromptIsEmpty, claudePromptShown, type PaneFlags, paneScreenArgs, parsePaneFlags, parsePaneScreen } from '../src/core/claudePrompt';
+import { claudeIsWorking, claudePromptIsEmpty, claudeSpinner, claudePromptShown, type PaneFlags, paneScreenArgs, parsePaneFlags, parsePaneScreen } from '../src/core/claudePrompt';
 
 const E = '\x1b';
 const rule = `${E}[38;5;244m${'─'.repeat(40)} devdesk-agents ─`;
@@ -228,5 +228,26 @@ describe('claudePromptShown', () => {
   it('is true with the composer on screen (real captures), false while a dialog takes its place', () => {
     for (const name of ['empty', 'idle-after-turn', 'working', 'text']) expect(claudePromptShown(capture(name)), name).toBe(true);
     for (const name of ['permission-dialog', 'question-dialog']) expect(claudePromptShown(capture(name)), name).toBe(false);
+  });
+});
+
+describe('claudeSpinner', () => {
+  const box = (...above: string[]) => [...above, rule, `❯ ${E}[7m ${E}[0m`, bottom].join('\n');
+
+  it('reads the verb, time and tokens of the spinner above the prompt box', () => {
+    const spinner = `${E}[38;5;174m✻${E}[39m ${E}[38;5;174mCogitating…${E}[39m ${E}[2m(1m 12s · ↓ 3.4k tokens · esc to interrupt)${E}[22m`;
+    expect(claudeSpinner(box('⏺ Running the tests.', '', spinner, ''))).toEqual({ verb: 'Cogitating', seconds: 72, tokens: '↓ 3.4k tokens' });
+    expect(claudeSpinner(box('✶ Simmering… (1h 2m 3s · ↑ 900 tokens · thought for 4s)', '  ⎿  ☐ Fix the tests', ''))).toEqual({ verb: 'Simmering', seconds: 3723, tokens: '↑ 900 tokens' });
+  });
+
+  it('keeps the verb alone when the spinner shows nothing else, or what it no longer reads', () => {
+    expect(claudeSpinner(box('✳ Pondering…', ''))).toEqual({ verb: 'Pondering' });
+    expect(claudeSpinner(box('✳ Pondering… (esc to interrupt · ctrl+t to show todos)', ''))).toEqual({ verb: 'Pondering' });
+  });
+
+  it('is undefined with no spinner, after a finished turn, or with no prompt box', () => {
+    expect(claudeSpinner(box('⏺ Done.', '', '✻ Worked for 1m 3s', ''))).toBeUndefined();
+    expect(claudeSpinner(box('  * Building…', ''))).toBeUndefined();
+    expect(claudeSpinner('✻ Pondering… (12s)')).toBeUndefined();
   });
 });
