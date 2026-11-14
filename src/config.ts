@@ -10,6 +10,7 @@ import type { ParkPolicy } from './core/park';
 import { SORT_MODES, type SortMode } from './core/urgency';
 import { DEFAULT_MODE_NAME, joinArgs, type LaunchMode, parseModes, pickMode } from './core/modes';
 import { DEFAULT_CLAUDE_PATH, DEFAULT_SERVER, DEFAULT_PASTE_SETTLE_MS, defaultTmuxInstallCommand, isServerName, tmuxOptions, tmuxRunner, type TmuxRunner, type TmuxSetup } from './core/tmux';
+import { settingsGearCommand } from './core/settingsGear';
 import { scrollLines } from './core/smoothScroll';
 import { sanitizedTmuxConfig, userTmuxConfigFiles } from './core/tmuxConfig';
 import { claudeConfigFilePath } from './core/trust';
@@ -33,9 +34,9 @@ export function setGlobalSetting(key: string, value: unknown): Thenable<void> {
   return cfg().update(key, value, vscode.ConfigurationTarget.Global);
 }
 
-/** Opens the Settings editor on this extension's settings matching `query` (a settings gear). */
+/** Opens the Settings editor on this extension's settings matching `query` (a settings gear), on the Remote tab in a remote window. */
 export function openSettings(query: string): Thenable<unknown> {
-  return vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${EXTENSION_ID} ${query}`);
+  return vscode.commands.executeCommand(...settingsGearCommand(vscode.env.remoteName, `@ext:${EXTENSION_ID} ${query}`));
 }
 
 const expandHome = (p: string | undefined) => p?.trim().replace(/^~(?=\/|$)/, homedir());

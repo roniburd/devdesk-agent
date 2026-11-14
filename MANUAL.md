@@ -54,7 +54,7 @@ A few words this manual uses:
 
 ### Where to find settings
 
-Every option in this manual is a VS Code setting. Click **⚙** in the Claude view, the Worktrees view or the board to see them. [All settings](#19-all-settings) lists every one.
+Every option in this manual is a VS Code setting. Click **⚙** in the Claude view, the Worktrees view or the board to see them. [All settings](#19-all-settings) lists every one. Over Remote-SSH, **⚙** opens the **Remote** tab: VS Code lists machine settings (tool paths, the web access tunnel) only there, not under **User**.
 
 ## 2. Set up status hooks
 
