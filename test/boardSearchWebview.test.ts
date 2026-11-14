@@ -258,7 +258,7 @@ describe('board search box: as you type', () => {
 });
 
 describe('board 📊 popup: scope', () => {
-  const zeroT = { total: 0, cached: 0, requests: 0, totalText: '0', cachedText: '0' };
+  const zeroT = { total: 0, cached: 0, requests: 0, input: 0, cacheWrite: 0, output: 0, unsplit: 0, totalText: '0', cachedText: '0', inputText: '0', cacheWriteText: '0', outputText: '0', unsplitText: '0' };
   const day = (places: unknown[]) => ({ key: 'k', label: 'Today', short: 'Today', sessions: zeroT, devdesk: { ...zeroT, failed: 0 }, models: [], top: [], places });
   type Loose = { scope: never; windowProject: string; choices: never; today: { places: { project: string; worktree?: string }[] } };
   /** The popover as `scopedPopover` sends it: with its selects, and the scope each breakdown row narrows to. */
@@ -353,7 +353,8 @@ describe('board 📊 popup: scope', () => {
     await b.host({ type: 'usage', usage: scoped(all as never) });
     const row = pop.querySelector('.stats-place') as HTMLElement;
     expect(row.getAttribute('role')).toBe('button');
-    expect(row.getAttribute('aria-label')).toBe('Show ws: 0 total, 0 cached, 100%');
+    expect(row.getAttribute('aria-label')).toBe('Show ws: 0 total, 0 input, 0 cached, 0 output, 100%');
+    expect([...pop.querySelectorAll('.stats-head .stats-num')].map((e) => e.textContent)).toEqual(['total', 'input', 'cached', 'output']);
     row.focus();
     row.dispatchEvent(new b.win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(b.posted).toContainEqual({ type: 'usageScope', scope: { kind: 'project', project: '/w/ws' } });

@@ -82,8 +82,8 @@ describe('the Claude Usage page', () => {
 
   it('chooses a project and a worktree, and shows the period by project or by worktree', async () => {
     const { main, posted, send } = open();
-    const place = (project: string, worktree: string, total: number) => ({ project, kind: 'git' as const, worktree, tokens: { total, cached: 0, requests: 1 }, byModel: [], bySession: [] });
-    const days = [{ day: today, sessions: { total: 15, cached: 0, requests: 2 }, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0 }, byPlace: [place('/w/a', 'main', 10), place('/w/b', 'x', 5)] }];
+    const place = (project: string, worktree: string, total: number) => ({ project, kind: 'git' as const, worktree, tokens: { total, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] });
+    const days = [{ day: today, sessions: { total: 15, cached: 0, requests: 2, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 }, byPlace: [place('/w/a', 'main', 10), place('/w/b', 'x', 5)] }];
     const win = { project: '/w/a', kind: 'git' as const, worktree: 'main' };
     const info = { days: 0, bytes: 0, maxBytes: 1, keepDays: 365 };
     await send({ type: 'page', page: scopedPage(days, today, info, { kind: 'all' }, win) });
@@ -101,13 +101,13 @@ describe('the Claude Usage page', () => {
 
   it("picks a project's worktree, and sorts the every-day table by a column", async () => {
     const { main, posted, send } = open();
-    const place = (project: string, worktree: string, total: number) => ({ project, kind: 'git' as const, worktree, tokens: { total, cached: 0, requests: 1 }, byModel: [], bySession: [] });
+    const place = (project: string, worktree: string, total: number) => ({ project, kind: 'git' as const, worktree, tokens: { total, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] });
     const day = (key: string, ...byPlace: ReturnType<typeof place>[]) => ({
       day: key,
-      sessions: { total: byPlace.reduce((n, p) => n + p.tokens.total, 0), cached: 0, requests: byPlace.length },
+      sessions: { total: byPlace.reduce((n, p) => n + p.tokens.total, 0), cached: 0, requests: byPlace.length, input: 0, cacheWrite: 0, output: 0 },
       byModel: [],
       bySession: [],
-      devdesk: { total: 0, cached: 0, requests: 0, failed: 0 },
+      devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 },
       byPlace,
     });
     const yesterday = dayKey(Date.now() - 86_400_000);
@@ -153,15 +153,53 @@ describe('the Claude Usage page', () => {
     expect(every()[0]).toEqual(['a', '30']);
   });
 
+  it('splits tokens into input, cache writes, cached and output, and shows both charts or either', async () => {
+    const saved: { state?: unknown } = {};
+    const { main, send } = open(saved);
+    const tokens = (total: number, cached: number, input: number, cacheWrite: number, output: number) => ({ total, cached, requests: 1, input, cacheWrite, output });
+    const day = (key: string, t: ReturnType<typeof tokens>) => ({
+      day: key,
+      sessions: t,
+      byModel: [{ model: 'opus', tokens: t }],
+      bySession: [],
+      devdesk: { ...tokens(0, 0, 0, 0, 0), requests: 0, failed: 0 },
+      byPlace: [{ project: '/w/a', kind: 'git' as const, worktree: 'main', tokens: t, byModel: [], bySession: [] }],
+    });
+    const yesterday = dayKey(Date.now() - 86_400_000);
+    // Yesterday was counted before tokens were split: 40 of its 100 are input, cache writes and output together.
+    const days = [day(yesterday, tokens(100, 60, 0, 0, 0)), day(today, tokens(100, 50, 10, 30, 10))];
+    await send({ type: 'page', page: scopedPage(days, today, { days: 1, bytes: 0, maxBytes: 1, keepDays: 365 }, { kind: 'all' }, undefined) });
+    const tiles = () => Object.fromEntries([...main.querySelectorAll('.tile')].map((t) => [t.querySelector('.tile-label')!.textContent, t.querySelector('.tile-value')!.textContent]));
+    expect(tiles()).toMatchObject({ Total: '100', Input: '10', 'Cache writes': '30', Cached: '50 (50%)', Output: '10' });
+    expect(tiles()).not.toHaveProperty('Before the split');
+    const model = () => [...main.querySelectorAll('.grid2 table')[0].querySelectorAll('tbody td')].map((c) => c.textContent);
+    expect(model()).toEqual(['opus', '100', '10', '30', '50 (50%)', '10', '1']);
+    const charts = () => [...main.querySelectorAll('svg.chart')].map((c) => c.getAttribute('aria-label'));
+    expect(charts()).toEqual(['Input tokens per period: input, cache writes and cached', 'Cached share of the total, per period', 'Output tokens per period']);
+    const view = (v: string) => (main.querySelector(`[data-view="${v}"]`) as HTMLElement).click();
+    view('output');
+    expect(charts()).toEqual(['Output tokens per period']);
+    expect(saved.state).toMatchObject({ view: 'output' });
+    view('input');
+    expect(charts()).toEqual(['Input tokens per period: input, cache writes and cached', 'Cached share of the total, per period']);
+    expect(main.querySelector('[data-view="input"]')!.getAttribute('aria-checked')).toBe('true');
+    // Yesterday: its parts are not known, only what was before the split.
+    const cols = [...main.querySelectorAll('.col')];
+    (cols[cols.length - 2].querySelector('.hit') as unknown as HTMLElement).dispatchEvent(new main.ownerDocument.defaultView!.MouseEvent('click'));
+    expect(tiles()).toMatchObject({ Input: '0', Output: '0', 'Before the split': '40' });
+    expect(model()).toEqual(['opus', '100', '—', '—', '60 (60%)', '—', '1']);
+    expect([...main.querySelectorAll('.legend .legend-item')].map((l) => l.textContent)).toContain('Before the split (input, cache writes, output)');
+  });
+
   it('keeps the every-day table open and sorted when the tab is hidden and shown again', async () => {
-    const place = (project: string, total: number) => ({ project, kind: 'git' as const, worktree: 'main', tokens: { total, cached: 0, requests: 1 }, byModel: [], bySession: [] });
+    const place = (project: string, total: number) => ({ project, kind: 'git' as const, worktree: 'main', tokens: { total, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] });
     const yesterday = dayKey(Date.now() - 86_400_000);
     const days = [yesterday, today].map((key, i) => ({
       day: key,
-      sessions: { total: i ? 10 : 30, cached: 0, requests: 1 },
+      sessions: { total: i ? 10 : 30, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 },
       byModel: [],
       bySession: [],
-      devdesk: { total: 0, cached: 0, requests: 0, failed: 0 },
+      devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 },
       byPlace: [place('/w/a', i ? 10 : 30)],
     }));
     const info = { days: 2, bytes: 0, maxBytes: 1, keepDays: 365 };
@@ -197,13 +235,13 @@ describe('the Claude Usage page', () => {
 
   it('labels a project the same in every period, with its path as the tooltip, and sorts empty periods last', async () => {
     const { main, send } = open();
-    const place = (project: string, total: number) => ({ project, kind: 'git' as const, worktree: 'main', tokens: { total, cached: 0, requests: 1 }, byModel: [], bySession: [] });
+    const place = (project: string, total: number) => ({ project, kind: 'git' as const, worktree: 'main', tokens: { total, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] });
     const day = (key: string, ...byPlace: ReturnType<typeof place>[]) => ({
       day: key,
-      sessions: { total: byPlace.reduce((n, p) => n + p.tokens.total, 0), cached: 0, requests: byPlace.length },
+      sessions: { total: byPlace.reduce((n, p) => n + p.tokens.total, 0), cached: 0, requests: byPlace.length, input: 0, cacheWrite: 0, output: 0 },
       byModel: [],
       bySession: [],
-      devdesk: { total: 0, cached: 0, requests: 0, failed: 0 },
+      devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 },
       byPlace,
     });
     const ago = (n: number) => dayKey(Date.now() - n * 86_400_000);
@@ -227,8 +265,8 @@ describe('the Claude Usage page', () => {
 
   it('keeps the selects as they are while the pages it gets show the same choices', async () => {
     const { main, send } = open();
-    const byPlace = [{ project: '/w/a', kind: 'git' as const, worktree: 'main', tokens: { total: 5, cached: 0, requests: 1 }, byModel: [], bySession: [] }];
-    const days = [{ day: today, sessions: { total: 5, cached: 0, requests: 1 }, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0 }, byPlace }];
+    const byPlace = [{ project: '/w/a', kind: 'git' as const, worktree: 'main', tokens: { total: 5, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] }];
+    const days = [{ day: today, sessions: { total: 5, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 }, byPlace }];
     const info = { days: 1, bytes: 0, maxBytes: 1, keepDays: 365 };
     const select = () => main.ownerDocument.getElementById('scope-project') as HTMLSelectElement;
     await send({ type: 'page', page: scopedPage(days, today, info, { kind: 'all' }, undefined) });

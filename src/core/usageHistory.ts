@@ -1,5 +1,5 @@
 import { parseObject } from './json';
-import { formatTokens, parseLedgerLine, type Tokens, type UsageScan } from './usage';
+import { formatTokens, parseLedgerLine, type Tokens, type UsageScan, unsplitTokens } from './usage';
 import { DEVDESK, devdeskPlace, MAIN, OTHER, type Place, type PlaceKind, placeResolver, projectLabels, projectTitle, unknownPlace } from './usagePlace';
 
 /**
@@ -32,6 +32,11 @@ export interface DayUsage {
    * that could not be. Read it through {@link placesOf}.
    */
   byPlace?: PlaceDay[] | 'unknown';
+  /**
+   * A day stored before tokens were split into input, cache writes and output (only total and cached), not counted again
+   * yet: {@link upgradeDay} counts it from what is left of its transcripts, or keeps it as it is ({@link unsplitTokens}).
+   */
+  unsplit?: true;
 }
 
 /** A day's usage in one place (project and worktree): its tokens, models and top sessions. */
@@ -53,12 +58,17 @@ const TOP_PLACES_PER_DAY = 30;
 /** Sessions kept by name for each of a day's places. */
 const TOP_SESSIONS_PER_PLACE = 5;
 
-export const noTokens = (): Tokens => ({ total: 0, cached: 0, requests: 0 });
+export const noTokens = (): Tokens => ({ total: 0, cached: 0, requests: 0, input: 0, cacheWrite: 0, output: 0 });
 export const addTokens = (t: Tokens, e: Tokens) => {
   t.total += e.total;
   t.cached += e.cached;
   t.requests += e.requests;
+  t.input += e.input;
+  t.cacheWrite += e.cacheWrite;
+  t.output += e.output;
 };
+/** One request's tokens. */
+const oneRequest = (e: Omit<Tokens, 'requests'>): Tokens => ({ total: e.total, cached: e.cached, requests: 1, input: e.input, cacheWrite: e.cacheWrite, output: e.output });
 const addKey = (m: Map<string, Tokens>, key: string, one: Tokens) => {
   let t = m.get(key);
   if (!t) m.set(key, (t = noTokens()));
@@ -156,13 +166,17 @@ export function placesOf(d: DayUsage): PlaceDay[] {
 }
 
 /**
- * A day stored before places were counted (`old`), after counting it again from what is left of its transcripts and of
- * DevDesk's ledger (`recount`): its sessions, and DevDesk's calls, each from the recount when it found as many
- * requests, else as stored (part of the transcripts is gone, or the ledger was trimmed). A day whose sessions could not
- * be recounted keeps them all in the Unknown project, marked `byPlace: 'unknown'` so it is not recounted again.
+ * A day stored before places, or the parts of its tokens, were counted (`old`), after counting it again from what is
+ * left of its transcripts and of DevDesk's ledger (`recount`): its sessions, and DevDesk's calls, each from the recount
+ * when it found as many requests, else as stored (part of the transcripts is gone, or the ledger was trimmed). A day
+ * whose sessions could not be recounted keeps them as stored: without places, all in the Unknown project, marked
+ * `byPlace: 'unknown'`, and without the parts of their tokens, all unsplit; either way it is not recounted again.
  */
 export function upgradeDay(old: DayUsage, recount: DayUsage | undefined): DayUsage {
-  if (!recount || recount.sessions.requests < old.sessions.requests) return { ...old, byPlace: 'unknown' };
+  if (!recount || recount.sessions.requests < old.sessions.requests) {
+    const { unsplit: _unsplit, ...kept } = old;
+    return { ...kept, byPlace: old.byPlace ?? 'unknown' };
+  }
   if (recount.devdesk.requests >= old.devdesk.requests) return { ...recount, day: old.day };
   return {
     day: old.day,
@@ -264,7 +278,7 @@ export class DayCounter {
     for (const [id, e] of scan.entries) {
       if (!this.inRange(e.at) || this.seen.has(id)) continue;
       this.seen.add(id);
-      const one = { total: e.total, cached: e.cached, requests: 1 };
+      const one = oneRequest(e);
       const key = dayKey(e.at);
       changed.add(key);
       const a = this.acc(key);
@@ -285,7 +299,7 @@ export class DayCounter {
       const key = dayKey(call.at);
       changed.add(key);
       const a = this.acc(key);
-      const one = { total: call.total, cached: call.cached, requests: 1 };
+      const one = oneRequest(call);
       addTokens(a.devdesk, one);
       const model = `${call.model} ${DEVDESK_MODEL_SUFFIX}`;
       addKey(a.models, model, one);
@@ -340,16 +354,26 @@ export function usageByDay(
 
 // ---- The history file: one compact JSON line per day ----
 
-type Triple = [number, number, number];
-const triple = (t: Tokens): Triple => [t.total, t.cached, t.requests];
+/*
+ * Tokens are `[total, cached, requests, input, cacheWrite, output]` (DevDesk's: `failed` after `requests`). Lines
+ * written before tokens were split stop at `requests`: they read with no parts, all of the rest of the total unsplit.
+ */
+const triple = (t: Tokens): number[] => [t.total, t.cached, t.requests];
+const partsOf = (t: Tokens): number[] => [t.input, t.cacheWrite, t.output];
+const tuple = (t: Tokens): number[] => [...triple(t), ...partsOf(t)];
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
-const fromTriple = (v: unknown): Tokens | undefined =>
-  Array.isArray(v) && v.length >= 3 && isNum(v[0]) && isNum(v[1]) && isNum(v[2]) ? { total: v[0], cached: v[1], requests: v[2] } : undefined;
+/** Whether `v` has the parts of its tokens from index `at`. */
+const hasParts = (v: unknown, at = 3): boolean => Array.isArray(v) && v.length >= at + 3 && isNum(v[at]) && isNum(v[at + 1]) && isNum(v[at + 2]);
+const fromTriple = (v: unknown, partsAt = 3): Tokens | undefined => {
+  if (!Array.isArray(v) || v.length < 3 || !isNum(v[0]) || !isNum(v[1]) || !isNum(v[2])) return undefined;
+  const split = hasParts(v, partsAt);
+  return { total: v[0], cached: v[1], requests: v[2], input: split ? v[partsAt] : 0, cacheWrite: split ? v[partsAt + 1] : 0, output: split ? v[partsAt + 2] : 0 };
+};
 
 const KIND_CODE: Record<PlaceKind, string> = { workspace: 'b', git: 'g', folder: 'f' };
 const CODE_KIND: Record<string, PlaceKind | undefined> = { b: 'workspace', g: 'git', f: 'folder' };
-const encodeModels = (list: DayUsage['byModel']) => list.map((m) => [m.model, ...triple(m.tokens)]);
-const encodeSessions = (list: SessionDay[]) => list.map((s) => [s.sessionId, s.name, ...triple(s)]);
+const encodeModels = (list: DayUsage['byModel']) => list.map((m) => [m.model, ...tuple(m.tokens)]);
+const encodeSessions = (list: SessionDay[]) => list.map((s) => [s.sessionId, s.name, ...tuple(s)]);
 
 function decodeModels(v: unknown): DayUsage['byModel'] {
   const out: DayUsage['byModel'] = [];
@@ -382,13 +406,13 @@ function decodePlaces(v: unknown[]): PlaceDay[] {
 
 /** A day as its history line (no newline). */
 export function encodeDay(d: DayUsage): string {
-  const places = d.byPlace === 'unknown' ? 'u' : d.byPlace?.map((p) => [p.project, KIND_CODE[p.kind], p.worktree, triple(p.tokens), encodeModels(p.byModel), encodeSessions(p.bySession)]);
+  const places = d.byPlace === 'unknown' ? 'u' : d.byPlace?.map((p) => [p.project, KIND_CODE[p.kind], p.worktree, tuple(p.tokens), encodeModels(p.byModel), encodeSessions(p.bySession)]);
   return JSON.stringify({
     day: d.day,
-    s: triple(d.sessions),
+    s: tuple(d.sessions),
     m: encodeModels(d.byModel),
     x: encodeSessions(d.bySession),
-    d: [...triple(d.devdesk), d.devdesk.failed],
+    d: [...triple(d.devdesk), d.devdesk.failed, ...partsOf(d.devdesk)],
     ...(places ? { p: places } : {}),
   });
 }
@@ -399,7 +423,7 @@ export function decodeDay(line: string): DayUsage | undefined {
   if (!o || typeof o.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(o.day)) return undefined;
   const sessions = fromTriple(o.s);
   const dd = Array.isArray(o.d) ? o.d : [];
-  const devdesk = fromTriple(dd);
+  const devdesk = fromTriple(dd, 4);
   if (!sessions || !devdesk) return undefined;
   let byPlace: DayUsage['byPlace'] = o.p === 'u' ? 'unknown' : Array.isArray(o.p) ? decodePlaces(o.p) : undefined;
   // Places that do not add up to the day (entries that could not be read) are dropped, so the day is counted again.
@@ -411,6 +435,7 @@ export function decodeDay(line: string): DayUsage | undefined {
     bySession: decodeSessions(o.x),
     devdesk: { ...devdesk, failed: isNum(dd[3]) ? dd[3] : 0 },
     ...(byPlace ? { byPlace } : {}),
+    ...(hasParts(o.s) ? {} : { unsplit: true as const }),
   };
 }
 
@@ -468,9 +493,27 @@ export interface TokensText extends Tokens {
   totalText: string;
   /** `6.8M (55%)` */
   cachedText: string;
+  inputText: string;
+  cacheWriteText: string;
+  outputText: string;
+  /** The part of the total counted before its parts were ({@link unsplitTokens}). */
+  unsplit: number;
+  unsplitText: string;
 }
 
-const text = (t: Tokens): TokensText => ({ ...t, totalText: formatTokens(t.total), cachedText: formatShare(t.cached, t.total) });
+const text = (t: Tokens): TokensText => {
+  const unsplit = unsplitTokens(t);
+  return {
+    ...t,
+    totalText: formatTokens(t.total),
+    cachedText: formatShare(t.cached, t.total),
+    inputText: formatTokens(t.input),
+    cacheWriteText: formatTokens(t.cacheWrite),
+    outputText: formatTokens(t.output),
+    unsplit,
+    unsplitText: formatTokens(unsplit),
+  };
+};
 
 /** How a period's places are summed: by project (all projects), or by worktree (one project). */
 export type PlaceGroup = 'project' | 'worktree';

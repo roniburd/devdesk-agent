@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { UsageScan } from '../src/core/usage';
+import { UsageScan, unsplitTokens } from '../src/core/usage';
 import {
   addDays,
   DayCounter,
@@ -36,10 +36,10 @@ const scan = (...lines: string[]) => {
 };
 const day = (key: string, total: number, cached = 0, extra: Partial<DayUsage> = {}): DayUsage => ({
   day: key,
-  sessions: { total, cached, requests: 1 },
-  byModel: [{ model: 'm', tokens: { total, cached, requests: 1 } }],
-  bySession: [{ sessionId: 's1', name: 'One', total, cached, requests: 1 }],
-  devdesk: { total: 0, cached: 0, requests: 0, failed: 0 },
+  sessions: { total, cached, requests: 1, input: 0, cacheWrite: 0, output: 0 },
+  byModel: [{ model: 'm', tokens: { total, cached, requests: 1, input: 0, cacheWrite: 0, output: 0 } }],
+  bySession: [{ sessionId: 's1', name: 'One', total, cached, requests: 1, input: 0, cacheWrite: 0, output: 0 }],
+  devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 },
   ...extra,
 });
 
@@ -85,16 +85,16 @@ describe('usageByDay', () => {
     const days = usageByDay(scans, ledger, dayStart('2026-10-31'), new Map([['s1', 'Fix the parser']]), 1);
     expect([...days.keys()]).toEqual(['2026-10-31', '2026-11-01']);
     const oct31 = days.get('2026-10-31')!;
-    expect(oct31.sessions).toEqual({ total: 100, cached: 90, requests: 1 });
-    expect(oct31.bySession).toEqual([{ sessionId: 's1', name: 'Fix the parser', total: 100, cached: 90, requests: 1 }]);
+    expect(oct31.sessions).toEqual({ total: 100, cached: 90, requests: 1, input: 10, cacheWrite: 0, output: 0 });
+    expect(oct31.bySession).toEqual([{ sessionId: 's1', name: 'Fix the parser', total: 100, cached: 90, requests: 1, input: 10, cacheWrite: 0, output: 0 }]);
     const nov1 = days.get('2026-11-01')!;
-    expect(nov1.sessions).toEqual({ total: 8, cached: 0, requests: 3 });
+    expect(nov1.sessions).toEqual({ total: 8, cached: 0, requests: 3, input: 3, cacheWrite: 0, output: 5 });
     expect(nov1.byModel.map((m) => m.model)).toEqual(['claude-haiku-5-5 (DevDesk)', 'claude-opus-5-5', 'claude-haiku-5-5', 'unknown (DevDesk)']);
     expect(nov1.bySession).toEqual([
-      { sessionId: 's1', name: 'Fix the parser', total: 5, cached: 0, requests: 1 },
-      { sessionId: OTHER, name: '2 other sessions', total: 3, cached: 0, requests: 2 },
+      { sessionId: 's1', name: 'Fix the parser', total: 5, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 5 },
+      { sessionId: OTHER, name: '2 other sessions', total: 3, cached: 0, requests: 2, input: 3, cacheWrite: 0, output: 0 },
     ]);
-    expect(nov1.devdesk).toEqual({ total: 104, cached: 11, requests: 2, failed: 1 });
+    expect(nov1.devdesk).toEqual({ total: 104, cached: 11, requests: 2, failed: 1, input: 90, cacheWrite: 0, output: 3 });
   });
 
   it("lists DevDesk's own calls by model too, apart from the sessions' models", () => {
@@ -106,12 +106,12 @@ describe('usageByDay', () => {
     ].join('\n');
     const nov1 = usageByDay(scans, ledger, 0, new Map()).get('2026-11-01')!;
     expect(nov1.byModel).toEqual([
-      { model: 'claude-opus-5-5', tokens: { total: 500, cached: 0, requests: 1 } },
-      { model: 'claude-haiku-5-5 (DevDesk)', tokens: { total: 110, cached: 11, requests: 2 } },
-      { model: 'claude-haiku-5-5', tokens: { total: 1, cached: 0, requests: 1 } },
-      { model: 'unknown (DevDesk)', tokens: { total: 1, cached: 0, requests: 1 } },
+      { model: 'claude-opus-5-5', tokens: { total: 500, cached: 0, requests: 1, input: 500, cacheWrite: 0, output: 0 } },
+      { model: 'claude-haiku-5-5 (DevDesk)', tokens: { total: 110, cached: 11, requests: 2, input: 96, cacheWrite: 0, output: 3 } },
+      { model: 'claude-haiku-5-5', tokens: { total: 1, cached: 0, requests: 1, input: 1, cacheWrite: 0, output: 0 } },
+      { model: 'unknown (DevDesk)', tokens: { total: 1, cached: 0, requests: 1, input: 1, cacheWrite: 0, output: 0 } },
     ]);
-    expect(nov1.sessions).toEqual({ total: 501, cached: 0, requests: 2 });
+    expect(nov1.sessions).toEqual({ total: 501, cached: 0, requests: 2, input: 501, cacheWrite: 0, output: 0 });
   });
 
   it('skips what came before since', () => {
@@ -122,10 +122,26 @@ describe('usageByDay', () => {
 
 describe('history file', () => {
   it('round-trips a day and skips bad lines', () => {
-    const d = day('2026-10-31', 100, 90, { devdesk: { total: 5, cached: 1, requests: 2, failed: 1 } });
+    const d = day('2026-10-31', 100, 90, { devdesk: { total: 5, cached: 1, requests: 2, failed: 1, input: 0, cacheWrite: 0, output: 0 } });
     expect(decodeDay(encodeDay(d))).toEqual(d);
     const map = decodeHistory(`${encodeDay(d)}\nnot json\n{"day":"bad"}\n`);
     expect([...map.keys()]).toEqual(['2026-10-31']);
+  });
+
+  it("stores the parts of tokens, DevDesk's included, and reads a line from before them as unsplit", () => {
+    const t = { total: 100, cached: 60, requests: 2, input: 10, cacheWrite: 25, output: 5 };
+    const d = day('2026-10-31', 100, 60, { sessions: t, byModel: [{ model: 'm', tokens: t }], bySession: [{ sessionId: 's1', name: 'One', ...t }], devdesk: { ...t, failed: 1 } });
+    expect(decodeDay(encodeDay(d))).toEqual(d);
+    const old = decodeDay(JSON.stringify({ day: '2026-10-30', s: [100, 60, 2], m: [['m', 100, 60, 2]], x: [], d: [7, 1, 1, 1] }))!;
+    expect(old.unsplit).toBe(true);
+    expect(old.sessions).toEqual({ total: 100, cached: 60, requests: 2, input: 0, cacheWrite: 0, output: 0 });
+    expect(unsplitTokens(old.sessions)).toBe(40);
+    expect(old.devdesk).toEqual({ total: 7, cached: 1, requests: 1, failed: 1, input: 0, cacheWrite: 0, output: 0 });
+    // Written again, it has parts (none): the rest of its total stays unsplit, and it is not marked any more.
+    const { unsplit: _unsplit, ...upgraded } = old;
+    const again = decodeDay(encodeDay(upgraded))!;
+    expect(again).not.toHaveProperty('unsplit');
+    expect(unsplitTokens(again.sessions)).toBe(40);
   });
 
   it('drops days older than the limit, then the oldest until it fits', () => {
@@ -141,8 +157,8 @@ describe('history file', () => {
   });
 
   it('keeps a line small: a year of busy days fits well under the default 10 MB', () => {
-    const sessions = Array.from({ length: 21 }, (_, i) => ({ sessionId: `${i}`.padStart(36, 'a'), name: 'A fairly long session name for a feature', total: 123456789, cached: 98765432, requests: 1234 }));
-    const busy = day('2026-10-31', 1e9, 5e8, { bySession: sessions, byModel: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((model) => ({ model, tokens: { total: 1e9, cached: 5e8, requests: 9999 } })) });
+    const sessions = Array.from({ length: 21 }, (_, i) => ({ sessionId: `${i}`.padStart(36, 'a'), name: 'A fairly long session name for a feature', total: 123456789, cached: 98765432, requests: 1234, input: 0, cacheWrite: 0, output: 0 }));
+    const busy = day('2026-10-31', 1e9, 5e8, { bySession: sessions, byModel: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'].map((model) => ({ model, tokens: { total: 1e9, cached: 5e8, requests: 9999, input: 0, cacheWrite: 0, output: 0 } })) });
     expect(Buffer.byteLength(encodeDay(busy)) * 365).toBeLessThan(2 * 1024 * 1024);
   });
 
@@ -154,11 +170,11 @@ describe('history file', () => {
 
 describe('views', () => {
   it('sums days into a period, merging sessions and the rest', () => {
-    const a = day('2026-10-30', 100, 50, { bySession: [{ sessionId: 's1', name: 'Old name', total: 100, cached: 50, requests: 1 }] });
+    const a = day('2026-10-30', 100, 50, { bySession: [{ sessionId: 's1', name: 'Old name', total: 100, cached: 50, requests: 1, input: 0, cacheWrite: 0, output: 0 }] });
     const b = day('2026-10-31', 300, 0, {
       bySession: [
-        { sessionId: 's1', name: 'New name', total: 200, cached: 0, requests: 1 },
-        { sessionId: OTHER, name: '3 other sessions', total: 100, cached: 0, requests: 3 },
+        { sessionId: 's1', name: 'New name', total: 200, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 },
+        { sessionId: OTHER, name: '3 other sessions', total: 100, cached: 0, requests: 3, input: 0, cacheWrite: 0, output: 0 },
       ],
     });
     const v = sumDays([a, b], '2026-10-30', 'x', 'x');
@@ -167,6 +183,12 @@ describe('views', () => {
       ['New name', 300],
       ['Other sessions', 100],
     ]);
+  });
+
+  it("shows each part of a period's tokens, and what days from before the split left unsplit", () => {
+    const split = day('2026-10-31', 100, 60, { sessions: { total: 100, cached: 60, requests: 2, input: 10, cacheWrite: 25, output: 5 } });
+    const v = sumDays([day('2026-10-30', 50, 20), split], '2026-10-30', 'x', 'x');
+    expect(v.sessions).toMatchObject({ total: 150, cached: 80, input: 10, cacheWrite: 25, output: 5, unsplit: 30, inputText: '10', cacheWriteText: '25', outputText: '5', unsplitText: '30' });
   });
 
   it('lists every period, empty ones included', () => {
@@ -217,7 +239,7 @@ describe('usage by place', () => {
   /** A scan with requests `[id, cwd, total]` from session transcripts; cwd decides the place. */
   const scanOf = (entries: [string, string | undefined, number][], title?: string) => {
     const s = new UsageScan();
-    for (const [id, cwd, total] of entries) s.entries.set(id, { at, model: 'opus', total, cached: 0, ...(cwd ? { cwd } : {}) });
+    for (const [id, cwd, total] of entries) s.entries.set(id, { at, model: 'opus', total, cached: 0, input: total, cacheWrite: 0, output: 0, ...(cwd ? { cwd } : {}) });
     if (title) s.customTitle = title;
     return s;
   };
@@ -254,7 +276,7 @@ describe('usage by place', () => {
     expect(places[30].byModel.map((m) => m.model)).toEqual(['opus']);
     expect(places.filter((p) => p.project === DEVDESK)).toHaveLength(1);
     const others = scopeDays([day], { kind: 'project', project: OTHER })[0];
-    expect(others.sessions).toEqual({ total: 210, cached: 0, requests: 3 });
+    expect(others.sessions).toEqual({ total: 210, cached: 0, requests: 3, input: 210, cacheWrite: 0, output: 0 });
     expect(others.byModel.map((m) => m.model)).toEqual(['opus']);
     expect(places[0].bySession).toHaveLength(6);
     expect(places[0].bySession[5]).toMatchObject({ sessionId: OTHER, requests: 3 });
@@ -272,13 +294,13 @@ describe('usage by place', () => {
 
   const legacy: DayUsage = {
     day: '2026-10-01',
-    sessions: { total: 100, cached: 10, requests: 4 },
+    sessions: { total: 100, cached: 10, requests: 4, input: 0, cacheWrite: 0, output: 0 },
     byModel: [
-      { model: 'opus', tokens: { total: 100, cached: 10, requests: 4 } },
-      { model: 'haiku (DevDesk)', tokens: { total: 9, cached: 0, requests: 3 } },
+      { model: 'opus', tokens: { total: 100, cached: 10, requests: 4, input: 0, cacheWrite: 0, output: 0 } },
+      { model: 'haiku (DevDesk)', tokens: { total: 9, cached: 0, requests: 3, input: 0, cacheWrite: 0, output: 0 } },
     ],
-    bySession: [{ sessionId: 's1', name: 'One', total: 100, cached: 10, requests: 4 }],
-    devdesk: { total: 9, cached: 0, requests: 3, failed: 0 },
+    bySession: [{ sessionId: 's1', name: 'One', total: 100, cached: 10, requests: 4, input: 0, cacheWrite: 0, output: 0 }],
+    devdesk: { total: 9, cached: 0, requests: 3, failed: 0, input: 0, cacheWrite: 0, output: 0 },
   };
 
   it('reads a day stored before places were counted as the Unknown project and DevDesk', () => {
@@ -304,6 +326,19 @@ describe('usage by place', () => {
     expect(upgradeDay(legacy, partial)).toEqual({ ...legacy, byPlace: 'unknown' });
   });
 
+  it('upgrades a day stored before tokens were split: from the recount in full, else as stored and not marked again', () => {
+    const old: DayUsage = { ...legacy, byPlace: 'unknown', unsplit: true };
+    const kept = upgradeDay(old, undefined);
+    expect(kept).not.toHaveProperty('unsplit');
+    expect(kept).toEqual({ ...legacy, byPlace: 'unknown' });
+    const c = new DayCounter(0, Infinity, fake);
+    c.addScan('s1', scanOf([['a', '/r', 25], ['b', '/r', 25], ['c', '/r', 25], ['d', '/r', 25]]));
+    const up = upgradeDay(old, { ...c.day('2026-11-01', new Map())!, day: legacy.day });
+    expect(up).not.toHaveProperty('unsplit');
+    expect(up.sessions).toMatchObject({ total: 100, input: 100 });
+    expect(Array.isArray(up.byPlace)).toBe(true);
+  });
+
   it('upgrades a day with more places than kept, keeping DevDesk’s stored calls as their own place', () => {
     const c = new DayCounter(0, Infinity, fake);
     for (let i = 0; i < 31; i++) c.addScan(`p${i}`, scanOf([[`r${i}`, `/p${i}`, 100 + i]]));
@@ -312,8 +347,8 @@ describe('usage by place', () => {
     const old: DayUsage = {
       ...legacy,
       sessions: { ...recount.sessions },
-      byModel: [{ model: 'haiku (DevDesk)', tokens: { total: 50, cached: 0, requests: 2 } }],
-      devdesk: { total: 50, cached: 0, requests: 2, failed: 0 },
+      byModel: [{ model: 'haiku (DevDesk)', tokens: { total: 50, cached: 0, requests: 2, input: 0, cacheWrite: 0, output: 0 } }],
+      devdesk: { total: 50, cached: 0, requests: 2, failed: 0, input: 0, cacheWrite: 0, output: 0 },
     };
     const check = (places: PlaceDay[]) => {
       expect(places).toHaveLength(31);

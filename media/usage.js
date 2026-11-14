@@ -1,6 +1,6 @@
 // @ts-check
-/* The Claude Usage page: tokens by day, week or month (a stacked column chart of new and cached tokens, and the
- * cached share), with the selected period's models, sessions, projects (or worktrees) and DevDesk insight calls, for
+/* The Claude Usage page: tokens by day, week or month (a stacked column chart of input, cache writes and cached
+ * tokens with the cached share, and a chart of output tokens; a toggle shows both or either), with the selected period's models, sessions, projects (or worktrees) and DevDesk insight calls, for
  * the window's scope: one project (and worktree) or all projects, chosen in the header. Data comes from the host
  * (`usagePanel.ts`), already summed and formatted. */
 import { countHead, durationText, timeLeftText } from '../src/core/usageProgress';
@@ -9,8 +9,8 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
   const vscode = acquireVsCodeApi();
   const SVG = 'http://www.w3.org/2000/svg';
   const main = /** @type {HTMLElement} */ (document.getElementById('main'));
-  /** @type {{ unit: 'day' | 'week' | 'month', selected?: string, everyOpen?: boolean, everySort?: { col: number, dir: 1 | -1, for: string } }} */
-  const state = Object.assign({ unit: 'day' }, vscode.getState() || {});
+  /** @type {{ unit: 'day' | 'week' | 'month', view: 'both' | 'input' | 'output', selected?: string, everyOpen?: boolean, everySort?: { col: number, dir: 1 | -1, for: string } }} */
+  const state = Object.assign({ unit: 'day', view: 'both' }, vscode.getState() || {});
   /** @type {any} The page last posted (`ScopedPage` in src/core/usageScope.ts). */
   let page;
   /** Claude's plan limits (`planLimits.ts`): `view` (the 5-hour and weekly rows), `setup` (offer the status line), or neither. */
@@ -114,24 +114,39 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
   }
   const hideTip = () => (tip.hidden = true);
 
+  /** A note for tokens counted before they were split into input, cache writes and output (`t.unsplit`). */
+  const unsplitNote = (t) => (t.unsplit > 0 ? [['muted', `${t.unsplitText} before the split (input, cache writes and output together)`]] : []);
   const tipLines = (p) => [
     ['tip-title', p.label],
     ['', `Total ${p.sessions.totalText}`],
+    ['', `Input ${p.sessions.inputText}`],
+    ['', `Cache writes ${p.sessions.cacheWriteText}`],
     ['', `Cached ${p.sessions.cachedText}`],
+    ['', `Output ${p.sessions.outputText}`],
+    ...unsplitNote(p.sessions),
     ['muted', `${p.sessions.requests} requests`],
   ];
 
-  /** The columns: new tokens at the base, cached above, one per period; click selects. */
-  function columnChart(periods, width) {
-    const H = 220;
+  /** The input chart's segments, from the base up: what was sent to the model (`[class, label, value of tokens]`). */
+  const INPUT_SEGMENTS = [
+    ['input', 'Input', (t) => t.input],
+    ['write', 'Cache writes', (t) => t.cacheWrite],
+    ['unsplit', 'Before the split (input, cache writes, output)', (t) => t.unsplit],
+    ['cached', 'Cached (cache reads)', (t) => t.cached],
+  ];
+  const OUTPUT_SEGMENTS = [['output', 'Output', (t) => t.output]];
+
+  /** Stacked columns of `segments` (from the base up), one per period; click selects. */
+  function columnChart(periods, width, segments, label, H = 220) {
     const M = { top: 12, right: 8, bottom: 26, left: 48 };
     const w = Math.max(200, width) - M.left - M.right;
     const h = H - M.top - M.bottom;
-    const max = Math.max(1, ...periods.map((p) => p.sessions.total));
+    const values = (p) => segments.map(([, , v]) => Math.max(0, v(p.sessions)));
+    const max = Math.max(1, ...periods.map((p) => values(p).reduce((a, b) => a + b, 0)));
     const step = niceStep(max, 4);
     const top = Math.ceil(max / step) * step;
     const y = (v) => M.top + h - (v / top) * h;
-    const root = svg('svg', { width: w + M.left + M.right, height: H, class: 'chart', role: 'img', 'aria-label': 'Tokens per period: new and cached' });
+    const root = svg('svg', { width: w + M.left + M.right, height: H, class: 'chart', role: 'img', 'aria-label': label });
     for (let v = 0; v <= top + 1e-9; v += step) {
       root.append(svg('line', { x1: M.left, x2: M.left + w, y1: y(v), y2: y(v), class: v ? 'grid' : 'axis' }));
       const t = svg('text', { x: M.left - 6, y: y(v) + 4, class: 'tick', 'text-anchor': 'end' });
@@ -144,20 +159,21 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     periods.forEach((p, i) => {
       const cx = M.left + band * i + band / 2;
       const x = cx - bw / 2;
-      const total = p.sessions.total;
-      const cached = p.sessions.cached;
-      const fresh = total - cached;
       const g = svg('g', { class: `col${p.key === state.selected ? ' selected' : ''}` });
-      const hNew = (fresh / top) * h;
-      const hCached = (cached / top) * h;
+      const vs = values(p);
+      const last = vs.reduce((n, v, k) => (v > 0 ? k : n), -1);
       const GAP = 2;
-      if (fresh > 0) g.append(svg('path', { d: columnPath(x, y(0) - hNew, bw, hNew, cached <= 0), class: 'seg new' }));
-      if (cached > 0) {
-        const hc = Math.max(0, hCached - (fresh > 0 ? GAP : 0));
-        g.append(svg('path', { d: columnPath(x, y(0) - hNew - hCached, bw, hc, true), class: 'seg cached' }));
-      }
+      let base = 0;
+      vs.forEach((v, k) => {
+        if (v <= 0) return;
+        const hs = (v / top) * h;
+        // A gap under each segment but the lowest, so the stack reads as parts; only the top one is rounded.
+        const hh = Math.max(0, hs - (base > 0 ? GAP : 0));
+        g.append(svg('path', { d: columnPath(x, y(0) - base - hs, bw, hh, k === last), class: `seg ${segments[k][0]}` }));
+        base += hs;
+      });
       // The hit target: the whole band, taller than the column.
-      const hit = svg('rect', { x: M.left + band * i, y: M.top, width: band, height: h, class: 'hit', tabindex: 0, role: 'button', 'aria-label': `${p.label}: total ${p.sessions.totalText}, cached ${p.sessions.cachedText}` });
+      const hit = svg('rect', { x: M.left + band * i, y: M.top, width: band, height: h, class: 'hit', tabindex: 0, role: 'button', 'aria-label': `${p.label}: total ${p.sessions.totalText}, input ${p.sessions.inputText}, cache writes ${p.sessions.cacheWriteText}, cached ${p.sessions.cachedText}, output ${p.sessions.outputText}` });
       hit.addEventListener('mousemove', (ev) => showTip(ev, tipLines(p)));
       hit.addEventListener('mouseleave', hideTip);
       const select = () => {
@@ -226,9 +242,11 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     return root;
   }
 
-  function legend() {
+  /** The legend of `segments`; Before the split only when one of `periods` has some. */
+  function legend(segments, periods) {
     const l = el('div', 'legend');
-    for (const [cls, label] of [['new', 'New (input, cache writes, output)'], ['cached', 'Cached (cache reads)']]) {
+    for (const [cls, label, v] of segments) {
+      if (cls === 'unsplit' && !periods.some((p) => v(p.sessions) > 0)) continue;
       const item = el('span', 'legend-item');
       item.append(el('span', `swatch ${cls}`), el('span', '', label));
       l.append(item);
@@ -352,6 +370,36 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     worktreeSel.value = selects.worktree.value;
   }
 
+  /** The token columns of a table, and their cells for a row's tokens (`TokensText`), each sorting by its number. */
+  const PART_HEAD = ['Total', 'Input', 'Cache writes', 'Cached', 'Output'];
+  /** A part of tokens partly counted before the split is marked `*`, and `—` when none of them was split. */
+  const partCell = (t, text, n) => {
+    if (!(t.unsplit > 0)) return [text, n];
+    const note = `${t.unsplitText} before the split: in none of input, cache writes and output`;
+    return t.input + t.cacheWrite + t.output > 0 ? [`${text}*`, n, note] : ['—', null, note];
+  };
+  const partCells = (t) => [[t.totalText, t.total], partCell(t, t.inputText, t.input), partCell(t, t.cacheWriteText, t.cacheWrite), [t.cachedText, t.cached], partCell(t, t.outputText, t.output)];
+
+  /** Shows both charts, or only the input or the output one. */
+  function viewToggle() {
+    const g = el('div', 'units view');
+    g.setAttribute('role', 'radiogroup');
+    g.setAttribute('aria-label', 'Charts');
+    for (const [view, label] of /** @type {const} */ ([['both', 'Both'], ['input', 'Input'], ['output', 'Output']])) {
+      const b = el('button', '', label);
+      b.setAttribute('role', 'radio');
+      b.setAttribute('data-view', view);
+      b.setAttribute('aria-checked', String(state.view === view));
+      b.addEventListener('click', () => {
+        state.view = view;
+        save();
+        render();
+      });
+      g.append(b);
+    }
+    return g;
+  }
+
   const mb = (b) => (b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
   function render() {
@@ -372,25 +420,40 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     const summary = el('section', 'block');
     summary.append(el('h2', '', sel.label));
     const tiles = el('div', 'tiles');
+    const t = sel.sessions;
     tiles.append(
-      tile('Total', sel.sessions.totalText, `${sel.sessions.requests} requests`),
-      tile('Cached', sel.sessions.cachedText, 'read from the prompt cache'),
-      tile('New', compact(sel.sessions.total - sel.sessions.cached), 'input, cache writes, output'),
+      tile('Total', t.totalText, `${t.requests} requests`),
+      tile('Input', t.inputText, 'sent, not from the cache'),
+      tile('Cache writes', t.cacheWriteText, 'written to the prompt cache'),
+      tile('Cached', t.cachedText, 'read from the prompt cache'),
+      tile('Output', t.outputText, 'written by the model'),
     );
+    if (t.unsplit > 0) tiles.append(tile('Before the split', t.unsplitText, 'input, cache writes and output, counted together'));
     // A project's usage never includes DevDesk's own calls.
     if (all) tiles.append(tile('DevDesk insights', sel.devdesk.totalText, `${sel.devdesk.requests} calls${sel.devdesk.failed ? `, ${sel.devdesk.failed} failed` : ''}`));
     summary.append(tiles);
     parts.push(summary);
 
     const chartBlock = el('section', 'block');
-    chartBlock.append(el('h2', '', `Tokens per ${state.unit}`), legend(), columnChart(periods, width));
-    chartBlock.append(el('h2', 'sub', 'Cached share'), shareChart(periods, width));
+    const chartHead = el('div', 'chart-head');
+    chartHead.append(el('h2', '', `Tokens per ${state.unit}`), viewToggle());
+    chartBlock.append(chartHead);
+    if (state.view !== 'output') {
+      if (state.view === 'both') chartBlock.append(el('h2', 'sub', 'Input'));
+      chartBlock.append(legend(INPUT_SEGMENTS, periods), columnChart(periods, width, INPUT_SEGMENTS, 'Input tokens per period: input, cache writes and cached'));
+      chartBlock.append(el('h2', 'sub', 'Cached share'), shareChart(periods, width));
+    }
+    if (state.view !== 'input') {
+      chartBlock.append(el('h2', 'sub', 'Output'));
+      chartBlock.append(columnChart(periods, width, OUTPUT_SEGMENTS, 'Output tokens per period', state.view === 'output' ? 220 : 140));
+      if (periods.some((p) => p.sessions.unsplit > 0)) chartBlock.append(el('p', 'muted note', 'Days counted before tokens were split, whose transcripts are gone, have their output in Before the split.'));
+    }
     parts.push(chartBlock);
 
     const grid = el('div', 'grid2');
     grid.append(
-      table(`By model · ${sel.label}`, ['Model', 'Total', 'Cached', 'Requests'], sel.models.map((m) => [m.model, m.totalText, m.cachedText, String(m.requests)])),
-      table(`Top sessions · ${sel.label}`, ['Session', 'Total', 'Cached', 'Requests'], sel.top.map((s) => [s.name, s.totalText, s.cachedText, String(s.requests)])),
+      table(`By model · ${sel.label}`, ['Model', ...PART_HEAD, 'Requests'], sel.models.map((m) => [m.model, ...partCells(m), String(m.requests)])),
+      table(`Top sessions · ${sel.label}`, ['Session', ...PART_HEAD, 'Requests'], sel.top.map((s) => [s.name, ...partCells(s), String(s.requests)])),
     );
     parts.push(grid);
 
@@ -399,8 +462,8 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     parts.push(
       table(
         `${all ? 'Projects' : 'Worktrees'} · ${sel.label}`,
-        [all ? 'Project' : 'Worktree', 'Total', 'Cached', 'Share'],
-        places.map((p) => [p.label, p.totalText, p.cachedText, `${p.share}%`]),
+        [all ? 'Project' : 'Worktree', ...PART_HEAD, 'Share'],
+        places.map((p) => [p.label, ...partCells(p), `${p.share}%`]),
         { titles: places.map((p) => p.title) },
       ),
     );
@@ -417,16 +480,10 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     const projectCell = (pl) => (pl.project === undefined ? ['—', null] : [labelOf.get(pl.project) ?? pl.label, labelOf.get(pl.project) ?? pl.label, pl.title]);
     const rows = all
       ? [...periods].reverse().flatMap((p, i) =>
-          (p.places && p.places.length ? p.places : [{ label: '—', total: p.sessions.total, totalText: p.sessions.totalText, cached: p.sessions.cached, cachedText: p.sessions.cachedText, requests: p.sessions.requests }]).map((pl) => [
-            num(p.label, at(i)),
-            projectCell(pl),
-            num(pl.totalText, pl.total),
-            num(pl.cachedText, pl.cached),
-            num(String(pl.requests), pl.requests),
-          ]),
+          (p.places && p.places.length ? p.places : [{ ...p.sessions, label: '—' }]).map((pl) => [num(p.label, at(i)), projectCell(pl), ...partCells(pl), num(String(pl.requests), pl.requests)]),
         )
-      : [...periods].reverse().map((p, i) => [num(p.label, at(i)), num(p.sessions.totalText, p.sessions.total), num(p.sessions.cachedText, p.sessions.cached), num(String(p.sessions.requests), p.sessions.requests)]);
-    const head = all ? [unitTitle, 'Project', 'Total', 'Cached', 'Requests'] : [unitTitle, 'Total', 'Cached', 'Requests'];
+      : [...periods].reverse().map((p, i) => [num(p.label, at(i)), ...partCells(p.sessions), num(String(p.sessions.requests), p.sessions.requests)]);
+    const head = all ? [unitTitle, 'Project', ...PART_HEAD, 'Requests'] : [unitTitle, ...PART_HEAD, 'Requests'];
     // A sort is kept while the columns stay the same (same unit, same kind of scope).
     // Kept in the webview's state (`everySort`, undefined: newest first), so it survives the tab being hidden.
     const sortFor = `${state.unit}:${all}`;
@@ -449,7 +506,7 @@ import { countHead, durationText, timeLeftText } from '../src/core/usageProgress
     foot.textContent =
       `History: ${h.days} day${h.days === 1 ? '' : 's'} · ${mb(h.bytes)} of ${mb(h.maxBytes)} · kept ${h.keepDays} days` +
       (h.oldest ? ` · oldest ${h.oldest}` : '') +
-      '. Total counts input, cache writes, cache reads and output; cached is the part read from the prompt cache. Today is counted live.';
+      '. Total counts input, cache writes, cache reads (cached) and output. Days counted before tokens were split, whose transcripts are gone, keep input, cache writes and output together, as Before the split. Today is counted live.';
     parts.push(foot);
     main.replaceChildren(...parts);
   }

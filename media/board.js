@@ -1733,23 +1733,32 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
   $('cardline').addEventListener('click', () => send('toggleCardLine'));
 
   /**
-   * The 📊 popover: tokens used today, this week and in the last 30 days, as total and cached (with its share), by
-   * sessions and by DevDesk's Haiku insights; More… opens the Claude Usage page. Its selects choose the project (or
-   * All projects) and the worktree, and today's breakdown by project (or by worktree) narrows the scope on a click.
+   * The 📊 popover: tokens used today, this week and in the last 30 days, as total, input, cached (with its share) and
+   * output, by sessions and by DevDesk's Haiku insights; More… opens the Claude Usage page. Its selects choose the
+   * project (or All projects) and the worktree, and today's breakdown by project (or by worktree) narrows the scope on a
+   * click.
    */
   const stats = (() => {
     const btn = $('stats');
     const pop = $('stats-pop');
     const TITLE = 'Token usage';
+    /** A part of `t` (input or output): `*` when part of it was counted before tokens were split, `—` when all was. */
+    const part = (t, text) => {
+      if (!(t.unsplit > 0)) return el('span', 'stats-num', text);
+      const s = el('span', 'stats-num', t.input + t.cacheWrite + t.output > 0 ? `${text}*` : '—');
+      s.title = `${t.unsplitText} before the split: in none of input, cache writes and output`;
+      return s;
+    };
     const row = (label, t, extra) => {
       const r = el('div', 'stats-row');
-      r.append(el('span', 'stats-label', label), el('span', 'stats-num', t.totalText), el('span', 'stats-num cached', t.cachedText));
+      r.append(el('span', 'stats-label', label), el('span', 'stats-num', t.totalText), part(t, t.inputText), el('span', 'stats-num cached', t.cachedText), part(t, t.outputText));
       if (extra) r.append(el('span', 'stats-extra', extra));
       return r;
     };
     const head = () => {
       const r = el('div', 'stats-row stats-head');
-      r.append(el('span', 'stats-label', ''), el('span', 'stats-num', 'total'), el('span', 'stats-num cached', 'cached'));
+      r.append(el('span', 'stats-label', ''), el('span', 'stats-num', 'total'), el('span', 'stats-num', 'input'), el('span', 'stats-num cached', 'cached'), el('span', 'stats-num', 'output'));
+      r.title = 'Input is what was sent, not from the cache; cache writes are only on the Claude Usage page (More…)';
       return r;
     };
     const section = (title) => el('div', 'stats-section', title);
@@ -1790,7 +1799,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
       r.tabIndex = 0;
       r.setAttribute('role', 'button');
       // The name a screen reader reads replaces the row's text: it carries the numbers too.
-      r.setAttribute('aria-label', `Show ${p.label}: ${p.totalText} total, ${p.cachedText} cached, ${p.share}%`);
+      r.setAttribute('aria-label', `Show ${p.label}: ${p.totalText} total, ${p.inputText} input, ${p.cachedText} cached, ${p.outputText} output, ${p.share}%`);
       const go = () => send('usageScope', { scope: p.narrow });
       r.addEventListener('click', go);
       r.addEventListener('keydown', (ev) => {
@@ -1897,7 +1906,7 @@ import { countHead, timeLeftText } from '../src/core/usageProgress';
         parts.push(section('DevDesk insights (Haiku)'));
         for (const p of u.periods.slice(0, 2)) parts.push(row(p.label, p.devdesk, calls(p.devdesk)));
       }
-      parts.push(el('div', 'stats-note', 'Total counts input, cache writes, cache reads and output. Cached is the part read from the prompt cache, which is cheaper and is not new work; the % is its share of the total.'));
+      parts.push(el('div', 'stats-note', 'Total counts input, cache writes, cache reads and output. Input is what was sent, not from the cache; output is what the model wrote. Cached is the part read from the prompt cache, which is cheaper and is not new work; the % is its share of the total. * or —: partly or all counted before tokens were split (hover to see how much); More… shows cache writes too.'));
       parts.push(more());
       // Rebuilding drops the select or breakdown row being used: give focus back to the select with the same label,
       // or, when that element is gone (a row, or the Worktree select of a project with one worktree), to the Project select.

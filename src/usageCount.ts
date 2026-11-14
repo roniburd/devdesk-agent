@@ -91,11 +91,11 @@ export async function countUsage(reader: UsageReader, req: CountRequest, onProgr
   /** The first day not stored yet. */
   const fromKey = last && addDays(last, 1) > cutoff ? addDays(last, 1) : cutoff;
   /**
-   * Days stored before places were counted: counted once more, from what is left of their transcripts and the ledger
-   * (`upgradeDay`), so the read starts at the oldest of them. The first count after the upgrade reads what is left of
-   * the transcripts, about a month of them.
+   * Days stored before places, or the parts of tokens, were counted: counted once more, from what is left of their
+   * transcripts and the ledger (`upgradeDay`), so the read starts at the oldest of them. The first count after an
+   * upgrade reads what is left of the transcripts, about a month of them.
    */
-  const legacy = new Map([...stored.values()].filter((d) => d.day >= cutoff && d.day < fromKey && d.byPlace === undefined).map((d) => [d.day, d]));
+  const legacy = new Map([...stored.values()].filter((d) => d.day >= cutoff && d.day < fromKey && (d.byPlace === undefined || d.unsplit)).map((d) => [d.day, d]));
   const oldestLegacy = [...legacy.keys()].sort()[0];
   const since = dayStart(oldestLegacy ?? fromKey);
   const ledger = await readFile(req.ledgerPath, 'utf8').catch(() => '');
@@ -277,15 +277,17 @@ function unread(reader: UsageReader, f: TranscriptFile): number {
 /**
  * The stored days after reading the history file again (`onDisk`): the days this count stored (`counted`) as it
  * counted them, every other one as the file has it, so a day another window stored meanwhile is kept. A window still
- * on a build from before places were counted rewrites the file without them: a day the file has with the same totals
- * but no places keeps the places this window has for it.
+ * on a build from before places (or the parts of tokens) were counted rewrites the file without them: a day the file
+ * has with the same totals but without them keeps what this window has for it.
  */
 export function mergeHistory(stored: ReadonlyMap<string, DayUsage>, onDisk: ReadonlyMap<string, DayUsage>, counted: ReadonlySet<string>): Map<string, DayUsage> {
   const merged = new Map(stored);
   for (const [key, day] of onDisk) {
     if (counted.has(key)) continue;
     const mine = stored.get(key);
-    merged.set(key, day.byPlace === undefined && mine?.byPlace !== undefined && sameTotals(day, mine) ? { ...day, byPlace: mine.byPlace } : day);
+    if (!mine || !sameTotals(day, mine)) merged.set(key, day);
+    else if (day.unsplit && !mine.unsplit) merged.set(key, day.byPlace === undefined || mine.byPlace !== undefined ? mine : { ...mine, byPlace: day.byPlace });
+    else merged.set(key, day.byPlace === undefined && mine.byPlace !== undefined ? { ...day, byPlace: mine.byPlace } : day);
   }
   return merged;
 }

@@ -1,8 +1,13 @@
-/* The Claude Usage page. Series colors are the dataviz reference palette's slots 1 and 2, stepped per theme (validated
- * light and dark: CVD and normal-vision separation, contrast against the surface). */
+/* The Claude Usage page. Series colors are the dataviz reference palette's slots 1 to 4, stepped per theme. Input,
+ * cache writes and cached (slots 1-3) stack, validated light and dark (CVD and normal-vision separation, contrast
+ * against the surface; aqua is under 3:1 on light, so the tables carry every number). Output (slot 4) has a chart of its
+ * own, never next to cached. Tokens counted before they were split are a neutral gray. */
 body {
-  --series-new: #2a78d6;
+  --series-input: #2a78d6;
+  --series-write: #1baf7a;
   --series-cached: #eb6834;
+  --series-output: #eda100;
+  --series-unsplit: #8a8a85;
   margin: 0;
   padding: 0 16px 24px;
   color: var(--vscode-foreground);
@@ -11,8 +16,11 @@ body {
   font-size: var(--vscode-font-size);
 }
 body.vscode-dark, body.vscode-high-contrast {
-  --series-new: #3987e5;
+  --series-input: #3987e5;
+  --series-write: #199e70;
   --series-cached: #d95926;
+  --series-output: #c98500;
+  --series-unsplit: #75756f;
 }
 .bar { display: flex; align-items: center; gap: 8px; padding: 10px 0; position: sticky; top: 0; background: var(--vscode-editor-background); z-index: 2; }
 .bar h1 { font-size: 1.15em; margin: 0 12px 0 0; font-weight: 600; }
@@ -46,15 +54,23 @@ h2.sub { margin-top: 16px; color: var(--vscode-descriptionForeground); }
 .legend { display: flex; gap: 16px; font-size: 0.85em; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
-.swatch.new { background: var(--series-new); }
+.swatch.input { background: var(--series-input); }
+.swatch.write { background: var(--series-write); }
+.swatch.unsplit { background: var(--series-unsplit); }
 .swatch.cached { background: var(--series-cached); }
 svg.chart { display: block; overflow: visible; }
 .grid { stroke: var(--vscode-widget-border, rgba(128, 128, 128, 0.2)); stroke-opacity: 0.5; stroke-width: 1; }
 .axis { stroke: var(--vscode-descriptionForeground); stroke-opacity: 0.5; stroke-width: 1; }
 .tick { fill: var(--vscode-descriptionForeground); font-size: 10px; font-variant-numeric: tabular-nums; }
 .tick.strong { fill: var(--vscode-foreground); font-weight: 600; }
-.seg.new { fill: var(--series-new); }
+.seg.input { fill: var(--series-input); }
+.seg.write { fill: var(--series-write); }
+.seg.unsplit { fill: var(--series-unsplit); }
 .seg.cached { fill: var(--series-cached); }
+.seg.output { fill: var(--series-output); }
+.chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.chart-head h2 { margin: 0; }
+.note { font-size: 0.85em; margin: 4px 0 0; }
 .col .seg { opacity: 0.7; transition: opacity 0.1s; }
 .col.selected .seg, .col:hover .seg { opacity: 1; }
 .hit { fill: transparent; cursor: pointer; }

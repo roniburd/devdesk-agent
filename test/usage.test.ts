@@ -10,10 +10,10 @@ const assistant = (requestId: string, at: string, usage: Record<string, number>,
   JSON.stringify({ type: 'assistant', requestId, timestamp: at, message: { id: `m-${requestId}`, model, usage } });
 
 describe('usage lines', () => {
-  it('counts total and cached tokens of assistant lines', () => {
+  it('counts the total and each part of assistant lines\' tokens', () => {
     expect(parseUsageLine(assistant('r1', '2026-11-01T10:00:00Z', { input_tokens: 10, cache_creation_input_tokens: 20, cache_read_input_tokens: 1000, output_tokens: 5 }))).toEqual([
       'r1',
-      { at: Date.parse('2026-11-01T10:00:00Z'), model: 'claude-opus-5-5', total: 1035, cached: 1000 },
+      { at: Date.parse('2026-11-01T10:00:00Z'), model: 'claude-opus-5-5', total: 1035, cached: 1000, input: 10, cacheWrite: 20, output: 5 },
     ]);
     expect(parseUsageLine(JSON.stringify({ type: 'user', message: { content: 'usage' } }))).toBeUndefined();
     expect(parseUsageLine('{"usage": broken')).toBeUndefined();

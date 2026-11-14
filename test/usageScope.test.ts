@@ -3,7 +3,7 @@ import type { DayUsage, PlaceDay } from '../src/core/usageHistory';
 import { DEVDESK, type Place, UNKNOWN } from '../src/core/usagePlace';
 import { ALL_SCOPE, narrowScope, parseScope, type ProjectChoice, resolveScope, scopeChoices, scopedPage, scopedPopover, scopeDays, scopeSelects } from '../src/core/usageScope';
 
-const t = (total: number, requests = 1) => ({ total, cached: 0, requests });
+const t = (total: number, requests = 1) => ({ total, cached: 0, requests, input: 0, cacheWrite: 0, output: 0 });
 const place = (project: string, worktree: string, total: number, session: string, kind: PlaceDay['kind'] = 'git'): PlaceDay => ({
   project,
   kind,

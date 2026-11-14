@@ -143,8 +143,28 @@ describe('countUsage', () => {
     await writeFile(req.historyPath, `${legacyLine(2, 5000, 9)}\n${legacyLine(1, 12, 2)}\n`);
     const snapshot = await countUsage(new UsageReader(), req);
     const day2 = snapshot.days.find((d) => d.day === key(2))!;
-    expect(day2.sessions).toEqual({ total: 5000, cached: 0, requests: 9 });
+    expect(day2.sessions).toEqual({ total: 5000, cached: 0, requests: 9, input: 0, cacheWrite: 0, output: 0 });
     expect(day2.byPlace).toBe('unknown');
+  });
+
+  // Stored after places, before tokens were split: places, but tokens as `[total, cached, requests]`.
+  const unsplitLine = (daysAgo: number, total: number, requests: number) => JSON.stringify({ day: key(daysAgo), s: [total, 0, requests], m: [], x: [], d: [0, 0, 0, 0], p: 'u' });
+
+  it('splits the tokens of a day stored before they were, when its transcripts are all there', async () => {
+    await mkdir(join(dir, 'state'), { recursive: true });
+    await writeFile(req.historyPath, `${unsplitLine(40, 77, 1)}\n${unsplitLine(2, 1010, 2)}\n${unsplitLine(1, 12, 2)}\n`);
+    const first = await countUsage(new UsageReader(), req);
+    const byDay = new Map(first.days.map((d) => [d.day, d]));
+    expect(byDay.get(key(2))!.sessions).toEqual({ total: 1010, cached: 0, requests: 2, input: 1010, cacheWrite: 0, output: 0 });
+    expect(Array.isArray(byDay.get(key(2))!.byPlace)).toBe(true);
+    // Its transcripts are gone: kept as it was, the rest of its total unsplit.
+    expect(byDay.get(key(40))!.sessions).toEqual({ total: 77, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 });
+    const stored = decodeHistory(await readFile(req.historyPath, 'utf8'));
+    expect([...stored.values()].some((d) => d.unsplit)).toBe(false);
+    // Checked once: the next count does not touch it.
+    const before = await readFile(req.historyPath, 'utf8');
+    await countUsage(new UsageReader(), { ...req, now: Date.now() });
+    expect(await readFile(req.historyPath, 'utf8')).toBe(before);
   });
 
   it('never counts again a day already stored with places', async () => {
@@ -160,9 +180,9 @@ describe('countUsage', () => {
     await mkdir(join(dir, 'state'), { recursive: true });
     // Day 3 was upgraded before the stop (its places stored); days 2 and 1 were not reached. Its place is one a
     // recount would not find (the transcripts have no `cwd`), so a recount would show.
-    const tokens = { total: 100, cached: 0, requests: 1 };
+    const tokens = { total: 100, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 };
     const place = { project: '/w/p', kind: 'folder' as const, worktree: 'main', tokens, byModel: [], bySession: [] };
-    const upgraded = encodeDay({ day: key(3), sessions: tokens, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0 }, byPlace: [place] });
+    const upgraded = encodeDay({ day: key(3), sessions: tokens, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 }, byPlace: [place] });
     await writeFile(req.historyPath, `${upgraded}\n${legacyLine(2, 1010, 2)}\n${legacyLine(1, 12, 2)}\n`);
     const done = await countUsage(new UsageReader(), req);
     expect(totals(done.days)).toEqual(expected());
@@ -188,7 +208,7 @@ describe('countUsage', () => {
     expect(stopped.get(key(40))!.sessions.total).toBe(77);
     expect(Array.isArray(stopped.get(key(2))!.byPlace)).toBe(true);
     expect(stopped.get(key(1))!.byPlace).toBeUndefined();
-    expect(stopped.get(key(1))!.sessions).toEqual({ total: 12, cached: 0, requests: 2 });
+    expect(stopped.get(key(1))!.sessions).toEqual({ total: 12, cached: 0, requests: 2, input: 0, cacheWrite: 0, output: 0 });
     expect(text.split('\n').find((l) => l.includes(`"${key(1)}"`))).not.toContain('"p"');
 
     const progress: CountProgress[] = [];
@@ -202,9 +222,9 @@ describe('countUsage', () => {
     await mkdir(join(dir, 'state'), { recursive: true });
     // Day 5 (stored before places, no transcripts left) makes the read start before the upgraded day 3. A recount of
     // day 3 would put its request under '(unknown)', since the transcripts have no `cwd`.
-    const tokens = { total: 100, cached: 0, requests: 1 };
+    const tokens = { total: 100, cached: 0, requests: 1, input: 0, cacheWrite: 0, output: 0 };
     const place = { project: '/w/p', kind: 'folder' as const, worktree: 'main', tokens, byModel: [], bySession: [] };
-    const upgraded = encodeDay({ day: key(3), sessions: tokens, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0 }, byPlace: [place] });
+    const upgraded = encodeDay({ day: key(3), sessions: tokens, byModel: [], bySession: [], devdesk: { total: 0, cached: 0, requests: 0, failed: 0, input: 0, cacheWrite: 0, output: 0 }, byPlace: [place] });
     await writeFile(req.historyPath, `${legacyLine(5, 50, 1)}\n${upgraded}\n${legacyLine(2, 1010, 2)}\n${legacyLine(1, 12, 2)}\n`);
     const done = await countUsage(new UsageReader(), req);
     expect(totals(done.days)).toEqual({ [key(5)]: 50, ...expected() });
@@ -215,7 +235,7 @@ describe('countUsage', () => {
   });
 });
 
-const zero = { total: 0, cached: 0, requests: 0 };
+const zero = { total: 0, cached: 0, requests: 0, input: 0, cacheWrite: 0, output: 0 };
 const dayOf = (day: string, total: number): DayUsage =>
   decodeHistory(encodeDay({ day, sessions: { ...zero, total }, byModel: [], bySession: [], devdesk: { ...zero, failed: 0 } }).concat('\n')).get(day)!;
 
@@ -243,12 +263,18 @@ describe('usage history shared by several windows', () => {
   });
 
   it("keeps a day's places when a window on an older build wrote it again without them", () => {
-    const place = { project: '/r', kind: 'folder' as const, worktree: 'main', tokens: { total: 5, cached: 0, requests: 0 }, byModel: [], bySession: [] };
+    const place = { project: '/r', kind: 'folder' as const, worktree: 'main', tokens: { total: 5, cached: 0, requests: 0, input: 0, cacheWrite: 0, output: 0 }, byModel: [], bySession: [] };
     const counted: DayUsage = { ...dayOf('2026-01-01', 5), byPlace: [place] };
     const stored = new Map([['2026-01-01', counted]]);
     expect(mergeHistory(stored, new Map([['2026-01-01', dayOf('2026-01-01', 5)]]), new Set()).get('2026-01-01')?.byPlace).toEqual([place]);
     // Other totals: the other window counted the day again, so its line wins as it is.
     expect(mergeHistory(stored, new Map([['2026-01-01', dayOf('2026-01-01', 6)]]), new Set()).get('2026-01-01')).not.toHaveProperty('byPlace');
+  });
+
+  it('keeps the parts of a day\'s tokens when a window on an older build wrote it again without them', () => {
+    const split: DayUsage = { ...dayOf('2026-01-01', 5), sessions: { total: 5, cached: 0, requests: 1, input: 2, cacheWrite: 0, output: 3 } };
+    const older = decodeHistory(`${JSON.stringify({ day: '2026-01-01', s: [5, 0, 1], m: [], x: [], d: [0, 0, 0, 0] })}\n`);
+    expect(mergeHistory(new Map([['2026-01-01', split]]), older, new Set()).get('2026-01-01')).toEqual(split);
   });
 
   it('keeps a day another window stored while this count ran', async () => {

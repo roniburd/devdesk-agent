@@ -6,20 +6,32 @@ import { mapLimit } from './limit';
 
 /**
  * Token usage for the board's stats: what Claude sessions used (from their transcripts, subagents included) and what
- * DevDesk's own Haiku calls used (from `<state dir>/usage.jsonl`). Tokens only, as total (input, cache writes, cache
- * reads and output) and cached (cache reads), so the difference shows.
+ * DevDesk's own Haiku calls used (from `<state dir>/usage.jsonl`). Tokens only: the total, and its parts: input, cache
+ * writes, cached (cache reads) and output. Days stored before the parts were counted have only the total and cached:
+ * the rest of their total is {@link unsplitTokens}.
  */
 export interface Tokens {
+  /** Input, cache writes, cache reads and output. */
   total: number;
+  /** Cache reads. */
   cached: number;
   requests: number;
+  input: number;
+  cacheWrite: number;
+  output: number;
 }
+
+/** The part of a total counted before its parts were (input, cache writes and output together): 0 for usage counted since. */
+export const unsplitTokens = (t: Tokens): number => Math.max(0, t.total - t.cached - t.input - t.cacheWrite - t.output);
 
 export interface UsageEntry {
   at: number;
   model: string;
   total: number;
   cached: number;
+  input: number;
+  cacheWrite: number;
+  output: number;
   /** The folder the session ran in when it made the request (from its transcript line, else the line before). */
   cwd?: string;
 }
@@ -35,12 +47,12 @@ export function parseUsageLine(line: string): [string, UsageEntry] | undefined {
   const id = typeof o.requestId === 'string' && o.requestId ? o.requestId : typeof message.id === 'string' && message.id ? message.id : undefined;
   const at = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
   if (!id || !Number.isFinite(at)) return undefined;
-  const cached = positiveNumber(u.cache_read_input_tokens);
-  const total = positiveNumber(u.input_tokens) + positiveNumber(u.cache_creation_input_tokens) + cached + positiveNumber(u.output_tokens);
+  const parts = { cached: positiveNumber(u.cache_read_input_tokens), input: positiveNumber(u.input_tokens), cacheWrite: positiveNumber(u.cache_creation_input_tokens), output: positiveNumber(u.output_tokens) };
+  const total = parts.input + parts.cacheWrite + parts.cached + parts.output;
   if (!total) return undefined;
   const model = typeof message.model === 'string' && message.model && message.model !== '<synthetic>' ? message.model : 'unknown';
   const cwd = typeof o.cwd === 'string' && o.cwd ? o.cwd : undefined;
-  return [id, cwd ? { at, model, total, cached, cwd } : { at, model, total, cached }];
+  return [id, cwd ? { at, model, total, ...parts, cwd } : { at, model, total, ...parts }];
 }
 
 const CWD_VALUE = /"cwd":("(?:[^"\\]|\\.)*")/y;
@@ -110,12 +122,14 @@ export class UsageScan extends LineScan {
 }
 
 /** One call DevDesk made, from a line of its ledger (`usage.jsonl`, written by `ledgerLine` in insights.ts). */
-export function parseLedgerLine(line: string): { at: number; model: string; total: number; cached: number; ok: boolean } | undefined {
+export function parseLedgerLine(
+  line: string,
+): { at: number; model: string; total: number; cached: number; input: number; cacheWrite: number; output: number; ok: boolean } | undefined {
   const o = parseObject(line);
   if (!o || !isFiniteNumber(o.at)) return undefined;
-  const cached = positiveNumber(o.cacheRead);
+  const parts = { cached: positiveNumber(o.cacheRead), input: positiveNumber(o.input), cacheWrite: positiveNumber(o.cacheWrite), output: positiveNumber(o.output) };
   const model = typeof o.model === 'string' && o.model ? o.model : 'unknown';
-  return { at: o.at, model, total: positiveNumber(o.input) + positiveNumber(o.cacheWrite) + cached + positiveNumber(o.output), cached, ok: o.ok === true };
+  return { at: o.at, model, total: parts.input + parts.cacheWrite + parts.cached + parts.output, ...parts, ok: o.ok === true };
 }
 
 /** `950`, `12.3k`, `4.56M`, `1.22B`. */

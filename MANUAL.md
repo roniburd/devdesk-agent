@@ -1164,7 +1164,13 @@ DevDesk reads every transcript under `~/.claude/projects`, subagents included. I
 Each line has:
 
 - a **total**: input, cache writes, cache reads and output;
+- **input**: tokens sent to the model, not read from the prompt cache;
 - how much of it was **cached**, with its share, such as `63M (55%)`. Cached tokens are read from the prompt cache. They are cheaper, and are not new work.
+- **output**: tokens the model wrote.
+
+Cache writes (tokens written to the prompt cache) are in the total. The Claude Usage page shows them on their own.
+
+Days counted by earlier versions had only the total and cached tokens. DevDesk counts them again from their transcripts, if Claude Code hasn't deleted them yet. A day whose transcripts are gone keeps its input, cache writes and output together, as **Before the split**: its input and output show `—`, or a number marked `*` when only part of the period was split. Hover over it to see how much.
 
 DevDesk logs its own calls in `usage.jsonl` in `devdesk.sessions.stateDir`. The tokens per model list them apart from your sessions' models, as `<model> (DevDesk)`, for example `claude-haiku-5-5 (DevDesk)`. Days counted before v0.5.35 don't have this row.
 
@@ -1202,11 +1208,18 @@ Click **More…** in the popup, or run **DevDesk: Show Claude Token Usage**. The
 
 At the top, the page shows your plan limits, as the popup does (the same rows, the same **Show…** offer, and nothing without numbers or with `devdesk.usage.planLimits` off). Plan limits are for your whole Claude account, whatever project you choose.
 
-Each column shows new and cached tokens. A line shows the cached share. Click a column to see that period's totals, models and top sessions. Open *Every day as a table* to see the numbers.
+The page has two charts:
+
+- **Input**: each column stacks input, cache writes and cached tokens (and, for days counted by earlier versions whose transcripts are gone, *Before the split*). A line under it shows the cached share.
+- **Output**: the output tokens, on a scale of their own. Output is usually about 1% of the total, too little to see in the same column.
+
+**Both**, **Input** and **Output** above the charts show both or one of them. Click a column to see that period's total, input, cache writes, cached and output tokens, models and top sessions. Open *Every day as a table* to see the numbers.
 
 The header has the popup's **Project** and **Worktree** selects. Below the charts, **Projects** (under *All projects*) or **Worktrees** (for one project) splits the selected period by project or worktree. Under *All projects*, *Every day as a table* has a row per day and project. Click a column title in that table to sort by it, and again to reverse.
 
 ![The Projects table under All projects: each project's total, cached tokens and share of the week](images/usage-projects.png)
+
+The tables have a column for each part: total, input, cache writes, cached and output.
 
 ### By project
 
