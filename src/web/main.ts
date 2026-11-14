@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -10,6 +11,7 @@ import { ComposerCache } from '../core/web/composerCache';
 import { processAlive } from '../core/sessions';
 import { tmuxRunner } from '../core/tmux';
 import { type DaemonConfig, defaultDaemonConfig, fillTunnelCommand, parseDaemonArgs, parseDaemonConfig } from '../core/web/config';
+import { DEFAULT_PROJECT_DAYS, parseProjects, projectMaxAgeMs, projectsPath, recentProjects } from '../core/web/projects';
 import { SessionSnapshot } from '../core/web/snapshot';
 import { publicHostOf } from '../core/web/tunnel';
 import { classifyTunnelUrl, ngrokPolicy } from '../core/web/tunnelPresets';
@@ -61,7 +63,13 @@ async function main(): Promise<void> {
   const { config, configPath } = await loadConfig(process.argv.slice(2));
   const runner = (server: string) =>
     tmuxRunner(server, { bin: config.tmux.bin, ...(server === config.tmux.server && config.tmux.configFile ? { configFile: config.tmux.configFile } : {}) });
-  const snapshot = new SessionSnapshot(config, { tmux: runner, listProcesses, alive: processAlive });
+  // The other projects a window on this host recorded lately, read again on each refresh (projects.json).
+  const maxAgeMs = projectMaxAgeMs(config.projectDays ?? DEFAULT_PROJECT_DAYS);
+  const recordedRoots = async () => {
+    const text = await readFile(projectsPath(config.webDir), 'utf8').catch(() => '');
+    return recentProjects(parseProjects(text), Date.now(), maxAgeMs, existsSync).map((e) => e.root);
+  };
+  const snapshot = new SessionSnapshot(config, { tmux: runner, listProcesses, alive: processAlive, recordedRoots });
   let tunnelHost = '';
   const accessKeys = config.auth === 'cloudflare' && config.cloudflare.team ? new AccessKeyCache(config.cloudflare.team, log) : undefined;
   void accessKeys?.refresh(true);

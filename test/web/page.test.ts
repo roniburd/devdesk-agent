@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { buildSync } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { CardsResponse, ComposerResponse, FoldersResponse, SessionDetail, WebCard } from '../../src/core/web/types';
+import type { CardsResponse, ComposerResponse, FoldersResponse, ProjectsResponse, SessionDetail, WebCard } from '../../src/core/web/types';
 import { cssColor, fitLine } from '../../src/web/page/screen';
 
 const PAGE = join(__dirname, '..', '..', 'src', 'web', 'page');
@@ -449,11 +449,96 @@ describe('parked sessions', () => {
   });
 });
 
+describe('projects', () => {
+  const projects: ProjectsResponse = {
+    projects: [
+      { root: '/ws', name: 'ws', isDefault: true },
+      { root: '/other', name: 'other', isDefault: false },
+    ],
+  };
+  const folders: FoldersResponse = {
+    folders: [
+      { dir: '/ws', name: 'main', isMain: true, project: '/ws' },
+      { dir: '/ws/worktrees/feat', name: 'feat', isMain: false, project: '/ws' },
+      { dir: '/other', name: 'main', isMain: true, project: '/other' },
+    ],
+  };
+  const daemon = (served: ProjectsResponse) => (m: string, url: string) => {
+    if (m === 'GET' && url === 'api/projects') return { status: 200, body: served };
+    if (m === 'GET' && url === 'api/folders') return { status: 200, body: folders };
+    return undefined;
+  };
+  const cards = [
+    card({ id: 'a', title: 'In ws', project: '/ws', group: 'needs' }),
+    card({ id: 'b', title: 'In other', project: '/other' }),
+    card({ id: 'c', title: 'Nowhere' }),
+  ];
+  type Page = Awaited<ReturnType<typeof page>>;
+  const titles = (p: Page) => p.$$('.card .title').map((t) => t.textContent);
+  const pick = async (p: Page, root: string) => {
+    const select = p.$('select.project-pick') as HTMLSelectElement;
+    select.value = root;
+    select.dispatchEvent(new p.win.Event('change'));
+    await p.settle();
+  };
+
+  it('hides the picker with one project', async () => {
+    const p = await page(daemon({ projects: [projects.projects[0]] }));
+    expect(p.visible(p.$('select.project-pick'))).toBe(false);
+  });
+
+  it('shows all projects at first, then the picked one, counting the sessions that need you', async () => {
+    const p = await page(daemon(projects));
+    p.streams[0].emit('cards', cardsAnswer(cards));
+    await p.settle();
+    expect(p.visible(p.$('select.project-pick'))).toBe(true);
+    expect(p.$$('select.project-pick option').map((o) => o.textContent)).toEqual(['All projects · 1', 'ws · 1', 'other']);
+    expect(titles(p)).toEqual(['In ws', 'In other', 'Nowhere']);
+    await pick(p, '/other');
+    expect(titles(p)).toEqual(['In other']);
+    expect(p.win.localStorage.getItem('devdesk.web.project')).toBe('/other');
+    await pick(p, '/ws');
+    expect(titles(p)).toEqual(['In ws']);
+  });
+
+  it('says so when the picked project has no sessions', async () => {
+    const p = await page(daemon(projects));
+    p.streams[0].emit('cards', cardsAnswer([cards[0]]));
+    await p.settle();
+    await pick(p, '/other');
+    expect(p.$('.empty p')!.textContent).toBe('No Claude sessions are running in other.');
+  });
+
+  it("offers the picked project's folders, and every project's by name under all", async () => {
+    const p = await page(daemon(projects));
+    const folder = () => p.$('select.folder-pick') as HTMLSelectElement;
+    expect(p.$$('select.folder-pick optgroup').map((g) => g.getAttribute('label'))).toEqual(['ws', 'other']);
+    expect(folder().value).toBe('/ws');
+    await pick(p, '/other');
+    expect(p.$$('select.folder-pick option').map((o) => o.getAttribute('value'))).toEqual(['/other']);
+    expect(folder().value).toBe('/other');
+    await pick(p, '/ws');
+    expect(p.$$('select.folder-pick option').map((o) => o.textContent)).toEqual(['main (main repo)', 'feat']);
+  });
+
+  it('keeps the pick, and forgets one the daemon no longer serves', async () => {
+    const p = await page(daemon(projects));
+    p.win.localStorage.setItem('devdesk.web.project', '/other');
+    p.streams[0].emit('cards', cardsAnswer(cards));
+    await p.settle();
+    expect(titles(p)).toEqual(['In other']);
+    p.win.localStorage.setItem('devdesk.web.project', '/gone');
+    p.streams[0].emit('cards', cardsAnswer([...cards, card({ id: 'd', title: 'New' })]));
+    await p.settle();
+    expect(titles(p)).toEqual(['In ws', 'In other', 'Nowhere', 'New']);
+  });
+});
+
 describe('new session', () => {
   const folders: FoldersResponse = {
     folders: [
-      { dir: '/ws/feat-a', name: 'feat-a', isMain: false },
-      { dir: '/ws/main', name: 'main', isMain: true },
+      { dir: '/ws/feat-a', name: 'feat-a', isMain: false, project: '/ws' },
+      { dir: '/ws/main', name: 'main', isMain: true, project: '/ws' },
     ],
   };
   const starts = (m: string, url: string) => {
@@ -559,7 +644,7 @@ describe('new session', () => {
 });
 
 describe('prompt box tools', () => {
-  const folders: FoldersResponse = { folders: [{ dir: '/ws/main', name: 'main', isMain: true }] };
+  const folders: FoldersResponse = { folders: [{ dir: '/ws/main', name: 'main', isMain: true, project: '/ws' }] };
   const info: ComposerResponse = {
     commands: [
       { name: 'model', description: 'Set the model', origin: 'built-in', category: 'A', argumentHint: '[model]' },

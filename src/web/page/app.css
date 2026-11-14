@@ -476,6 +476,29 @@ button, input, textarea { font: inherit; color: inherit; }
   cursor: pointer;
 }
 .folder-pick:disabled { color: var(--muted); cursor: default; }
+/* The project picker in the list's bar: as the folder picker, smaller. */
+.project-chip { position: relative; display: flex; min-width: 0; }
+.project-chip[hidden] { display: none; }
+/* With several projects the picker takes the heading's place (the list is narrow on a phone and beside a session): the project's name says what the list is. */
+.bar:has(.project-chip:not([hidden])) .heading { display: none; }
+.bar .project-chip { flex: 1; max-width: none; }
+.bar .project-pick { flex: 1; font-weight: 600; }
+.project-chip::after { content: "▾"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.project-pick {
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--tap-sm);
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--ink);
+  font-size: max(16px, 0.9375rem);
+  text-overflow: ellipsis;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
 .composer .start { min-width: 96px; }
 
 /* The `/` button and the mode, model and effort pills: native selects (a wheel or sheet on a phone) drawn as chips. On

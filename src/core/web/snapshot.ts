@@ -9,6 +9,7 @@ import { STATE_INFO } from '../sessionStates';
 import { DEFAULT_SERVER, listPanes, listSessions, type TmuxPane, type TmuxRunner } from '../tmux';
 import { discoverFeatures, type Feature } from '../worktrees';
 import type { DaemonConfig } from './config';
+import { type Project, projectRoots } from './projects';
 
 /**
  * The live sessions' cards without VS Code, for the web access daemon: what `SessionsModel.refresh` does up to the
@@ -49,9 +50,11 @@ export interface SnapshotDeps {
   listProcesses: () => Promise<ProcessTable | undefined>;
   /** processAlive */
   alive: (pid: number) => boolean;
+  /** The other projects' roots (projects.json, recent ones whose folder is there); none when absent. */
+  recordedRoots?: () => Promise<string[]>;
 }
 
-/** Rediscover the root's worktrees every this many calls of `features()`. */
+/** Rediscover a project's worktrees every this many calls of `projects()`. */
 const REDISCOVER_EVERY = 10;
 
 export class SessionSnapshot {
@@ -59,8 +62,8 @@ export class SessionSnapshot {
   private readonly meta = new MetaReader();
   private readonly children = new ChildrenReader();
   private readonly ended = new EndedRecords();
-  private known?: { root: string | undefined; list: Feature[] };
-  private calls = 0;
+  /** Each project's worktrees, rediscovered every REDISCOVER_EVERY calls of `projects()`. */
+  private readonly known = new Map<string, { list: Feature[]; calls: number }>();
   private reading?: Promise<SessionCard[]>;
 
   constructor(
@@ -77,15 +80,31 @@ export class SessionSnapshot {
     return this.reading;
   }
 
-  /** The root's features (main and worktrees), main first; rediscovered every 10th call or when the root changed. [] without a root. */
+  /** Every project's features (main and worktrees), project by project, main first; [] without a root or recorded projects. */
   async features(): Promise<Feature[]> {
-    const root = this.cfg.root;
-    if (!this.known || this.known.root !== root || ++this.calls >= REDISCOVER_EVERY) {
-      const list = root ? await discoverFeatures(root, this.cfg.discovery) : [];
-      this.known = { root, list: [...list.filter((f) => f.isMain), ...list.filter((f) => !f.isMain)] };
-      this.calls = 0;
-    }
-    return this.known.list;
+    const seen = new Set<string>();
+    return (await this.projects()).flatMap((p) => p.features).filter((f) => !seen.has(f.dir) && !!seen.add(f.dir));
+  }
+
+  /**
+   * The projects served: the daemon's root first, then the other recorded ones, each with its worktrees (main first).
+   * Without a root or recorded projects, none.
+   */
+  async projects(): Promise<Project[]> {
+    const recorded = (await this.deps.recordedRoots?.().catch(() => [])) ?? [];
+    const roots = projectRoots(this.cfg.root, recorded);
+    for (const root of this.known.keys()) if (!roots.includes(root)) this.known.delete(root);
+    return Promise.all(
+      roots.map(async (root) => {
+        let known = this.known.get(root);
+        if (!known || ++known.calls >= REDISCOVER_EVERY) {
+          const list = await discoverFeatures(root, this.cfg.discovery).catch((): Feature[] => []);
+          known = { list: [...list.filter((f) => f.isMain), ...list.filter((f) => !f.isMain)], calls: 0 };
+          this.known.set(root, known);
+        }
+        return { root, features: known.list };
+      }),
+    );
   }
 
   /** tmux session names on cfg.tmux.server (for nextSessionName). */
@@ -108,7 +127,9 @@ export class SessionSnapshot {
       readCardExtras(cfg.stateDir, deps.alive),
     ]);
     const panes = withClaudeProcesses(paneLists.flat(), procs);
-    const features = await this.features();
+    const projects = await this.projects();
+    const seen = new Set<string>();
+    const features = projects.flatMap((p) => p.features).filter((f) => !seen.has(f.dir) && !!seen.add(f.dir));
     // No fork parents: a /fork runs outside tmux, where nothing can be typed into it. Parked sessions show, as in the
     // Claude view, so opening one resumes it.
     const split = splitRecords(records, panes, deps.alive);
@@ -124,7 +145,10 @@ export class SessionSnapshot {
       now: Date.now(),
       quietMs: cfg.hooksQuietMs,
     });
-    const scoped = cfg.scope === 'workspace' ? cardsInScope(all, cfg.scopeDirs, features) : all;
+    // In scope: sessions in any project served (the daemon's root as configured and resolved, the others' main
+    // worktrees resolved through their features).
+    const scopeDirs = [...cfg.scopeDirs, ...projects.map((p) => p.root)];
+    const scoped = cfg.scope === 'workspace' ? cardsInScope(all, scopeDirs, features) : all;
     const live = scoped.filter((c) => STATE_INFO[c.state].live);
     const parked = newestParked(
       scoped.filter((c) => c.state === 'parked'),

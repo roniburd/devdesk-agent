@@ -141,6 +141,14 @@ describe('parseDaemonConfig', () => {
     expect('config' in parsed && parsed.config.sort).toEqual({ mode: 'urgency', recentMs: 15 * 60_000, unreadFirst: true });
   });
 
+  it('keeps projectDays, absent when the config has none, and refuses a bad one', () => {
+    const kept = parseDaemonConfig({ ...good(), projectDays: 0 });
+    expect('config' in kept && kept.config.projectDays).toBe(0);
+    const none = parseDaemonConfig(good());
+    expect('config' in none && none.config).not.toHaveProperty('projectDays');
+    expect(parseDaemonConfig({ ...good(), projectDays: -1 })).toEqual({ error: 'bad config: projectDays must be a number, 0 or more' });
+  });
+
   it("keeps the prompt box's modes, models and Claude config directory", () => {
     const claude = { modeArgs: '', env: {}, modes: [{ name: 'Plan', args: '--permission-mode plan', description: 'Plan only' }], defaultMode: 'Plan', models: ['Default', 'opus'], configDir: '/h/.claude' };
     const parsed = parseDaemonConfig({ ...good(), claude });

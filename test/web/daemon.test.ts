@@ -349,6 +349,40 @@ describe('web access daemon (header auth, tunnel)', () => {
     expect(JSON.parse(r.body).folders).toEqual([expect.objectContaining({ dir: repo, isMain: true })]);
   });
 
+  it('serves the projects other windows recorded: lists them, their folders, and names each card its project', async () => {
+    const other = join(tmp, 'other-project');
+    await mkdir(join(other, '.git'), { recursive: true });
+    const path = join(d.stateDir, 'web', 'projects.json');
+    const now = Date.now();
+    const recorded = [
+      { root: other, seenAt: now },
+      { root: join(tmp, 'gone-project'), seenAt: now },
+      { root: repo, seenAt: now - 60 * 24 * 60 * 60_000 },
+    ];
+    await writeFile(path, JSON.stringify({ version: 1, projects: recorded }));
+    try {
+      const projects = await call(d.port, { path: '/api/projects', headers: as('roni') });
+      expect(projects.status).toBe(200);
+      expect(JSON.parse(projects.body).projects).toEqual([
+        { root: repo, name: 'repo', isDefault: true },
+        { root: other, name: 'other-project', isDefault: false },
+      ]);
+      const folders = JSON.parse((await call(d.port, { path: '/api/folders', headers: as('roni') })).body).folders;
+      expect(folders.map((f: { dir: string; project: string }) => [f.dir, f.project])).toEqual([
+        [repo, repo],
+        [other, other],
+      ]);
+      const composer = await call(d.port, { path: `/api/composer?dir=${encodeURIComponent(other)}`, headers: as('roni') });
+      expect(composer.status).toBe(200);
+      const cards = JSON.parse((await call(d.port, { path: '/api/sessions', headers: as('roni') })).body).cards;
+      expect(cards.find((c: { id: string }) => c.id === 'sess-1')).toMatchObject({ project: repo });
+      expect((await call(d.port, { path: '/api/projects' })).status).toBe(403);
+    } finally {
+      await rm(path, { force: true });
+    }
+    expect(JSON.parse((await call(d.port, { path: '/api/projects', headers: as('roni') })).body).projects).toEqual([{ root: repo, name: 'repo', isDefault: true }]);
+  });
+
   it("offers the prompt box's commands, models and modes for a listed folder only", async () => {
     const r = await call(d.port, { path: `/api/composer?dir=${encodeURIComponent(repo)}`, headers: as('roni') });
     expect(r.status).toBe(200);

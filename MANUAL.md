@@ -1388,6 +1388,7 @@ devdesk worker ask --task <id> <question>                                     # 
 
 Web access is a page for your phone's browser. It shows your Claude sessions and lets you answer them, even when VS Code is closed or Remote-SSH drops. It works in a laptop browser too.
 
+- **Projects**: one daemon serves every project a VS Code window on this machine opened in the last 14 days (`devdesk.web.projectDays`), whichever window ran Start. With more than one, a picker at the top of the list switches between them, or shows **All projects**; each project shows how many of its sessions need you. The browser remembers your pick, and the prompt box offers the chosen project's folders (all of them, by project, under **All projects**).
 - **List**: the sessions that need you first, then the working ones, then the rest (see [How the list is ordered](#how-the-list-is-ordered)). Each shows its state, its worktree and what it is doing or asking.
 - **Session**: two tabs. **Transcript** is the conversation: your last 40 prompts (marked `>`) and Claude's replies (marked `⏺`, with their tables, lists and code laid out). One grey line such as "Ran 3 tools: Bash, Read" stands for the tools Claude ran between them; tap it to see the calls. **Screen** is the session's terminal as it is now (**Terminal** with the [experimental terminal](#the-terminal-experimental)). Type a reply: as in the prompt box, **`/`** (or the **/** button) lists the commands, skills and plugin prompts you can run in the session, and one that needs nothing more (`/compact`, `/context`, `/permissions`) runs when you pick it. Commands that only the Claude Board runs (`/plan`, `/resume`) and blocked ones (`/exit`, `/login`) are left out. When Claude shows a dialog or a choice, the reply box gives way to the keys **1**, **2**, **3**, **↑**, **↓**, **Esc** and **Enter**. While Claude works, **Esc** interrupts it.
 - **Start a session**: the prompt box on top of the list. Type what Claude should do, pick `main` or a worktree (main is picked), and tap **Start** (or press Cmd/Ctrl+Enter). The new session opens. The box works like the Claude Board's:
@@ -1766,6 +1767,7 @@ Settings marked *machine* apply to the whole machine, so set them in your User s
 | `devdesk.web.cloudflare.audience` | *machine*, empty: for the `cloudflare` tunnel, the Access application's AUD tag; empty denies every request |
 | `devdesk.web.ngrok.oauthProvider` | *machine*, `google` (`github`, `microsoft`, `gitlab`): what visitors sign in with for the `ngrok` tunnel |
 | `devdesk.web.sessionView` | `transcript` (`terminal-experimental`: [the live terminal](#the-terminal-experimental)): how a session opens in a browser that didn't choose in the page's Settings |
+| `devdesk.web.projectDays` | `14`: the page switches between the projects (workspace roots) the windows on this machine opened in this many days; `0`: only the project of the window that ran Start |
 
 ### Advanced
 

@@ -44,6 +44,8 @@ export interface WebCard {
   canSend: boolean;
   /** A parked session with a known conversation: opening it resumes it (POST api/sessions/<id>/resume). */
   resumable?: true;
+  /** The root of the project it works in (projectOf); absent when it works in none of them. */
+  project?: string;
 }
 
 export interface CardsResponse {
@@ -98,10 +100,24 @@ export interface WebFolder {
   dir: string;
   name: string;
   isMain: boolean;
+  /** The root of the project it belongs to. */
+  project: string;
 }
-/** Main first, then the others by name. */
+/** Project by project (as ProjectsResponse lists them), main first, then the others by name. */
 export interface FoldersResponse {
   folders: WebFolder[];
+}
+
+export interface WebProject {
+  root: string;
+  /** projectNames(): the root's folder name. */
+  name: string;
+  /** The project of the window that ran Start. */
+  isDefault: boolean;
+}
+/** `api/projects`: the daemon's own project first, then the others most recently opened first. */
+export interface ProjectsResponse {
+  projects: WebProject[];
 }
 
 /** 1..MAX_TEXT_BYTES (65536) UTF-8 bytes. */

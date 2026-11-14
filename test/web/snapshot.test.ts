@@ -217,6 +217,27 @@ describe('SessionSnapshot', () => {
     expect(await new SessionSnapshot(config({ root: undefined }), deps([]).deps).features()).toEqual([]);
   });
 
+  it("serves the recorded projects too: their features after the root's, and their sessions in scope", async () => {
+    const other = join(tmp, 'other');
+    await mkdir(join(other, '.git'), { recursive: true });
+    await writeRecord(record('s1'));
+    await writeRecord(record('s2', { pid: 1002, tmuxSession: 'cc-other', tmuxPane: '%2', cwd: join(other, 'src') }));
+    await writeRecord(record('s3', { pid: 1002, tmuxSession: 'cc-else', tmuxPane: '%3', cwd: join(tmp, 'elsewhere') }));
+    const panes = [
+      mainPane(),
+      paneLine({ session: 'cc-other', pane: '%2', pid: 501, cwd: join(other, 'src') }),
+      paneLine({ session: 'cc-else', pane: '%3', pid: 501, cwd: join(tmp, 'elsewhere') }),
+    ];
+    let recorded = [other, root];
+    const d = deps(panes, [1001, 1002]);
+    const snapshot = new SessionSnapshot(config(), { ...d.deps, recordedRoots: async () => recorded });
+    expect((await snapshot.projects()).map((p) => p.root)).toEqual([root, other]);
+    expect((await snapshot.features()).map((f) => f.dir)).toEqual([root, other]);
+    expect((await snapshot.cards()).map((c) => c.sessionId).sort()).toEqual(['s1', 's2']);
+    recorded = [];
+    expect((await snapshot.projects()).map((p) => p.root)).toEqual([root]);
+  });
+
   it('lists the tmux session names', async () => {
     const snapshot = new SessionSnapshot(config(), deps([mainPane(), paneLine({ session: 'cc-main-2', pane: '%4', pid: 9, cwd: root })]).deps);
     expect(await snapshot.sessionNames()).toEqual(['cc-main', 'cc-main-2']);

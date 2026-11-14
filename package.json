@@ -3,7 +3,7 @@
   "displayName": "DevDesk for Claude Code",
   "description": "Claude Code sessions in tmux that keep running when VS Code closes, a Claude Board, and worktree diffs for git repositories, locally or over Remote-SSH.",
   "icon": "images/icon.png",
-  "version": "2.1.10",
+  "version": "2.2.0",
   "publisher": "roniburd",
   "license": "MIT",
   "engines": {
@@ -2593,6 +2593,14 @@
             "default": "transcript",
             "markdownDescription": "What the web page shows when you open a session. Each browser can choose its own in the page's settings (the gear); this is what a browser that didn't choose gets.",
             "order": 13
+          },
+          "devdesk.web.projectDays": {
+            "type": "number",
+            "default": 14,
+            "minimum": 0,
+            "maximum": 3650,
+            "markdownDescription": "Web access serves every project (workspace root) a VS Code window on this machine opened in the last this many days, and the page switches between them. `0`: only the project of the window that ran Start.",
+            "order": 14
           }
         }
       }

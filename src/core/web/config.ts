@@ -216,6 +216,8 @@ export interface DaemonConfig extends WebAccessSettings {
   };
   /** sessionsFinishedSessions(): how many parked sessions the list shows per worktree, newest first (absent: 10). */
   finishedSessions?: number;
+  /** webProjectDays(): the other projects served are those a window recorded in this many days (absent: 14). */
+  projectDays?: number;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -302,6 +304,7 @@ function configProblem(r: Record<string, unknown>): string | undefined {
   if (c.accounts !== undefined && (!Array.isArray(c.accounts) || !c.accounts.every(isAccount))) return 'claude.accounts must be Claude accounts';
   if (!optionalString(c.ambientConfigDir)) return 'claude.ambientConfigDir must be a string';
   if (r.finishedSessions !== undefined && (!isFiniteNumber(r.finishedSessions) || r.finishedSessions < 0)) return 'finishedSessions must be a number, 0 or more';
+  if (r.projectDays !== undefined && (!isFiniteNumber(r.projectDays) || r.projectDays < 0)) return 'projectDays must be a number, 0 or more';
   return undefined;
 }
 
@@ -354,6 +357,7 @@ export function parseDaemonConfig(raw: unknown): { config: DaemonConfig } | { er
       ...(claude.ambientConfigDir !== undefined ? { ambientConfigDir: claude.ambientConfigDir } : {}),
     },
     ...(r.finishedSessions !== undefined ? { finishedSessions: r.finishedSessions } : {}),
+    ...(r.projectDays !== undefined ? { projectDays: r.projectDays } : {}),
   };
   return { config };
 }

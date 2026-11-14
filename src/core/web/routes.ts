@@ -12,6 +12,7 @@ export type Route =
   | { kind: 'cards' }
   | { kind: 'events' }
   | { kind: 'folders' }
+  | { kind: 'projects' }
   | { kind: 'composer' }
   | { kind: 'detail'; id: string }
   | { kind: 'send'; id: string }
@@ -37,6 +38,7 @@ const FIXED: Readonly<Record<string, { GET?: Route; POST?: Route }>> = {
   '/api/sessions': { GET: { kind: 'cards' }, POST: { kind: 'start' } },
   '/api/events': { GET: { kind: 'events' } },
   '/api/folders': { GET: { kind: 'folders' } },
+  '/api/projects': { GET: { kind: 'projects' } },
   '/api/composer': { GET: { kind: 'composer' } },
 };
 

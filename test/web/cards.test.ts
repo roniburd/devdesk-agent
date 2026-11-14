@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toWebCard, webCards, webFolders, webGroup } from '../../src/core/web/cards';
+import { toWebCard, webCards, webFolders, webGroup, webProjects } from '../../src/core/web/cards';
 import type { SessionCard } from '../../src/core/sessions';
 import { attentionOrder } from '../../src/core/sessionsView';
 import { sortSessions } from '../../src/core/urgency';
@@ -165,13 +165,41 @@ describe('webCards', () => {
 });
 
 describe('webFolders', () => {
-  it('lists main first, then the others by name', () => {
-    const f = (name: string, isMain = false): Feature => ({ name, dir: `/w/${name}`, isMain, packages: [] });
-    expect(webFolders([f('zeta'), f('alpha'), f('main', true)])).toEqual([
-      { dir: '/w/main', name: 'main', isMain: true },
-      { dir: '/w/alpha', name: 'alpha', isMain: false },
-      { dir: '/w/zeta', name: 'zeta', isMain: false },
+  const f = (name: string, isMain = false, root = '/w'): Feature => ({ name, dir: `${root}/${name}`, isMain, packages: [] });
+
+  it('lists each project in turn: main first, then the others by name', () => {
+    const projects = [
+      { root: '/w', features: [f('zeta'), f('alpha'), f('main', true)] },
+      { root: '/v', features: [f('main', true, '/v'), f('beta', false, '/v')] },
+    ];
+    expect(webFolders(projects)).toEqual([
+      { dir: '/w/main', name: 'main', isMain: true, project: '/w' },
+      { dir: '/w/alpha', name: 'alpha', isMain: false, project: '/w' },
+      { dir: '/w/zeta', name: 'zeta', isMain: false, project: '/w' },
+      { dir: '/v/main', name: 'main', isMain: true, project: '/v' },
+      { dir: '/v/beta', name: 'beta', isMain: false, project: '/v' },
     ]);
     expect(webFolders([])).toEqual([]);
+  });
+
+  it('lists a folder two projects share once, under the first', () => {
+    expect(webFolders([{ root: '/w', features: [f('main', true)] }, { root: '/w/main', features: [f('main', true)] }])).toHaveLength(1);
+  });
+});
+
+describe('webProjects', () => {
+  it("names the projects and marks the daemon's own", () => {
+    expect(webProjects([{ root: '/w/app', features: [] }, { root: '/v/lib', features: [] }], '/w/app')).toEqual([
+      { root: '/w/app', name: 'app', isDefault: true },
+      { root: '/v/lib', name: 'lib', isDefault: false },
+    ]);
+  });
+});
+
+describe('toWebCard project', () => {
+  it('names the project the session works in', () => {
+    const projects = [{ root: '/w/app', features: [] }];
+    expect(toWebCard(card('s', { cwd: '/w/app/src', featureDir: undefined }), o, projects).project).toBe('/w/app');
+    expect(toWebCard(card('s', { cwd: '/tmp', featureDir: undefined }), o, projects)).not.toHaveProperty('project');
   });
 });

@@ -13,6 +13,7 @@ import type {
   NewSessionRequest,
   NewSessionResponse,
   OkResponse,
+  ProjectsResponse,
   ResumeResponse,
   SendRequest,
   SessionDetail,
@@ -22,6 +23,7 @@ import type {
   WebFolder,
   WebGroup,
   WebKey,
+  WebProject,
 } from '../../core/web/types';
 import { api } from './api';
 import { h, sentenceCase, sessionHref } from './dom';
@@ -132,6 +134,69 @@ feed.listeners.add(() => {
   for (const c of feed.cards ?? []) if (c.pane) paneOf.set(c.id, c.pane);
 });
 
+// ---- Projects: the daemon serves every project a window on its machine opened lately; this browser picks one or all. ----
+
+const PROJECT_KEY = 'devdesk.web.project';
+const projects = {
+  list: [] as WebProject[],
+  listeners: new Set<() => void>(),
+};
+
+/** The project this browser shows ('' for all of them): its choice while the daemon still serves it. */
+function projectNow(): string {
+  let v = '';
+  try {
+    v = localStorage.getItem(PROJECT_KEY) ?? '';
+  } catch {
+    // No storage (private mode): all projects.
+  }
+  return projects.list.some((p) => p.root === v) ? v : '';
+}
+
+function pickProject(root: string): void {
+  try {
+    if (root) localStorage.setItem(PROJECT_KEY, root);
+    else localStorage.removeItem(PROJECT_KEY);
+  } catch {
+    // Not kept: the page still switches.
+  }
+  for (const fn of [...projects.listeners]) fn();
+}
+
+async function loadProjects(): Promise<void> {
+  const r = await api<ProjectsResponse>('GET', 'api/projects');
+  if (!r.data || !Array.isArray(r.data.projects)) return;
+  const before = JSON.stringify(projects.list);
+  projects.list = r.data.projects;
+  if (JSON.stringify(projects.list) === before) return;
+  foldersLoad = undefined;
+  for (const fn of [...projects.listeners]) fn();
+}
+
+/** The cards of the project shown (all with no project picked). */
+const shownCards = (cards: readonly WebCard[]): WebCard[] => {
+  const root = projectNow();
+  return root ? cards.filter((c) => c.project === root) : [...cards];
+};
+
+/** The project picker in the list's bar: hidden while there is one project or none. Counts the sessions that need you. */
+function projectPick(): { el: HTMLElement; render(): void } {
+  const select = h('select', { class: 'project-pick', attrs: { 'aria-label': 'Project' }, on: { change: () => pickProject(select.value) } });
+  const el = h('label', { class: 'project-chip', attrs: { title: 'Project' } }, select);
+  const render = () => {
+    el.hidden = projects.list.length < 2;
+    const cards = feed.cards ?? [];
+    const needs = (root: string) => cards.filter((c) => c.group === 'needs' && (!root || c.project === root)).length;
+    const label = (name: string, root: string) => (needs(root) ? `${name} · ${needs(root)}` : name);
+    select.replaceChildren(
+      h('option', { text: label('All projects', ''), attrs: { value: '' } }),
+      ...projects.list.map((p) => h('option', { text: label(p.name, p.root), attrs: { value: p.root, title: p.root } })),
+    );
+    select.value = projectNow();
+  };
+  return { el, render };
+}
+
 // ---- Settings: this browser's choice (localStorage), else the daemon's default (devdesk.web.sessionView). ----
 
 const VIEW_KEY = 'devdesk.web.sessionView';
@@ -223,16 +288,20 @@ function listView(): ListView {
   const badge = h('span', { attrs: { role: 'status' } });
   const body = h('div', { class: 'content list' });
   const start = composer();
-  const el = h('div', { class: 'view view-list' }, h('header', { class: 'bar' }, h('h1', { class: 'heading', text: 'Claude sessions' }), badge, gear()), start.el, body);
+  const pick = projectPick();
+  const el = h('div', { class: 'view view-list' }, h('header', { class: 'bar' }, h('h1', { class: 'heading', text: 'Claude sessions' }), pick.el, badge, gear()), start.el, body);
   const render = () => {
     showLink(badge);
-    const cards = feed.cards;
+    pick.render();
+    const cards = feed.cards ? shownCards(feed.cards) : undefined;
     if (!cards) {
       body.replaceChildren(h('p', { class: feed.error ? 'notice error' : 'notice', text: feed.error ?? 'Loading sessions…' }));
       return;
     }
     if (cards.length === 0) {
-      body.replaceChildren(h('div', { class: 'empty' }, h('p', { text: 'No Claude sessions are running.' }), h('p', { class: 'hint', text: 'Type a prompt above to start one.' })));
+      const project = projects.list.find((p) => p.root === projectNow());
+      const none = project ? `No Claude sessions are running in ${project.name}.` : 'No Claude sessions are running.';
+      body.replaceChildren(h('div', { class: 'empty' }, h('p', { text: none }), h('p', { class: 'hint', text: 'Type a prompt above to start one.' })));
       return;
     }
     const sections = GROUPS.map(({ group, title }) => {
@@ -257,6 +326,7 @@ function listView(): ListView {
     if (feed.error) body.prepend(h('p', { class: 'notice error', text: feed.error }));
   };
   feed.listeners.add(render);
+  projects.listeners.add(render);
   render();
   return {
     el,
@@ -268,6 +338,7 @@ function listView(): ListView {
     focusPrompt: () => start.focus(),
     dispose: () => {
       feed.listeners.delete(render);
+      projects.listeners.delete(render);
       start.dispose();
     },
   };
@@ -787,12 +858,30 @@ function composer(): View & { focus(): void } {
       folder.replaceChildren(h('option', { text: 'No folders to start in', attrs: { value: '' } }));
       return;
     }
-    const sorted = [...folders.filter((f) => f.isMain), ...folders.filter((f) => !f.isMain)];
-    folder.replaceChildren(...sorted.map((f) => h('option', { text: f.isMain ? `${f.name} (main repo)` : f.name, attrs: { value: f.dir, title: f.dir } })));
-    folder.value = sorted[0].dir;
+    // The project shown's folders; with all of them shown, every project's, under its name when there are several.
+    const root = projectNow();
+    const kept = folder.value;
+    const shown = root ? folders.filter((f) => f.project === root) : folders;
+    const option = (f: WebFolder) => h('option', { text: f.isMain ? `${f.name} (main repo)` : f.name, attrs: { value: f.dir, title: f.dir } });
+    const order = (list: WebFolder[]) => [...list.filter((f) => f.isMain), ...list.filter((f) => !f.isMain)];
+    const groups = [...new Set(shown.map((f) => f.project))];
+    if (shown.length === 0) {
+      folder.replaceChildren(h('option', { text: 'No folders to start in', attrs: { value: '' } }));
+      folder.disabled = true;
+      start.disabled = true;
+      return;
+    }
+    if (groups.length < 2) folder.replaceChildren(...order(shown).map(option));
+    else {
+      const names = new Map(projects.list.map((p) => [p.root, p.name]));
+      folder.replaceChildren(
+        ...groups.map((g) => h('optgroup', { attrs: { label: names.get(g) ?? g } }, ...order(shown.filter((f) => f.project === g)).map(option))),
+      );
+    }
+    folder.value = shown.some((f) => f.dir === kept) ? kept : order(shown.filter((f) => f.project === groups[0]))[0].dir;
     folder.disabled = false;
-    start.disabled = false;
-    void loadInfo(folder.value);
+    if (!waiting) start.disabled = false;
+    if (folder.value !== kept) void loadInfo(folder.value);
   }
 
   function arrived(): void {
@@ -874,6 +963,8 @@ function composer(): View & { focus(): void } {
   }
 
   feed.listeners.add(arrived);
+  const refill = () => void fill();
+  projects.listeners.add(refill);
   void fill();
   return {
     el,
@@ -886,6 +977,7 @@ function composer(): View & { focus(): void } {
       window.clearTimeout(waitTimer);
       window.clearTimeout(infoTimer);
       feed.listeners.delete(arrived);
+      projects.listeners.delete(refill);
     },
   };
 }
@@ -987,9 +1079,12 @@ function route(): void {
 function startPage(): void {
   window.addEventListener('hashchange', route);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !stream) openStream();
+    if (document.visibilityState !== 'visible') return;
+    if (!stream) openStream();
+    void loadProjects();
   });
   openStream();
+  void loadProjects();
   list = listView();
   shell.list.append(list.el);
   (document.getElementById('app') ?? document.body).replaceChildren(shell.el);

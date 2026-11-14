@@ -4,9 +4,9 @@ import { displayState, stateLook, timeAgo, waitsOnBackground } from '../sessions
 import { LOOKS } from '../stateLooks';
 import { oneLine, truncate } from '../text';
 import { isSessionId, paneTarget } from '../tmux';
-import type { Feature } from '../worktrees';
 import { type SortMode, sortSessions } from '../urgency';
-import type { WebCard, WebFolder, WebGroup, WebTone } from './types';
+import { type Project, projectNames, projectOf } from './projects';
+import type { WebCard, WebFolder, WebGroup, WebProject, WebTone } from './types';
 
 /** The session cards as the page shows them: the same titles, looks and labels as the Claude view and the board. */
 
@@ -40,7 +40,8 @@ export function webGroup(card: SessionCard, v: Pick<WebView, 'now' | 'idleMs' | 
   return 'rest';
 }
 
-export function toWebCard(card: SessionCard, o: WebView): WebCard {
+export function toWebCard(card: SessionCard, o: WebView, projects: readonly Project[] = []): WebCard {
+  const project = projectOf(card, projects);
   const look = stateLook(card, o);
   const info = LOOKS[look];
   const classes = info.glyphClass.split(/\s+/).filter(Boolean);
@@ -63,17 +64,28 @@ export function toWebCard(card: SessionCard, o: WebView): WebCard {
     ...(card.tmuxSession ? { tmuxSession: card.tmuxSession } : {}),
     canSend: !!paneTarget(card) && !claudeGone(card),
     ...(card.state === 'parked' && isSessionId(card.sessionId) && card.cwd ? { resumable: true as const } : {}),
+    ...(project ? { project } : {}),
   };
 }
 
 /** In the Claude view's order (`sortSessions`, working sessions not settled), so the phone lists sessions as VS Code does. */
-export function webCards(cards: readonly SessionCard[], v: WebView): WebCard[] {
-  return sortSessions(cards, v).map((c) => toWebCard(c, v));
+export function webCards(cards: readonly SessionCard[], v: WebView, projects: readonly Project[] = []): WebCard[] {
+  return sortSessions(cards, v).map((c) => toWebCard(c, v, projects));
 }
 
-/** The folders a new session may start in: main first, then the others by name. */
-export function webFolders(features: readonly Feature[]): WebFolder[] {
-  return features
-    .map((f) => ({ dir: f.dir, name: f.name, isMain: f.isMain }))
-    .sort((a, b) => Number(b.isMain) - Number(a.isMain) || a.name.localeCompare(b.name));
+/** The folders a new session may start in, project by project: main first, then the others by name. */
+export function webFolders(projects: readonly Project[]): WebFolder[] {
+  const seen = new Set<string>();
+  return projects.flatMap((p) =>
+    p.features
+      .filter((f) => !seen.has(f.dir) && !!seen.add(f.dir))
+      .map((f) => ({ dir: f.dir, name: f.name, isMain: f.isMain, project: p.root }))
+      .sort((a, b) => Number(b.isMain) - Number(a.isMain) || a.name.localeCompare(b.name)),
+  );
+}
+
+/** The projects the page can switch between, in the daemon's order (its own first). */
+export function webProjects(projects: readonly Project[], defaultRoot: string | undefined): WebProject[] {
+  const names = projectNames(projects.map((p) => p.root));
+  return projects.map((p) => ({ root: p.root, name: names.get(p.root) ?? p.root, isDefault: p.root === defaultRoot }));
 }

@@ -5,7 +5,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
-import { cfg, openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice, webTunnelPreview } from './config';
+import { cfg, openSettings, sessionsStateDir, webAccessConfig, webNeedsTunnelChoice, webProjectDays, webTunnelPreview, workspaceRoot } from './config';
 import { writeFileAtomic } from './core/atomicWrite';
 import { WEB_ACCESS } from './core/edition';
 import { FileLockBusy, withFileLock } from './core/fileLock';
@@ -14,6 +14,7 @@ import { execText } from './core/shellRun';
 import { type DaemonConfig, parseDaemonConfig, shortHostName, tunnelNameIgnored, tunnelNameProblem } from './core/web/config';
 import { isDaemonCommand, launchFailure, statusBarText, type WebMenuId, webMenuChoices } from './core/web/launch';
 import { daemonScript, type WebPanelRow } from './core/web/panel';
+import { parseProjects, projectMaxAgeMs, projectsJson, projectsPath, recordProject } from './core/web/projects';
 import { qrMatrix, qrSvg } from './core/web/qr';
 import { parseWebState, webConfigPath, webDir, webLogPath, webStatePath, type WebState, type WebStatus, webStatus } from './core/web/webState';
 import { tunnelHint } from './core/web/tunnelSetup';
@@ -97,13 +98,41 @@ export class WebAccess implements vscode.Disposable {
       { dispose: () => clearInterval(timer) },
       { dispose: () => this.unwatch() },
       { dispose: () => this.changeTimer && clearTimeout(this.changeTimer) },
+      vscode.workspace.onDidChangeWorkspaceFolders(() => void this.recordProject()),
       vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('devdesk.worktrees.root') || e.affectsConfiguration('devdesk.sessions.stateDir')) void this.recordProject();
         if (!AFFECTS.some((s) => e.affectsConfiguration(s))) return;
         if (this.changeTimer) clearTimeout(this.changeTimer);
         this.changeTimer = setTimeout(() => void this.serial(() => this.settingsChanged()), 300);
       }),
     );
     void this.refresh();
+    void this.recordProject();
+  }
+
+  /**
+   * Records this window's workspace root in projects.json, so a web access daemon started from any window on this
+   * machine can serve this project too (its page switches between them). Done once this window opens and when its
+   * folders change; it needs no daemon running.
+   */
+  async recordProject(): Promise<void> {
+    const root = workspaceRoot();
+    if (!root) return;
+    const dir = webDir(sessionsStateDir());
+    const path = projectsPath(dir);
+    try {
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      await withFileLock(
+        path,
+        async () => {
+          const entries = parseProjects(await readFile(path, 'utf8').catch(() => ''));
+          await writeFileAtomic(path, projectsJson(recordProject(entries, root, Date.now(), projectMaxAgeMs(webProjectDays()), existsSync)), false, 0o600);
+        },
+        { waitMs: 5000, dirMode: 0o700 },
+      );
+    } catch (err) {
+      log.warn(`web access: cannot record this project in ${path}: ${(err as Error).message}`);
+    }
   }
 
   dispose(): void {

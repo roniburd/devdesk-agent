@@ -18,6 +18,7 @@ import { accountConfigFile, accountDirs, accountEnv, accountOfTranscript, type C
 import { claudeLaunchCommand, type ClaudeLaunch } from './core/sessionStart';
 import type { TurnReadLimits } from './core/turnChangesRead';
 import { type DaemonConfig, needsTunnelChoice, resolveWebSettings, type TunnelPreview, tunnelNameIgnored, tunnelPreview, type WebSettings } from './core/web/config';
+import { DEFAULT_PROJECT_DAYS } from './core/web/projects';
 import { webDir } from './core/web/webState';
 import type { WorktreeKind } from './core/worktreeTasks';
 import { gitRootFor, isPackageWorkspace, normalizeRoot, workspaceRootFor } from './core/worktrees';
@@ -575,6 +576,11 @@ export function sessionsFinishedSessions(): number {
   return numberSetting('sessions.finishedSessions', 10, 0, Infinity, true);
 }
 
+/** `devdesk.web.projectDays`: web access also serves the projects a window on this machine opened in this many days (0: only its own). */
+export function webProjectDays(): number {
+  return numberSetting('web.projectDays', DEFAULT_PROJECT_DAYS, 0, 3650, true);
+}
+
 /**
  * When DevDesk parks its sessions (ends their tmux session and Claude; the row stays to resume them), without the
  * memory reading: settings `devdesk.sessions.parkAfterDays` (any parkable session; `0` turns parking off),
@@ -1064,5 +1070,6 @@ export function webAccessConfig(root: string | undefined = workspaceRoot()): Dae
       ambientConfigDir: ambientClaudeConfigDir(),
     },
     finishedSessions: sessionsFinishedSessions(),
+    projectDays: webProjectDays(),
   };
 }

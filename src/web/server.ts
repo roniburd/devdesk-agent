@@ -9,7 +9,7 @@ import { composerResponse, webModels } from '../core/web/composer';
 import type { ComposerCache } from '../core/web/composerCache';
 import type { AccessKeys } from '../core/web/cfAccess';
 import { answeredPublicHost, authorize, crossSiteRequest, deniedPage, hostAllowed, mutationCheck, SECURITY_HEADERS } from '../core/web/auth';
-import { webCards, webFolders, type WebView } from '../core/web/cards';
+import { webCards, webFolders, webProjects, type WebView } from '../core/web/cards';
 import { readFile } from 'node:fs/promises';
 import type { DaemonConfig } from '../core/web/config';
 import { pollLoop } from '../core/web/pollLoop';
@@ -32,7 +32,7 @@ import { TerminalHub } from './terminal';
 import { claudeGone } from '../core/sessionSend';
 import { isPaneId, paneTarget, tmuxTargetGone } from '../core/tmux';
 import { termSizeOf } from '../core/web/terminal';
-import type { SettingsResponse } from '../core/web/types';
+import type { FoldersResponse, ProjectsResponse, SettingsResponse } from '../core/web/types';
 
 /**
  * The web access HTTP server: `node:http` on 127.0.0.1 only, wired to the web core. Every request, the page's assets
@@ -45,7 +45,7 @@ export const LOOPBACK = '127.0.0.1';
 
 export interface WebServerOptions {
   config: DaemonConfig;
-  snapshot: Pick<SessionSnapshot, 'cards' | 'features' | 'sessionNames'>;
+  snapshot: Pick<SessionSnapshot, 'cards' | 'features' | 'projects' | 'sessionNames'>;
   actions: ActionDeps;
   page: PageAssets;
   /** config.publicHost || the tunnel's. */
@@ -154,8 +154,8 @@ export function createWebServer(o: WebServerOptions): WebServer {
     return { now: Date.now(), stuckMs: config.stuckMs, idleMs: config.idleMs, unread: webUnread(seen, cards), ...config.sort };
   };
   const cardsResponse = async (cards: readonly SessionCard[]): Promise<CardsResponse> => {
-    const v = await view(cards);
-    return { cards: webCards(cards, v), at: v.now };
+    const [v, projects] = await Promise.all([view(cards), snapshot.projects()]);
+    return { cards: webCards(cards, v, projects), at: v.now };
   };
   const serverOf = (card: SessionCard) => card.tmuxServer ?? config.tmux.server;
 
@@ -329,7 +329,9 @@ export function createWebServer(o: WebServerOptions): WebServer {
       case 'term':
         return openTerminal(req, res, route.id, user);
       case 'folders':
-        return sendJson(res, 200, { folders: webFolders(await snapshot.features()) });
+        return sendJson(res, 200, { folders: webFolders(await snapshot.projects()) } satisfies FoldersResponse);
+      case 'projects':
+        return sendJson(res, 200, { projects: webProjects(await snapshot.projects(), config.root) } satisfies ProjectsResponse);
       case 'composer': {
         const dir = new URL(req.url ?? '/', 'http://x').searchParams.get('dir') ?? '';
         const feature = featureOf(dir, await snapshot.features());
