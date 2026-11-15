@@ -1525,6 +1525,14 @@ node <extension dir>/dist/web.js --port 7691 --root <your repo> \
 - **Web: tunnel down**: the tunnel command exited, or printed no URL within 60 s. The status bar item's tooltip shows its last line, and for a preset a notification says what to do (sign in, add the ngrok authtoken, let your user run Tailscale Serve). Loopback still works. Fix the cause, then **Restart Tunnel**, or **Choose Tunnel** to pick another.
 - Anything else: the error offers **Open Log** (`daemon.log`). A daemon that crashed leaves a stale `web.json`; the next Start replaces it.
 
+### When the page is slow
+
+`daemon.log` times what the daemon does:
+
+- `slow: GET detail took 2400ms: cards 2200ms, turns 40ms, pane 120ms, program status 5ms`: a request that took over 2 s, or far over what that request usually takes, with its steps. `poll cards` is the read of every session behind the list's updates.
+- `timings: GET detail n=300 p50 180ms p90 420ms max 2400ms; …`: every 10 minutes, each request's times since the last such line, to compare a slow spell, or a new version, with before.
+- `event loop was blocked for 900ms`: the daemon could answer nothing for that long. A machine that slept doesn't count.
+
 ## 18. Troubleshooting
 
 ### Sessions show NO STATUS, or never change state

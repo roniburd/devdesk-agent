@@ -20,6 +20,11 @@ import { EXIT_BAD_CONFIG, EXIT_PORT_IN_USE, type WebState, webStatePath } from '
 import { PAGE } from './pageAssets';
 import { createWebServer, LOOPBACK } from './server';
 import { log, removeWebState, writeWebState } from './stateFile';
+import { timerLag } from '../core/web/timings';
+
+/** How often the daemon checks its event loop, and the delay it logs. */
+const LOOP_CHECK_MS = 1000;
+const LOOP_BLOCKED_MS = 500;
 import { runTunnel } from './tunnel';
 
 /**
@@ -198,6 +203,14 @@ async function main(): Promise<void> {
     await removeWebState(statePath, process.pid);
     process.exit(0);
   };
+  // A blocked event loop delays every request: log it, by a clock that stands still while the machine sleeps.
+  let tick = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    const lag = timerLag(tick, now, LOOP_CHECK_MS);
+    tick = now;
+    if (lag > LOOP_BLOCKED_MS) log(`event loop was blocked for ${lag}ms`);
+  }, LOOP_CHECK_MS).unref();
   process.on('SIGTERM', () => void stop('SIGTERM'));
   process.on('SIGINT', () => void stop('SIGINT'));
   // However the daemon ends, the tunnel it started ends with it.

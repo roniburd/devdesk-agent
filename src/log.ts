@@ -75,19 +75,21 @@ export function track(label: string): () => void {
 export function watchEventLoop(treeItemCalls: () => number, settings: () => DiagnosticsConfig): vscode.Disposable {
   const intervalMs = 1000;
   const limitMB = heapLimitMB();
-  let last = Date.now();
+  // The lag by a monotonic clock, which stands still while the machine sleeps: a Mac that slept is not a blocked loop.
+  let last = performance.now();
   let ticks = 0;
   let lastCalls = 0;
   let prev: HeapSample | undefined;
   const timer = setInterval(() => {
+    const tick = performance.now();
+    const lag = Math.round(tick - last - intervalMs);
     const now = Date.now();
-    const lag = now - last - intervalMs;
     // With debugLog, shorter stalls show too: 100ms is already a key press that feels slow.
     if (lag > 500 || (debugAsInfo && lag >= STALL_DEBUG_MS)) {
       const busy = inFlight(now);
       log[lag > 500 ? 'warn' : 'debug'](`extension host event loop was blocked for ${lag}ms${busy.length ? `; DevDesk in flight: ${busy.join(', ')}` : ''}`);
     }
-    last = now;
+    last = tick;
     if (++ticks % 10 === 0) {
       const s = settings();
       const slowMs = s.slowOperationSeconds * 1000;
@@ -203,16 +205,17 @@ export function registerTimedCommand(id: string, run: (...args: never[]) => unkn
 
 /** Times the steps of one operation: `mark(step)` ends a step; `describe()` lists them (`list 80ms, cards 3ms`). */
 export function stepTimer(): { mark: (step: string) => void; total: () => number; describe: () => string } {
-  const start = Date.now();
+  // A monotonic clock, which stands still while the machine sleeps: a refresh the Mac slept through is not slow.
+  const start = performance.now();
   let last = start;
   const steps: string[] = [];
   return {
     mark: (step) => {
-      const now = Date.now();
-      steps.push(`${step} ${now - last}ms`);
+      const now = performance.now();
+      steps.push(`${step} ${Math.round(now - last)}ms`);
       last = now;
     },
-    total: () => last - start,
+    total: () => Math.round(last - start),
     describe: () => steps.join(', '),
   };
 }

@@ -61,9 +61,11 @@ export interface ActionDeps {
  * What the pane shows, with Claude's own report on top where there is one (`screenWithProgramStatus`), as the Claude
  * Board reads a session before typing into it: whether it works or a dialog is open.
  */
-async function paneScreen(card: SessionCard, tmux: TmuxRunner, target: string, d: ActionDeps) {
+async function paneScreen(card: SessionCard, tmux: TmuxRunner, target: string, d: ActionDeps, mark?: (step: string) => void) {
   const read = await readPaneScreen(tmux, target, d.listProcesses);
+  mark?.('pane');
   const status = await d.programStatus?.(card);
+  mark?.('program status');
   const screen = screenWithProgramStatus(read.screen, status);
   return { ...read, screen: { ...read.screen, ...screen }, dialogOpen: !read.promptShown || programStatusBlocksArrow(status) };
 }
@@ -91,13 +93,15 @@ export async function detailTurns(path: string): Promise<Turn[]> {
   }
 }
 
-export async function sessionDetail(card: SessionCard, o: WebView & { server: string }, d: ActionDeps): Promise<ActionResult<SessionDetail>> {
+/** `mark` ends each step it takes (`turns`, `pane`), for the daemon's request timings. */
+export async function sessionDetail(card: SessionCard, o: WebView & { server: string }, d: ActionDeps, mark?: (step: string) => void): Promise<ActionResult<SessionDetail>> {
   const turns: Turn[] = card.transcriptPath ? await detailTurns(card.transcriptPath) : [];
+  mark?.('turns');
   const detail: SessionDetail = { card: toWebCard(card, o), turns, screen: [], prompt: NO_SCREEN, ended: claudeGone(card), ...(card.featureDir ? { dir: card.featureDir } : {}) };
   const target = paneTarget(card);
   if (!target) return { status: 200, body: { ...detail, ended: true } };
   try {
-    const { capture, screen, dialogOpen } = await paneScreen(card, d.tmux(o.server), target, d);
+    const { capture, screen, dialogOpen } = await paneScreen(card, d.tmux(o.server), target, d, mark);
     detail.screen = ansiToSpans(capture);
     detail.prompt = { ...screen, dialog: dialogOpen && !screen.exited && !screen.inMode };
     detail.ended ||= screen.exited;

@@ -13,6 +13,7 @@ import { webCards, webFolders, webProjects, type WebView } from '../core/web/car
 import { readFile } from 'node:fs/promises';
 import type { DaemonConfig } from '../core/web/config';
 import { pollLoop } from '../core/web/pollLoop';
+import { RequestTimings, stepTimer, TIMINGS_SUMMARY_MS } from '../core/web/timings';
 import {
   isMutating,
   MAX_BODY_BYTES,
@@ -59,6 +60,8 @@ export interface WebServerOptions {
   alive?: (pid: number) => boolean;
   /** How long a resume waits for the session to run again (RESUME_WAIT_MS). */
   resumeWaitMs?: number;
+  /** How often the request timings' summary goes to the log (TIMINGS_SUMMARY_MS). */
+  timingsSummaryMs?: number;
 }
 
 /** How long a resume waits for its session to run again before it answers anyway. */
@@ -133,6 +136,16 @@ export function createWebServer(o: WebServerOptions): WebServer {
   let lastSent: string | undefined;
   let ping: NodeJS.Timeout | undefined;
   let cached: { at: number; cards: SessionCard[] } | undefined;
+  const timings = new RequestTimings();
+  const noteTiming = (label: string, steps: ReturnType<typeof stepTimer>) => {
+    const line = timings.note(label, steps.total(), steps.describe(), Date.now());
+    if (line) log(line);
+  };
+  const summaryTimer = setInterval(() => {
+    const line = timings.summary();
+    if (line) log(line);
+  }, o.timingsSummaryMs ?? TIMINGS_SUMMARY_MS);
+  summaryTimer.unref();
 
   /** Cards for GETs: a snapshot at most pollMs old (Decision 6). */
   const recentCards = async () => {
@@ -177,7 +190,9 @@ export function createWebServer(o: WebServerOptions): WebServer {
   // One poll chain however clients come and go, even while a tick waits on tmux (pollLoop).
   const poll = pollLoop(async () => {
     try {
+      const steps = stepTimer();
       const cards = await freshCards();
+      noteTiming('poll cards', steps);
       if (!sse.size) return;
       const body = await cardsResponse(cards);
       const key = JSON.stringify(body.cards);
@@ -215,8 +230,8 @@ export function createWebServer(o: WebServerOptions): WebServer {
   };
 
   /** The card `id` among the live cards in scope, else a 404 sent. */
-  const cardFor = async (res: ServerResponse, id: string) => {
-    const card = (await freshCards()).find((c) => c.id === id);
+  const cardFor = async (res: ServerResponse, id: string, cards: () => Promise<SessionCard[]> = freshCards) => {
+    const card = (await cards()).find((c) => c.id === id);
     if (!card) sendError(res, 404, 'There is no such session.');
     return card;
   };
@@ -316,7 +331,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
     }
   };
 
-  const run = async (req: IncomingMessage, res: ServerResponse, route: Route, user?: string): Promise<void> => {
+  const run = async (req: IncomingMessage, res: ServerResponse, route: Route, user?: string, mark?: (step: string) => void): Promise<void> => {
     switch (route.kind) {
       case 'page':
         return send(res, 200, ASSET_TYPES[route.asset], page[route.asset]);
@@ -340,8 +355,10 @@ export function createWebServer(o: WebServerOptions): WebServer {
         return sendJson(res, 200, composerResponse({ claude: config.claude, ...got }));
       }
       case 'detail': {
-        const card = await cardFor(res, route.id);
-        if (card) sendResult(res, await sessionDetail(card, { ...(await view(await recentCards())), server: serverOf(card) }, actions));
+        // A read the page repeats every 2 s: cards at most pollMs old, as the list's (an action's are fresh).
+        const card = await cardFor(res, route.id, recentCards);
+        mark?.('cards');
+        if (card) sendResult(res, await sessionDetail(card, { ...(await view(await recentCards())), server: serverOf(card) }, actions, mark));
         return;
       }
       default:
@@ -415,7 +432,14 @@ export function createWebServer(o: WebServerOptions): WebServer {
       return route.status === 405 ? sendError(res, 405, 'Method not allowed.', { Allow: 'GET, POST' }) : sendError(res, 404, 'Not found.');
     }
     if (route.kind === 'term' && crossSiteRequest(req.headers)) return sendError(res, 403, 'This request did not come from the DevDesk page.');
-    if (!isMutating(route)) return run(req, res, route, auth.user);
+    if (!isMutating(route)) {
+      // The streams stay open as long as the page does: not timed.
+      if (route.kind === 'events' || route.kind === 'term') return run(req, res, route, auth.user);
+      const steps = stepTimer();
+      await run(req, res, route, auth.user, steps.mark);
+      return noteTiming(`${method} ${route.kind}`, steps);
+    }
+    const steps = stepTimer();
     const check = mutationCheck(req.headers, config.port, publicHost);
     if (!check.ok) {
       sendError(res, check.status, check.message);
@@ -424,6 +448,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
     }
     // One line per action: what, how it went and who; never the text typed. Terminal keystrokes are not logged one
     // by one (the terminal's open and close are).
+    if (route.kind !== 'term-input') noteTiming(`${method} ${route.kind}`, steps);
     if (route.kind === 'term-input' && res.statusCode === 200) return;
     const id = 'id' in route ? ` ${route.id}` : '';
     log(`${method} ${route.kind}${id} ${res.statusCode}${auth.user !== undefined ? ` user=${auth.user}` : ''}`);
@@ -453,6 +478,7 @@ export function createWebServer(o: WebServerOptions): WebServer {
     close: () =>
       new Promise((resolve) => {
         stopLoop();
+        clearInterval(summaryTimer);
         terminals.closeAll();
         for (const res of sse) res.end();
         sse.clear();
